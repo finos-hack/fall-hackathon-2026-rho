@@ -1,0 +1,207 @@
+{
+  "$schema": "http://localhost:8090/calm/namespaces/hackathon/patterns/web-service/versions/1.0.0",
+  "$id": "http://localhost:8090/calm/namespaces/hackathon/architectures/catalog-service/versions/1.0.0",
+  "title": "Catalog Service",
+  "description": "Serves the product catalog. MongoDB with OpenTelemetry.",
+  "nodes": [
+    {
+      "unique-id": "web-client",
+      "node-type": "webclient",
+      "name": "Web Client",
+      "description": "The browser or mobile client that calls the service."
+    },
+    {
+      "unique-id": "api-gateway",
+      "node-type": "system",
+      "name": "API Gateway",
+      "description": "Routes and authenticates external requests to the service.",
+      "interfaces": [
+        {
+          "unique-id": "api-gateway-ingress",
+          "host": "catalog.api.example.com",
+          "port": 443
+        }
+      ]
+    },
+    {
+      "unique-id": "web-service",
+      "node-type": "service",
+      "name": "Web Service",
+      "description": "The service the developer builds from this pattern.",
+      "metadata": {
+        "owner": "team-catalog",
+        "service-name": "catalog-service"
+      },
+      "interfaces": [
+        {
+          "unique-id": "web-service-api",
+          "port": 8082
+        }
+      ]
+    },
+    {
+      "unique-id": "mongodb-database",
+      "node-type": "database",
+      "name": "MongoDB",
+      "description": "Document data store for the service.",
+      "interfaces": [
+        {
+          "unique-id": "mongodb-port",
+          "port": 27017
+        }
+      ],
+      "controls": {
+        "security": {
+          "description": "Stored data must be encrypted at rest",
+          "requirements": [
+            {
+              "requirement-url": "http://localhost:8090/calm/domains/hackathon-security/controls/encryption-at-rest/requirement/versions/1.0.0",
+              "config-url": "http://localhost:8090/calm/domains/hackathon-security/controls/encryption-at-rest/configurations/aes-256-kms/versions/1.0.0"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "unique-id": "observability",
+      "node-type": "service",
+      "name": "OpenTelemetry Collector",
+      "description": "Receives traces, metrics and logs from the service.",
+      "interfaces": [
+        {
+          "unique-id": "otel-grpc",
+          "port": 4317
+        }
+      ]
+    }
+  ],
+  "relationships": [
+    {
+      "unique-id": "web-client-api-gateway",
+      "description": "The client calls the service through the gateway",
+      "protocol": "HTTPS",
+      "relationship-type": {
+        "connects": {
+          "source": {
+            "node": "web-client"
+          },
+          "destination": {
+            "node": "api-gateway"
+          }
+        }
+      },
+      "controls": {
+        "security": {
+          "description": "Connections must be permitted and encrypted in transit",
+          "requirements": [
+            {
+              "requirement-url": "http://localhost:8090/calm/domains/hackathon-security/controls/permitted-connection/requirement/versions/1.0.0",
+              "config-url": "http://localhost:8090/calm/domains/hackathon-security/controls/permitted-connection/configurations/https/versions/1.0.0"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "unique-id": "api-gateway-web-service",
+      "description": "The gateway forwards requests to the service",
+      "protocol": "HTTPS",
+      "relationship-type": {
+        "connects": {
+          "source": {
+            "node": "api-gateway"
+          },
+          "destination": {
+            "node": "web-service"
+          }
+        }
+      },
+      "controls": {
+        "security": {
+          "description": "Connections must be permitted and encrypted in transit",
+          "requirements": [
+            {
+              "requirement-url": "http://localhost:8090/calm/domains/hackathon-security/controls/permitted-connection/requirement/versions/1.0.0",
+              "config-url": "http://localhost:8090/calm/domains/hackathon-security/controls/permitted-connection/configurations/https/versions/1.0.0"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "unique-id": "web-service-mongodb",
+      "description": "The service stores its data in MongoDB",
+      "protocol": "TCP",
+      "relationship-type": {
+        "connects": {
+          "source": {
+            "node": "web-service"
+          },
+          "destination": {
+            "node": "mongodb-database"
+          }
+        }
+      },
+      "controls": {
+        "security": {
+          "description": "Connections to the data store must be permitted and encrypted",
+          "requirements": [
+            {
+              "requirement-url": "http://localhost:8090/calm/domains/hackathon-security/controls/permitted-connection/requirement/versions/1.0.0",
+              "config-url": "http://localhost:8090/calm/domains/hackathon-security/controls/permitted-connection/configurations/datastore/versions/1.0.0"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "unique-id": "datastore-choice",
+      "description": "Which data store does the service use?",
+      "relationship-type": {
+        "options": [
+          {
+            "description": "MongoDB",
+            "nodes": [
+              "mongodb-database"
+            ],
+            "relationships": [
+              "web-service-mongodb"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "unique-id": "add-ons",
+      "description": "Which add-ons does the service need?",
+      "relationship-type": {
+        "options": [
+          {
+            "description": "Observability (OpenTelemetry)",
+            "nodes": [
+              "observability"
+            ],
+            "relationships": [
+              "web-service-observability"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "unique-id": "web-service-observability",
+      "description": "The service exports telemetry",
+      "protocol": "TCP",
+      "relationship-type": {
+        "connects": {
+          "source": {
+            "node": "web-service"
+          },
+          "destination": {
+            "node": "observability"
+          }
+        }
+      }
+    }
+  ]
+}

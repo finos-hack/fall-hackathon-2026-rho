@@ -1,0 +1,35 @@
+apiVersion: scaffolder.backstage.io/v1beta3
+kind: Template
+metadata:
+  name: smoke-template
+  title: Smoke Template
+  description: Renders one file with fetch:template and logs the workspace. Proves the scaffolder runs on this Node version.
+spec:
+  owner: user:guest
+  type: service
+
+  parameters:
+    - title: Name
+      required:
+        - name
+      properties:
+        name:
+          title: Name
+          type: string
+          description: A name to render into the skeleton
+
+  steps:
+    - id: fetch
+      name: Render skeleton
+      action: fetch:template
+      input:
+        url: ./skeleton
+        values:
+          name: ${{ parameters.name }}
+
+    - id: log
+      name: Log workspace
+      action: debug:log
+      input:
+        message: Rendered skeleton for ${{ parameters.name }}
+        listWorkspace: with-contents

@@ -1,0 +1,11 @@
+{
+  "name": "web-service",
+  "version": "1.0.0",
+  "description": "README, docker-compose.yml and config/application.yaml for a web-service architecture.",
+  "pattern": {
+    "namespace": "hackathon",
+    "patternId": "web-service",
+    "version": "1.0.0",
+    "url": "http://localhost:8090/calm/namespaces/hackathon/patterns/web-service/versions/1.0.0"
+  }
+}

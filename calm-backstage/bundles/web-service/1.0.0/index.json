@@ -1,0 +1,27 @@
+{
+  "name": "Web Service Bundle v1",
+  "transformer": "web-service-transformer",
+  "templates": [
+    {
+      "template": "README.md.hbs",
+      "from": "document",
+      "output": "README.md",
+      "output-type": "single",
+      "front-matter": {
+        "inject": false
+      }
+    },
+    {
+      "template": "docker-compose.yml.hbs",
+      "from": "document",
+      "output": "docker-compose.yml",
+      "output-type": "single"
+    },
+    {
+      "template": "application.yaml.hbs",
+      "from": "document",
+      "output": "config/application.yaml",
+      "output-type": "single"
+    }
+  ]
+}

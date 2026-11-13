@@ -1,0 +1,168 @@
+<title>CALM Backstage Status</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root {
+  --bg: #f5f6f8; --surface: #ffffff; --ink: #14181f; --muted: #5a6472; --line: #dde1e7; --accent: #2b4cc9;
+  --pending: #6b7480; --pending-bg: #e9ecf0;
+  --run: #8a5200; --run-bg: #ffe9c2;
+  --done: #11663a; --done-bg: #d3f1df;
+  --fail: #a3201c; --fail-bg: #fbdad7;
+  --block: #5b2f9e; --block-bg: #e8dcf7;
+  --font-display: "Bricolage Grotesque", "Helvetica Neue", Arial, sans-serif;
+  --font-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #0f1218; --surface: #171b23; --ink: #e8ebf0; --muted: #9aa4b2; --line: #2a303b; --accent: #8fa6ff;
+  --pending: #a3acb8; --pending-bg: #262c36;
+  --run: #ffc56b; --run-bg: #3d2a08;
+  --done: #7ddca1; --done-bg: #123b25;
+  --fail: #ff9a94; --fail-bg: #4a1714;
+  --block: #cdb0ff; --block-bg: #2e1d4d;
+  color-scheme: dark; } }
+:root[data-theme="dark"] {
+  --bg: #0f1218; --surface: #171b23; --ink: #e8ebf0; --muted: #9aa4b2; --line: #2a303b; --accent: #8fa6ff;
+  --pending: #a3acb8; --pending-bg: #262c36;
+  --run: #ffc56b; --run-bg: #3d2a08;
+  --done: #7ddca1; --done-bg: #123b25;
+  --fail: #ff9a94; --fail-bg: #4a1714;
+  --block: #cdb0ff; --block-bg: #2e1d4d;
+  color-scheme: dark; }
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--ink); font-family: var(--font-body); font-size: 15px; line-height: 1.5;
+  padding-block: 28px 56px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+main { max-width: 1040px; margin: 0 auto; display: flex; flex-direction: column; gap: 32px; }
+h1, h2 { font-family: var(--font-display); text-wrap: balance; margin: 0; letter-spacing: -0.01em; }
+h1 { font-size: clamp(26px, 5vw, 38px); line-height: 1.1; }
+h2 { font-size: 20px; }
+.sub { color: var(--muted); margin: 6px 0 0; max-width: 65ch; }
+.strip { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 18px 20px; display: flex; flex-direction: column; gap: 14px; }
+.strip-top { display: flex; flex-wrap: wrap; gap: 8px 24px; align-items: center; justify-content: space-between; }
+.meta { font-family: var(--font-mono); font-size: 12.5px; color: var(--muted); }
+.bar { height: 10px; background: var(--pending-bg); border-radius: 5px; overflow: hidden; }
+.bar > i { display: block; height: 100%; width: 0%; background: var(--accent); border-radius: 5px; }
+.pill { display: inline-block; font-size: 12px; font-weight: 600; padding: 2px 9px; border-radius: 999px; white-space: nowrap; letter-spacing: 0.02em; }
+.p-pending { color: var(--pending); background: var(--pending-bg); }
+.p-run { color: var(--run); background: var(--run-bg); }
+.p-done { color: var(--done); background: var(--done-bg); }
+.p-fail { color: var(--fail); background: var(--fail-bg); }
+.p-block { color: var(--block); background: var(--block-bg); }
+.wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; min-width: 640px; }
+th { text-align: left; font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); font-weight: 600; padding: 10px 14px; border-bottom: 1px solid var(--line); }
+td { padding: 11px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
+tr:last-child td { border-bottom: 0; }
+td.n { font-family: var(--font-mono); color: var(--muted); width: 36px; }
+td.name { font-weight: 500; min-width: 200px; }
+td.hash, td.mono { font-family: var(--font-mono); font-size: 12.5px; }
+td.step, td.ev { color: var(--muted); font-size: 14px; }
+.sec { display: flex; flex-direction: column; gap: 12px; }
+ul.list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+ul.list li { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 10px 14px; }
+ul.list b { font-family: var(--font-mono); font-size: 12.5px; margin-right: 8px; color: var(--accent); }
+@media (max-width: 560px) { td, th { padding: 9px 10px; } body { font-size: 14.5px; } }
+</style>
+<main>
+  <header>
+    <h1>CALM Backstage: hackathon base</h1>
+    <p class="sub">Builds the 8-step thin slice from docs/superpowers/specs/2026-11-13-calm-backstage-design.md: a clone-and-run Backstage that reads CALM Hub and creates services from CALM patterns. Each step is planned when it starts (docs/superpowers/plans/) and built by a subagent.</p>
+  </header>
+
+  <section class="strip" aria-label="Overall status">
+    <div class="strip-top">
+      <div id="overall"><span class="pill p-done">done, awaiting your review</span></div>
+      <div class="meta" id="count">8 of 8 tasks done</div>
+      <div class="meta" id="stamp">started Nov 13 15:07 &middot; updated Nov 13 17:11</div>
+    </div>
+    <div class="bar" role="progressbar" aria-valuemin="0" aria-valuemax="8" aria-valuenow="8"><i id="fill" style="width:100%"></i></div>
+    <div class="meta" id="now">Now: finished</div>
+  </section>
+
+  <section class="sec">
+    <h2>Tasks</h2>
+    <div class="wrap"><table>
+      <thead><tr><th>#</th><th>Task</th><th>State</th><th>Current step</th><th>Commit</th><th>Evidence</th></tr></thead>
+      <tbody>
+      <tr id="t1"><td class="n">1</td><td class="name">Repository and app (create-app, ports, Node 26 check with one template run)</td><td><span class="pill p-done">done</span></td><td class="step">Backstage 1.56.0, Yarn 4.13.0, Node 26.13.1</td><td class="hash">013e3c5</td><td class="ev">yarn install 17s (better-sqlite3 built and loaded); yarn tsc exit 0 in 2.1s (re-run by lead); build:backend 6.3s; smoke task status completed; :3100 returned 200</td></tr>
+      <tr id="t2"><td class="n">2</td><td class="name">Hub and seed (compose, Mongo init, seed.sh, seed pattern, architectures, controls, bundle v1/v2)</td><td><span class="pill p-done">done</span></td><td class="step">CLI 1.71.0 pinned after Jim pre-approved it; hub:up works from node_modules</td><td class="hash">2fa3091, 8a60ce4</td><td class="ev">Re-run by lead on CLI 1.71.0: validate passes for both architectures; generate gives 6/7 and 5/6 nodes/relationships for two choice sets; bundle v1 renders 3 files, v2 renders 4; seed: 0 created, 10 present</td></tr>
+      <tr id="t3"><td class="n">3</td><td class="name">Catalog provider (architectures, patterns, controls, bundles, one Template per pattern)</td><td><span class="pill p-done">done</span></td><td class="step">Risk passed: the provider&#x27;s Template is on /create, and its form shows radio buttons for the oneOf choice and checkboxes for the anyOf choices</td><td class="hash">b822f14, 03cd0ca</td><td class="ev">calm-common: 2 suites, 10 tests passed (re-run by lead); catalog holds 2 architectures, 1 pattern, 2 controls, 2 bundles, 1 pattern Template; debug task completed; screenshots of /create and the form checked</td></tr>
+      <tr id="t4"><td class="n">4</td><td class="name">calm:generate action (CLI bin resolution, --option-choices)</td><td><span class="pill p-done">done</span></td><td class="step">Risk passed: bin resolved through require.resolve and run with the backend&#x27;s own Node; the CLI accepts the choices JSON the Template builds</td><td class="hash">5c28692</td><td class="ev">Task runs completed: PostgreSQL+Cache+Queue gives 6 nodes, 7 relationships; MongoDB+Observability gives 5, 6. The form schema rejects an invalid choice with HTTP 400, and the CLI&#x27;s own error appears in a dry run. yarn tsc exit 0 (re-run by lead)</td></tr>
+      <tr id="t5"><td class="n">5</td><td class="name">Placeholders (/placeholders route, CalmPlaceholders form field)</td><td><span class="pill p-done">done</span></td><td class="step">Risk passed: the alpha FormFieldBlueprint field rendered on the first try; the Details step fetches the placeholders again whenever the choices change</td><td class="hash">28cbfac, 335dba5, 7cfbf15</td><td class="ev">calm-common: 3 suites, 16 tests passed (re-run by lead); /placeholders returns 5 placeholders, 401 without a token, 400 for a bad URL or choice; a form task completed with the values in its log</td></tr>
+      <tr id="t6"><td class="n">6</td><td class="name">Finish the run (calm:fill, calm:validate, calm:template, calm:publish:local, register)</td><td><span class="pill p-done">done</span></td><td class="step">Risk passed: a local file location registers and the new service appears in the catalog; the Template runs six steps from generate to register</td><td class="hash">638c90a, 37e3fda, e529f5b, aabb179, ffa2331</td><td class="ev">3 task runs completed with calm validate 0 errors, 0 warnings; v1 renders 3 files, v2 renders 4; a missing value fails at calm:fill and names the open placeholder; 4 suites, 17 tests pass (re-run by lead)</td></tr>
+      <tr id="t7"><td class="n">7</td><td class="name">Entity pages (architecture card with Mermaid, pattern card)</td><td><span class="pill p-done">done</span></td><td class="step">Risk passed: Mermaid bundles and renders in the dev server and in the built app under the backend&#x27;s content security policy, with no console errors</td><td class="hash">1993dec, 1fbac12, b7c4321, c58b83e, d475c11</td><td class="ev">5 suites, 22 tests pass (re-run by lead); app build exit 0; published services are back in the catalog after a restart; 6 screenshots in docs/demo/; the architecture card diagram was checked by the lead</td></tr>
+      <tr id="t8"><td class="n">8</td><td class="name">Hand-over (README, FINDINGS, TRACKS)</td><td><span class="pill p-done">done</span></td><td class="step">README (one command each to start), FINDINGS (4 requests to CALM plus CLI, Hub and Backstage findings), TRACKS (A to F with starting points)</td><td class="hash">3ccd302 + wrap-up</td><td class="ev">Documented commands re-run by lead: hub:up, then hub:seed (0 created, 10 present), then yarn start: :3100 returned 200 and the catalog held 2 architectures, 1 pattern, 2 controls, 2 bundles; /architecture returned 200; build:backend exit 0; ports free afterwards</td></tr>
+      </tbody>
+    </table></div>
+  </section>
+
+  <section class="sec">
+    <h2>Deviations from the plan</h2>
+    <ul class="list" id="devs">
+      <li id="d1"><b>D1</b>The spec expected one implementation plan from writing-plans before building. Instead, each step gets its own technical plan in docs/superpowers/plans/ when it starts, so it can use the facts earlier steps found. A subagent implements each plan, one at a time. <span class="pill p-done">applied</span></li>
+      <li id="d2"><b>D2</b>The plan expected create-app to run on Node 26. Its prerequisite check refuses anything but 22.x or 24.x. The scaffold step ran once on the existing node@22; install, build and run all use Node 26, and engines.node was widened to "22 || 24 || 26". README records this. <span class="pill p-done">applied</span></li>
+      <li id="d3"><b>D3</b>The spec named isolated-vm as the Node 26 risk. Backstage 1.56 does not use it: yarn.lock has 0 matches, and templating is pure JS (nunjitsu). The native module that was proven instead is better-sqlite3, built and loaded on Node 26. <span class="pill p-done">documented</span></li>
+      <li id="d4"><b>D4</b>The spec said to copy the release schemas from @finos/calm-schema. That package (1.3.0) holds only release 1.3. @finos/calm-cli 1.71.0 ships dist/calm/release/1.0 to 1.3 in the exact layout the Hub's init expects, so step 2 copies from the CLI. <span class="pill p-done">applied</span></li>
+      <li id="d5"><b>D5</b>The plan expected the copied init-mongo.js to start cleanly. It crashes when /controls is missing (it reads .length of undefined). The upstream compose probably has the same bug (not checked). The script is unchanged; compose mounts an empty hub/mongo/controls and sets CALM_CONTROLS_BASE_PATH, as the script's own message says. Accepted by the lead. <span class="pill p-done">applied</span></li>
+      <li id="d6"><b>D6</b>The plan expected @finos/calm-cli 1.71.0 as a root dev dependency. .yarnrc.yml has npmMinimalAgeGate: 3d, and 1.71.0 was published today at 12:32Z, so it is quarantined. Nothing was changed to get round the gate. 1.69.0 (Nov 9) already clears it and gives the same generate output on our Hub pattern (tested in the scratchpad). Jim chose to add @finos/calm-cli to npmPreapprovedPackages and keep 1.71.0. <span class="pill p-done">applied</span></li>
+      <li id="d8"><b>D8</b>The spec put the Hub client in calm-backend. It lives in calm-common, so the catalog module and the backend share one client. The provider reads only the namespaces in config (calm.namespaces, default hackathon), because the Hub image also seeds upstream demo namespaces. Entity names are pattern-*, control-*, bundle-*-version. <span class="pill p-done">applied</span></li>
+      <li id="d9"><b>D9</b>The plan made anyOf choices require at least one item. The CLI requires an answer only for oneOf decisions, so anyOf is optional in the form. The options reader mirrors the CLI source at monorepo c7ce7fe1a (CLI 1.67.0). It has not been diffed against 1.71.0, but generate on 1.71.0 accepts the choices it builds. <span class="pill p-done">documented</span></li>
+      <li id="d10"><b>D10</b>The plan assumed the pattern URL would be in the Template&#x27;s annotations; it is not. The URL is written straight into the calm:generate step. Choices are passed one expression per decision, and the CLI checks them, not our own code. The action uses its own spawn so a failure carries the CLI&#x27;s stderr; executeShellCommand reports only the exit code. calm:generate supports dry runs. <span class="pill p-done">applied</span></li>
+      <li id="d11"><b>D11</b>The spec had no shared Node package. A new plugins/calm-node holds the CLI runner for both the scaffolder actions and calm-backend. Found: the form&#x27;s required flag alone does not block Review, so the field checks its own values. Tasks sent through the API skip the field&#x27;s check, so calm:fill must refuse open placeholders. In the seed pattern every placeholder sits on a fixed node, so the list does not change with the choices; only the node counts do. <span class="pill p-done">applied</span></li>
+      <li id="d12"><b>D12</b>The plan expected catalog:register to handle a local folder. It always adds a url location, and the catalog&#x27;s real default allows only url locations (the extension point&#x27;s doc says url and file). The CALM catalog module now allows file locations, and a new calm:register:local action adds the location and waits for the entity. <span class="pill p-done">applied</span></li>
+      <li id="d13"><b>D13</b>The plan did not account for the catalog living in memory: published services drop out of the catalog when the backend restarts, but their folders stay in output/. Step 7 adds a file glob location for output/*/catalog-info.yaml, and calm:register:local treats a match from that glob as already registered. Verified: after a backend restart the published services are back. <span class="pill p-done">applied</span></li>
+      <li id="d7"><b>D7</b>The plan did not say which Hub write API to use. The Hub has two. The seed uses the name-based /calm/namespaces/{ns}/... endpoints, because only those return a $id the CLI can fetch. Other findings: calm validate needs -c for localhost control URLs, and calm template -o treats a folder name containing a dot as a file. <span class="pill p-done">documented</span></li>
+    </ul>
+  </section>
+
+  <section class="sec">
+    <h2>Acceptance</h2>
+    <div class="wrap"><table>
+      <thead><tr><th>#</th><th>Criterion</th><th>Result</th><th>Actual</th></tr></thead>
+      <tbody>
+      <tr id="a1"><td class="n">1</td><td class="name">Hub up and seeded, then yarn start: one documented command each</td><td><span class="pill p-done">pass</span></td><td class="ev">README: yarn hub:up &amp;&amp; yarn hub:seed, then yarn start. Re-run Nov 13 17:06: seed exit 0; :3100 returned 200; CALM catalog: 1 pattern, 2 architectures, 2 controls, 2 bundles. Fresh clone at 3ccd302 (17:09–17:11): install --immutable and tsc pass; Hub reset with down -v; seed: 10 created; a Template task completed with validate 0 errors and 4 files rendered</td></tr>
+      <tr id="a2"><td class="n">2</td><td class="name">Catalog on :3100 lists architectures, patterns, controls; graph shows architecture → pattern → controls</td><td><span class="pill p-done">pass</span></td><td class="ev">docs/demo/catalog.png lists 2 architectures and 4 published services; catalog-graph.png shows Orders Service → Web Service → Encryption at Rest and Permitted Connection</td></tr>
+      <tr id="a3"><td class="n">3</td><td class="name">Architecture page shows the CALM card with a diagram</td><td><span class="pill p-done">pass</span></td><td class="ev">architecture-page.png: card shows pattern web-service 1.0.0, 6 nodes and 7 relationships, 2 controls, and a Mermaid diagram (PostgreSQL drawn as a cylinder); service-page.png shows the same for orders-api from its file (checked by lead)</td></tr>
+      <tr id="a4"><td class="n">4</td><td class="name">/create run (1 oneOf + 2 anyOf) asks placeholders, passes calm validate, renders files; output differs by bundle version and by choices</td><td><span class="pill p-done">pass</span></td><td class="ev">orders-api (v1): README.md, docker-compose.yml, config/application.yaml; orders-api-v2 (v2): adds Dockerfile and moves compose to deploy/. Choices: postgres:16 + redis:7 + rabbitmq become mongo:7 + otel collector. Validate: 0 errors, 0 warnings. UI run inventory-api completed</td></tr>
+      <tr id="a5"><td class="n">5</td><td class="name">Pattern page lists its decisions and choices</td><td><span class="pill p-done">pass</span></td><td class="ev">pattern-page.png lists datastore-choice (one of: PostgreSQL, MongoDB) and add-ons (any of: 3 choices), bundles 1.0.0 and 2.0.0, and a Create link to create-from-web-service</td></tr>
+      <tr id="a6"><td class="n">6</td><td class="name">yarn test passes for calm-common</td><td><span class="pill p-done">pass</span></td><td class="ev">Final: Test Suites: 5 passed, 5 total; Tests: 22 passed, 22 total (lead re-run, Nov 13 17:04)</td></tr>
+      <tr id="a7"><td class="n">7</td><td class="name">yarn tsc and yarn build:backend pass; screenshots of three screens in docs/demo/</td><td><span class="pill p-done">pass</span></td><td class="ev">yarn tsc exit 0 (17:04); build:backend exit 0 (17:07); docs/demo/ holds 6 screenshots: catalog, catalog-graph, architecture-page, service-page, pattern-page, create-form</td></tr>
+      </tbody>
+    </table></div>
+  </section>
+
+  <section class="sec">
+    <h2>Open items for Jim</h2>
+    <ul class="list">
+      <li>Review the base: README.md for the demo flow, FINDINGS.md, TRACKS.md, and the 6 screenshots in docs/demo/. Everything is in local commits on main.</li>
+      <li>Decide whether to put the repository on GitHub before Monday, so the team can clone it. Nothing has been pushed.</li>
+      <li>Decide whether to raise any FINDINGS.md items upstream (for example the init-mongo.js crash, calm template -o with dotted folder names, or the four API requests). None has been raised.</li>
+      <li>The Hub containers (calm-backstage-hub, calm-backstage-mongodb) are still running on 8090. Stop them with yarn hub:down. output/ holds 4 sample services (git-ignored).</li>
+      <li>Your call, not urgent: do you want to review each step's plan before it is built? The default is to build straight after planning and stop only if a step's risk comes true.</li>
+    </ul>
+  </section>
+
+  <section class="sec" id="bigger">
+    <h2>Overall plan progress</h2>
+    <div class="strip">
+      <div class="strip-top">
+        <div class="meta" id="plan-count">1 of 7 phases done</div>
+        <div class="meta" id="plan-name">CALM hackathon: base + Monday tracks (TRACKS.md)</div>
+      </div>
+      <div class="bar" role="progressbar" aria-valuemin="0" aria-valuemax="7" aria-valuenow="1"><i id="plan-fill" style="width:14.3%"></i></div>
+      <div class="meta" id="plan-next">Next up: Tracks A–F start on Monday 2026-11-16 with the bigger team. Each needs only the base and its section of TRACKS.md</div>
+    </div>
+    <div class="wrap"><table>
+      <thead><tr><th>Phase</th><th>Name</th><th>State</th><th>Outcome</th><th>Report</th></tr></thead>
+      <tbody>
+      <tr id="pl0"><td class="n">0</td><td class="name">Hackathon base (thin slice, steps 1–8)</td><td><span class="pill p-done">done</span></td><td class="ev">8 of 8 steps done, 7 of 7 acceptance criteria pass, 22 tests; create runs from pattern choices to a registered service</td><td class="mono">README.md, FINDINGS.md, TRACKS.md</td></tr>
+      <tr id="pl1"><td class="n">1</td><td class="name">Track A: Catalog</td><td><span class="pill p-pending">not started</span></td><td class="ev">-</td><td class="mono">-</td></tr>
+      <tr id="pl2"><td class="n">2</td><td class="name">Track B: Entity page</td><td><span class="pill p-pending">not started</span></td><td class="ev">-</td><td class="mono">-</td></tr>
+      <tr id="pl3"><td class="n">3</td><td class="name">Track C: Pattern options</td><td><span class="pill p-pending">not started</span></td><td class="ev">-</td><td class="mono">-</td></tr>
+      <tr id="pl4"><td class="n">4</td><td class="name">Track D: Template bundles</td><td><span class="pill p-pending">not started</span></td><td class="ev">-</td><td class="mono">-</td></tr>
+      <tr id="pl5"><td class="n">5</td><td class="name">Track E: Publish</td><td><span class="pill p-pending">not started</span></td><td class="ev">-</td><td class="mono">-</td></tr>
+      <tr id="pl6"><td class="n">6</td><td class="name">Track F: Provisioning</td><td><span class="pill p-pending">not started</span></td><td class="ev">-</td><td class="mono">-</td></tr>
+      </tbody>
+    </table></div>
+  </section>
+</main>

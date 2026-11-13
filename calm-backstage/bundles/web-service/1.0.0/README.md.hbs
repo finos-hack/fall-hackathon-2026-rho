@@ -1,0 +1,14 @@
+# {{title}}
+
+{{description}}
+
+- Service: `{{serviceName}}` (owner: {{owner}}), listening on port {{servicePort}}
+- Public entry: https://{{gatewayHost}}:{{gatewayPort}} via the API gateway
+- Data store: {{datastore.name}}
+{{#if cache}}- Cache: Redis
+{{/if}}{{#if messageQueue}}- Message queue: RabbitMQ
+{{/if}}{{#if observability}}- Observability: OpenTelemetry collector
+{{/if}}
+Run locally: `docker compose up`
+
+Generated from CALM architecture {{architectureId}} (pattern {{patternId}}) by bundle web-service 1.0.0.

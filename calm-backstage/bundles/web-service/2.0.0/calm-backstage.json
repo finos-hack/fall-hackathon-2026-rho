@@ -1,0 +1,11 @@
+{
+  "name": "web-service",
+  "version": "2.0.0",
+  "description": "v2 layout: deploy/docker-compose.yml with health checks, a Dockerfile, a component table in the README, and config/application.yaml with a health endpoint.",
+  "pattern": {
+    "namespace": "hackathon",
+    "patternId": "web-service",
+    "version": "1.0.0",
+    "url": "http://localhost:8090/calm/namespaces/hackathon/patterns/web-service/versions/1.0.0"
+  }
+}

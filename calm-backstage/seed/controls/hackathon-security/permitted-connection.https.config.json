@@ -1,0 +1,9 @@
+{
+  "$schema": "http://localhost:8090/calm/domains/hackathon-security/controls/permitted-connection/requirement/versions/1.0.0",
+  "$id": "http://localhost:8090/calm/domains/hackathon-security/controls/permitted-connection/configurations/https/versions/1.0.0",
+  "control-id": "hs-001",
+  "name": "Permitted Connection",
+  "description": "Every connection between components must name its protocol and give a business reason.",
+  "reason": "Client and service traffic crosses the network edge, so it must be encrypted in transit.",
+  "protocol": "HTTPS"
+}
