@@ -2,7 +2,10 @@
  * Every template bundle in the OCI bundle registry with what it says about itself, for the catalog, the upgrade
  * check, the upgrade action and the Template Explorer.
  */
-import { BundleMeta, readBundleMeta } from '@internal/backstage-plugin-calm-common';
+import {
+  BundleMeta,
+  readBundleMeta,
+} from '@internal/backstage-plugin-calm-common';
 import { bundleRef, listRepositories, listTags, readBundleConfig } from './oci';
 import type { BundleRegistrySettings } from './settings';
 

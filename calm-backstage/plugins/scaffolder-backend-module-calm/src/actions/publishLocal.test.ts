@@ -28,8 +28,18 @@ afterEach(async () => {
   await fs.rm(root, { recursive: true, force: true });
 });
 
+/** A catalog without the name, so the name check passes. */
+const catalog = { getEntityByRef: jest.fn(async () => undefined) } as any;
+const auth = {
+  getOwnServiceCredentials: jest.fn(async () => ({
+    principal: { type: 'service', subject: 'scaffolder' },
+  })),
+} as any;
+
 const action = () =>
   createCalmPublishLocalAction({
+    catalog,
+    auth,
     localDir: path.join(root, 'output'),
     namespacePrefix: 'calm-',
   });
