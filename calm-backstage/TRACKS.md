@@ -72,9 +72,16 @@ Scope: GitHub publish, dry run, register the architecture in the Hub.
 - Done: the generated architecture is stored in CALM Hub (`calm:register:hub`), the service is built and deployed
   to the local minikube (`calm:image:build`, `calm:deploy:k8s`) with NetworkPolicies from its `connects`
   relationships, and the deployment is recorded as a decorator (`calm:decorate:deployment`).
-- Left: a failed deployment is not recorded (the Template always passes `completed`); redeploying an existing
-  service and the dry runs are covered by unit tests only; the gateway forwards plain HTTP although the
-  architecture says HTTPS.
+- Left:
+  - A failed deployment is not recorded (the Template always passes `completed`).
+  - An existing service cannot be redeployed: `calm:register:hub` and `calm:publish:local` refuse a name whose
+    folder exists.
+  - `calm:register:hub` runs before the render, so a run that fails later (render, publish, build or deploy) leaves
+    its architecture version in the Hub, which cannot delete versions. It checks the catalog and the output folder
+    first, so a clashing name writes nothing.
+  - `calm:deploy:k8s` and `calm:image:build` have no dry run: in a dry run the scaffolder skips the publish step
+    they read from.
+  - The gateway forwards plain HTTP although the architecture says HTTPS.
 - `calm:publish:local` still writes `output/<name>/` and `calm:register:local` adds a file location.
 - Swap in `publish:github` + `catalog:register` (url location) for a real repository; no GitHub credentials are set up.
 - `calm:generate`, `calm:fill`, `calm:validate` support dry runs; the template editor's dry run can use them.
