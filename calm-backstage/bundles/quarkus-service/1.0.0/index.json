@@ -1,0 +1,57 @@
+{
+  "name": "Starter quarkus-service",
+  "transformer": "starter-transformer",
+  "templates": [
+    {
+      "template": "README.md.hbs",
+      "from": "document",
+      "output": "README.md",
+      "output-type": "single",
+      "front-matter": {
+        "inject": false
+      }
+    },
+    {
+      "template": "pom.xml.hbs",
+      "from": "document",
+      "output": "pom.xml",
+      "output-type": "single"
+    },
+    {
+      "template": "Dockerfile.hbs",
+      "from": "document",
+      "output": "Dockerfile",
+      "output-type": "single"
+    },
+    {
+      "template": "gitignore.hbs",
+      "from": "document",
+      "output": ".gitignore",
+      "output-type": "single"
+    },
+    {
+      "template": "InfoResource.java.hbs",
+      "from": "document",
+      "output": "src/main/java/com/example/service/InfoResource.java",
+      "output-type": "single"
+    },
+    {
+      "template": "Connections.java.hbs",
+      "from": "document",
+      "output": "src/main/java/com/example/service/Connections.java",
+      "output-type": "single"
+    },
+    {
+      "template": "application.properties.hbs",
+      "from": "document",
+      "output": "src/main/resources/application.properties",
+      "output-type": "single"
+    },
+    {
+      "template": "index.html.hbs",
+      "from": "document",
+      "output": "src/main/resources/META-INF/resources/index.html",
+      "output-type": "single"
+    }
+  ]
+}

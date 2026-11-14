@@ -1,0 +1,13 @@
+{
+  "name": "quarkus-service",
+  "version": "1.0.0",
+  "kind": "starter",
+  "runtime": "Red Hat build of Quarkus 3.33.4 on Java 21 (UBI 9)",
+  "description": "Starter: a Red Hat build of Quarkus 3.33.4 service on Java 21 (Red Hat Maven BOM 3.33.4.redhat-00003, Quarkus REST) with a page about itself, /health, /api/info and /api/connections, and a Dockerfile that builds and runs it on Red Hat UBI 9 OpenJDK 21 images. Deployed with deployment rules such as k8s-deploy.",
+  "patterns": [
+    {
+      "namespace": "hackathon",
+      "patternId": "web-service"
+    }
+  ]
+}

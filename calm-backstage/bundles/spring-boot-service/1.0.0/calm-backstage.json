@@ -1,0 +1,13 @@
+{
+  "name": "spring-boot-service",
+  "version": "1.0.0",
+  "kind": "starter",
+  "runtime": "Spring Boot 4.0.9 on Java 21",
+  "description": "Starter: a Spring Boot 4.0.9 service on Java 21 (Spring Initializr shape: Maven, web MVC, actuator) with a page about itself, /health, /api/info and /api/connections, and a Dockerfile that builds it with Maven and runs it on the Temurin 21 JRE. Deployed with deployment rules such as k8s-deploy.",
+  "patterns": [
+    {
+      "namespace": "hackathon",
+      "patternId": "web-service"
+    }
+  ]
+}
