@@ -243,6 +243,9 @@ calm:
   publish:
     # calm:publish:local writes new services to <localDir>/<name> (relative to packages/backend; git-ignored)
     localDir: ../../output
+    # calm:register:hub stores each new service's architecture in this Hub namespace (as <name> version 1.0.0), and
+    # calm:decorate:deployment its deployment decorators
+    hubNamespace: hackathon
   deploy:
     # calm:image:build and calm:deploy:k8s work only on this cluster: the minikube profile `yarn k8s:up` starts, through
     # its own kubeconfig (relative to packages/backend; git-ignored). They never use your default kubeconfig or context.

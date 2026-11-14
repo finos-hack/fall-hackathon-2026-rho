@@ -22,6 +22,11 @@ export interface Config {
        * directory (packages/backend). Default ../../output (the repository's git-ignored output folder).
        */
       localDir?: string;
+      /**
+       * CALM Hub namespace calm:register:hub stores the architectures of new services in, and
+       * calm:decorate:deployment their deployment decorators. Default hackathon.
+       */
+      hubNamespace?: string;
     };
     deploy?: {
       /**

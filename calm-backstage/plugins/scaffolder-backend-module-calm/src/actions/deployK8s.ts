@@ -193,6 +193,11 @@ export function createCalmDeployK8sAction(options: {
             .describe(
               'The kubectl command line for this cluster and namespace, to copy',
             ),
+        cluster: z => z.string().describe('The kubectl context deployed to'),
+        startTime: z =>
+          z.string().describe('When the apply started (ISO 8601)'),
+        endTime: z =>
+          z.string().describe('When the last rollout finished (ISO 8601)'),
       },
     },
     async handler(ctx) {
@@ -249,6 +254,7 @@ export function createCalmDeployK8sAction(options: {
         namespaceExists: Boolean(existing),
       });
       ctx.logger.info(kubectlCommand(settings, args));
+      const startTime = new Date().toISOString();
       await runKubectl(settings, args, run);
 
       let deployed: Deployed;
@@ -305,6 +311,9 @@ export function createCalmDeployK8sAction(options: {
       ctx.output('networkPolicies', deployed.networkPolicies);
       ctx.output('services', deployed.services);
       ctx.output('kubectl', kubectlCommand(settings, ['-n', namespace]));
+      ctx.output('cluster', settings.context);
+      ctx.output('startTime', startTime);
+      ctx.output('endTime', new Date().toISOString());
     },
   });
 }

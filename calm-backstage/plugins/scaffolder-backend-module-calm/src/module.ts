@@ -14,6 +14,9 @@ import { createCalmPublishLocalAction } from './actions/publishLocal';
 import { createCalmRegisterLocalAction } from './actions/registerLocal';
 import { createCalmImageBuildAction } from './actions/imageBuild';
 import { createCalmDeployK8sAction } from './actions/deployK8s';
+import { createCalmRegisterHubAction } from './actions/registerHub';
+import { createCalmDecorateDeploymentAction } from './actions/decorateDeployment';
+import { CalmHubWriteClient } from '@internal/backstage-plugin-calm-common';
 import {
   DEFAULT_NAMESPACE_PREFIX,
   calmBin,
@@ -67,6 +70,14 @@ export const scaffolderModuleCalm = createBackendModule({
             ? `calm:image:build and calm:deploy:k8s use kubeconfig ${kubernetes.kubeconfig}, context ${kubernetes.context}, minikube profile ${kubernetes.minikubeProfile}, namespaces ${kubernetes.namespacePrefix}<name>`
             : 'calm:image:build and calm:deploy:k8s: no calm.deploy.kubernetes kubeconfig and context, so both refuse to run',
         );
+        // Where calm:register:hub stores the architectures of new services, and calm:decorate:deployment their
+        // deployments.
+        const hub = new CalmHubWriteClient(hubUrl);
+        const hubNamespace =
+          config.getOptionalString('calm.publish.hubNamespace') ?? 'hackathon';
+        logger.info(
+          `calm:register:hub and calm:decorate:deployment write to ${hub.baseUrl}, namespace ${hubNamespace}`,
+        );
         logger.info(`calm CLI bin: ${process.execPath} ${calmBin()}`);
         logger.info(`calm:publish:local writes to ${localDir}`);
         logger.info(
@@ -78,6 +89,7 @@ export const scaffolderModuleCalm = createBackendModule({
           createCalmGenerateAction({ hubUrl }),
           createCalmFillAction(),
           createCalmValidateAction({ hubUrl }),
+          createCalmRegisterHubAction({ hub, namespace: hubNamespace }),
           createCalmTemplateAction({ bundles, registry, cacheDir }),
           createCalmPublishLocalAction({
             catalog,
@@ -88,6 +100,10 @@ export const scaffolderModuleCalm = createBackendModule({
           }),
           createCalmImageBuildAction({ settings: kubernetes, localDir }),
           createCalmDeployK8sAction({ settings: kubernetes, localDir }),
+          createCalmDecorateDeploymentAction({
+            hub,
+            appBaseUrl: config.getString('app.baseUrl'),
+          }),
           createCalmRegisterLocalAction({ catalog, auth, localDir }),
         );
       },

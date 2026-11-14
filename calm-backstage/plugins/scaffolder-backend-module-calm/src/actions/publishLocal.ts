@@ -45,6 +45,16 @@ export function serviceEntity(opts: {
    * `backstage.io/kubernetes-id` label, and their namespace. The Kubernetes tab reads both.
    */
   kubernetes?: { id: string; namespace: string };
+  /**
+   * The architecture version in CALM Hub (calm:register:hub). The architecture card then reads the Hub, and falls
+   * back to the file, which stays named.
+   */
+  hub?: {
+    namespace: string;
+    architecture: string;
+    version: string;
+    url?: string;
+  };
   description?: string;
 }): Entity {
   return {
@@ -70,6 +80,16 @@ export function serviceEntity(opts: {
         ...(opts.bundleRef ? { [ANN.bundleRef]: opts.bundleRef } : {}),
         ...(opts.bundleDigest ? { [ANN.bundleDigest]: opts.bundleDigest } : {}),
         [ANN.architectureFile]: `./${ARCHITECTURE_FILE}`,
+        ...(opts.hub
+          ? {
+              [ANN.architecture]: opts.hub.architecture,
+              [ANN.architectureVersion]: opts.hub.version,
+              // The one namespace annotation is the pattern's; the architecture's is named only when it differs.
+              ...(opts.hub.namespace !== opts.namespace
+                ? { [ANN.architectureNamespace]: opts.hub.namespace }
+                : {}),
+            }
+          : {}),
         ...(opts.kubernetes
           ? {
               [K8S.id]: opts.kubernetes.id,
@@ -78,6 +98,13 @@ export function serviceEntity(opts: {
           : {}),
       },
       tags: ['calm', 'calm-service'],
+      ...(opts.hub?.url
+        ? {
+            links: [
+              { url: opts.hub.url, title: 'Architecture in CALM Hub (JSON)' },
+            ],
+          }
+        : {}),
     },
     spec: {
       type: 'service',
@@ -150,6 +177,32 @@ export function createCalmPublishLocalAction(options: {
             .optional()
             .describe(
               'Manifest digest of the bundle (calm:template output bundleDigest); recorded as calm.finos.org/bundle-digest',
+            ),
+        hubNamespace: z =>
+          z
+            .string()
+            .optional()
+            .describe(
+              'Hub namespace of the registered architecture (calm:register:hub output namespace)',
+            ),
+        hubArchitecture: z =>
+          z
+            .string()
+            .optional()
+            .describe(
+              'Architecture name in the Hub (calm:register:hub output architecture); with hubNamespace and hubArchitectureVersion, recorded as the calm.finos.org/architecture annotations next to architecture-file',
+            ),
+        hubArchitectureVersion: z =>
+          z
+            .string()
+            .optional()
+            .describe('Its version (calm:register:hub output version)'),
+        hubArchitectureUrl: z =>
+          z
+            .string()
+            .optional()
+            .describe(
+              'Its Hub URL (calm:register:hub output url); added as a link',
             ),
         deployable: z =>
           z
@@ -240,6 +293,18 @@ export function createCalmPublishLocalAction(options: {
         }
       }
 
+      const { hubNamespace, hubArchitecture, hubArchitectureVersion } =
+        ctx.input;
+      const hub =
+        hubNamespace && hubArchitecture && hubArchitectureVersion
+          ? {
+              namespace: hubNamespace,
+              architecture: hubArchitecture,
+              version: hubArchitectureVersion,
+              url: ctx.input.hubArchitectureUrl || undefined,
+            }
+          : undefined;
+
       await fs.mkdir(options.localDir, { recursive: true });
       const target = resolveSafeChildPath(options.localDir, name);
 
@@ -279,6 +344,7 @@ export function createCalmPublishLocalAction(options: {
         bundleRef: ctx.input.bundleRef || undefined,
         bundleDigest: ctx.input.bundleDigest || undefined,
         kubernetes,
+        hub,
       });
       const catalogInfoPath = path.join(target, CATALOG_INFO_FILE);
       await fs.writeFile(catalogInfoPath, YAML.stringify(entity));
