@@ -1,0 +1,12 @@
+{
+  "name": "web-service",
+  "version": "3.0.0",
+  "description": "v3: a small runnable Node service (src/server.js, Dockerfile) and a kustomize base in deploy/k8s with a Deployment and Service per in-cluster node and NetworkPolicies from the architecture's connects relationships.",
+  "deploy": "kubernetes",
+  "pattern": {
+    "namespace": "hackathon",
+    "patternId": "web-service",
+    "version": "1.0.0",
+    "url": "http://localhost:8090/calm/namespaces/hackathon/patterns/web-service/versions/1.0.0"
+  }
+}
