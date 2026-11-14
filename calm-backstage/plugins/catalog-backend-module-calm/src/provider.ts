@@ -11,6 +11,7 @@ import type {
 import {
   CalmHubClient,
   CalmHubError,
+  compareVersions,
   latestVersion,
 } from '@internal/backstage-plugin-calm-common';
 import {
@@ -18,42 +19,67 @@ import {
   CalmSnapshot,
   ControlDocument,
   HubDocument,
+  RequirementRef,
   buildEntities,
   referencedRequirements,
 } from './entities';
 
 /**
- * Reads the control requirements the documents reference from the configured Hub. A control the Hub does not hold
- * (deleted, or referenced by a URL on another host whose path the local Hub lacks) is skipped with a warning, so one
- * missing control does not stop the whole refresh; any other Hub failure still throws.
+ * Reads the control requirements the documents reference from the configured Hub, one per control: the highest
+ * referenced version the Hub holds. A version the Hub lacks (deleted, or referenced by a URL on another host whose path
+ * the local Hub lacks) falls back to the next referenced version; a control with no version in the Hub is skipped with a
+ * warning, so one missing control does not stop the whole refresh. Any other Hub failure still throws.
  */
 export async function readControls(
   client: Pick<CalmHubClient, 'controlRequirement'>,
-  requirements: {
-    url: string;
-    domain: string;
-    control: string;
-    version: string;
-  }[],
+  requirements: RequirementRef[],
   logger: Pick<LoggerService, 'warn'>,
 ): Promise<ControlDocument[]> {
-  const controls: ControlDocument[] = [];
+  const byControl = new Map<string, RequirementRef[]>();
   for (const r of requirements) {
-    try {
-      const doc = await client.controlRequirement(
-        r.domain,
-        r.control,
-        r.version,
-      );
-      controls.push({ ...r, doc });
-    } catch (e) {
-      if (e instanceof CalmHubError && e.status === 404) {
-        logger.warn(
-          `CALM catalog: control ${r.domain}/${r.control} ${r.version} skipped, not in CALM Hub (referenced as ${r.url})`,
+    const key = `${r.domain}/${r.control}`;
+    const versions = byControl.get(key) ?? [];
+    if (!versions.some(v => v.version === r.version)) {
+      versions.push(r);
+    }
+    byControl.set(key, versions);
+  }
+
+  const controls: ControlDocument[] = [];
+  for (const [key, versions] of byControl) {
+    versions.sort((a, b) => compareVersions(b.version, a.version));
+    const missing: RequirementRef[] = [];
+    for (const r of versions) {
+      try {
+        const doc = await client.controlRequirement(
+          r.domain,
+          r.control,
+          r.version,
         );
-        continue;
+        controls.push({ ...r, doc });
+        break;
+      } catch (e) {
+        if (e instanceof CalmHubError && e.status === 404) {
+          missing.push(r);
+          continue;
+        }
+        throw e;
       }
-      throw e;
+    }
+    if (missing.length === versions.length) {
+      logger.warn(
+        `CALM catalog: control ${key} skipped, no referenced version is in CALM Hub (${missing
+          .map(r => `${r.version} as ${r.url}`)
+          .join(', ')})`,
+      );
+    } else if (missing.length) {
+      logger.warn(
+        `CALM catalog: control ${key} ${missing
+          .map(r => r.version)
+          .join(', ')} not in CALM Hub; using ${
+          versions[missing.length].version
+        }`,
+      );
     }
   }
   return controls;

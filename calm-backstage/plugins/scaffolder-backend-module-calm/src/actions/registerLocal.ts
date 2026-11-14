@@ -1,8 +1,12 @@
 import path from 'node:path';
-import { resolveSafeChildPath } from '@backstage/backend-plugin-api';
+import {
+  type AuthService,
+  resolveSafeChildPath,
+} from '@backstage/backend-plugin-api';
 import { stringifyEntityRef } from '@backstage/catalog-model';
 import type { CatalogService } from '@backstage/plugin-catalog-node';
 import { createTemplateAction } from '@backstage/plugin-scaffolder-node';
+import { assertClaimable, fileLocationRef, lookUpClaim } from './catalogClaim';
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
@@ -36,6 +40,7 @@ export function isConflict(e: unknown): boolean {
  */
 export function createCalmRegisterLocalAction(options: {
   catalog: CatalogService;
+  auth: Pick<AuthService, 'getOwnServiceCredentials'>;
   localDir: string;
 }) {
   return createTemplateAction({
@@ -85,27 +90,23 @@ export function createCalmRegisterLocalAction(options: {
         throw new Error(`No entity in ${target}`);
       }
       const entityRef = stringifyEntityRef(entity);
-      const wanted = `file:${target}`;
+      const wanted = fileLocationRef(target);
 
-      const existing = await options.catalog.getEntityByRef(entityRef, {
-        credentials,
-      });
-      const existingLocation =
-        existing?.metadata.annotations?.['backstage.io/managed-by-location'];
-      if (existing && existingLocation === wanted) {
+      // Throws if the catalog holds the entity from elsewhere: fail before adding a location it could not claim.
+      if (
+        assertClaimable(
+          await lookUpClaim(options, entityRef),
+          wanted,
+          entityRef,
+        )
+      ) {
         // Read already, e.g. by the catalog.locations glob over the publish folder.
         ctx.logger.info(
-          `The catalog already holds ${entityRef} from ${wanted} (origin ${existing.metadata.annotations?.['backstage.io/managed-by-origin-location']})`,
+          `The catalog already holds ${entityRef} from ${wanted}`,
         );
         ctx.output('entityRef', entityRef);
         ctx.output('locationTarget', wanted);
         return;
-      }
-      if (existing) {
-        // Fail before adding the location: a location whose entity the catalog cannot claim would stay registered.
-        throw new Error(
-          `${entityRef} already exists in the catalog, from ${existingLocation}; the new location cannot claim it`,
-        );
       }
 
       ctx.logger.info(`Registering file:${target} (${entityRef})`);
@@ -123,19 +124,15 @@ export function createCalmRegisterLocalAction(options: {
 
       const deadline = Date.now() + (ctx.input.waitSeconds ?? 30) * 1000;
       for (;;) {
-        const found = await options.catalog.getEntityByRef(entityRef, {
-          credentials,
-        });
-        const location =
-          found?.metadata.annotations?.['backstage.io/managed-by-location'];
-        if (found && location === wanted) {
+        if (
+          assertClaimable(
+            await lookUpClaim(options, entityRef),
+            wanted,
+            entityRef,
+          )
+        ) {
           ctx.logger.info(`The catalog holds ${entityRef} (from ${wanted})`);
           break;
-        }
-        if (found && location !== wanted) {
-          throw new Error(
-            `${entityRef} already exists in the catalog, from ${location}; the new location cannot claim it`,
-          );
         }
         if (Date.now() > deadline) {
           ctx.logger.warn(
