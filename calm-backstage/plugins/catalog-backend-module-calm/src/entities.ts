@@ -36,11 +36,19 @@ export interface ControlDocument {
   doc: any;
 }
 
-/** A bundle from config plus its calm-backstage.json. */
+/**
+ * A template bundle and its calm-backstage.json: from the OCI bundle registry (`ref` and `digest`) or from a local
+ * folder in `calm.bundles` (`path`).
+ */
 export interface BundleInfo {
   name: string;
   version: string;
-  path: string;
+  /** Absolute path of a local bundle folder. */
+  path?: string;
+  /** OCI reference of a registry bundle, e.g. `localhost:5050/calm-bundles/web-service:2.0.0`. */
+  ref?: string;
+  /** Digest of the registry bundle's manifest (`sha256:…`). */
+  digest?: string;
   description?: string;
   pattern?: {
     namespace?: string;
@@ -174,11 +182,14 @@ function bundleEntity(b: BundleInfo, hubUrl: string): Entity {
     metadata: {
       name: bundleEntityName(b.name, b.version),
       title: `${b.name} ${b.version}`,
-      description:
-        b.description ?? `CALM template bundle ${b.name} ${b.version}`,
+      description: `${
+        b.description ?? `CALM template bundle ${b.name} ${b.version}`
+      }${b.ref ? `\n\nStored in the OCI bundle registry as ${b.ref}.` : ''}`,
       annotations: {
         [ANN.bundle]: b.name,
         [ANN.bundleVersion]: b.version,
+        ...(b.ref ? { [ANN.bundleRef]: b.ref } : {}),
+        ...(b.digest ? { [ANN.bundleDigest]: b.digest } : {}),
         [ANN.hubUrl]: hubUrl,
         ...(p?.namespace ? { [ANN.namespace]: p.namespace } : {}),
         ...(p?.patternId ? { [ANN.pattern]: p.patternId } : {}),
@@ -396,7 +407,7 @@ export function templateEntity(
   };
 }
 
-/** Render with the chosen bundle, publish to the local output folder and register the new service. */
+/** Render with the chosen bundle (pulled from the bundle registry, or a local folder), publish to the local output folder and register the new service. */
 function publishSteps(p: HubDocument): object[] {
   return [
     {
@@ -421,6 +432,9 @@ function publishSteps(p: HubDocument): object[] {
         patternId: p.id,
         patternVersion: p.version,
         bundle: '${{ parameters.bundle }}',
+        // Set when calm:template pulled the bundle from the registry; empty for a local folder.
+        bundleRef: '${{ steps.template.output.bundleRef }}',
+        bundleDigest: '${{ steps.template.output.bundleDigest }}',
       },
     },
     {

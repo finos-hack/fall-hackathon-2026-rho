@@ -232,11 +232,14 @@ calm:
   # Hub namespaces the catalog provider reads (the Hub also holds upstream demo namespaces)
   namespaces: [hackathon]
   refreshSeconds: 60
-  # Template bundles; paths are relative to the backend process (packages/backend).
-  # The pattern a bundle fits comes from its calm-backstage.json.
-  bundles:
-    - { name: web-service, version: 1.0.0, path: ../../bundles/web-service/1.0.0 }
-    - { name: web-service, version: 2.0.0, path: ../../bundles/web-service/2.0.0 }
+  # Template bundles live in the OCI registry (hub/docker-compose.yml) as <repositoryPrefix>/<name>:<version>;
+  # `yarn bundles:push` pushes bundles/<name>/<version>. The pattern a bundle fits comes from its calm-backstage.json.
+  bundleRegistry:
+    url: http://localhost:5050
+    repositoryPrefix: calm-bundles
+  # While authoring a bundle, a local folder can stand in for the registry (path relative to packages/backend):
+  # bundles:
+  #   - { name: web-service, version: 2.1.0, path: ../../bundles/web-service/2.1.0 }
   publish:
     # calm:publish:local writes new services to <localDir>/<name> (relative to packages/backend; git-ignored)
     localDir: ../../output

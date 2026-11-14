@@ -13,6 +13,10 @@ export const CALM_ANNOTATIONS = {
   /** Template bundle name, e.g. `web-service`. */
   bundle: 'calm.finos.org/bundle',
   bundleVersion: 'calm.finos.org/bundle-version',
+  /** OCI reference of a bundle in the bundle registry, e.g. `localhost:5050/calm-bundles/web-service:2.0.0`. */
+  bundleRef: 'calm.finos.org/bundle-ref',
+  /** Digest of the bundle's OCI manifest (`sha256:…`): the exact content behind `bundle-ref` at the time. */
+  bundleDigest: 'calm.finos.org/bundle-digest',
   /** On a service created from a pattern: its architecture file, relative to `catalog-info.yaml`. */
   architectureFile: 'calm.finos.org/architecture-file',
   /** Base URL of the CALM Hub the entity was read from. */

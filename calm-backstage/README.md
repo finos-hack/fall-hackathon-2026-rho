@@ -13,7 +13,7 @@ You need Docker, Node 26 and the repository's own Yarn (`.yarn/releases`, picked
 
 ```sh
 yarn install
-yarn hub:up && yarn hub:seed    # CALM Hub on http://localhost:8090, seeded from seed/
+yarn hub:up && yarn hub:seed    # CALM Hub on http://localhost:8090 (seeded from seed/), bundle registry on 5050
 yarn start                      # Backstage on http://localhost:3100 (backend on 7107)
 ```
 
@@ -51,26 +51,27 @@ the compose services. `output/` is git-ignored, and services in it come back int
 | Package | Role |
 |---|---|
 | `plugins/calm-common` | Types, annotation and entity names, pattern options reader, placeholder scanner and filler, read-only Hub client, CALM → Mermaid transform |
-| `plugins/calm-node` | Runs the published `@finos/calm-cli` 1.71.0 (`generate`, `validate`, `template`) with the backend's own Node |
+| `plugins/calm-node` | Runs the published `@finos/calm-cli` 1.71.0 (`generate`, `validate`, `template`) with the backend's own Node; pushes and pulls template bundles as OCI artifacts (`oci.ts`) |
 | `plugins/catalog-backend-module-calm` | Entity provider: reads the Hub namespaces in `calm.namespaces` and emits architectures, patterns, controls, bundles and one Template per pattern |
 | `plugins/scaffolder-backend-module-calm` | Actions `calm:generate`, `calm:fill`, `calm:validate`, `calm:template`, `calm:publish:local`, `calm:register:local` |
 | `plugins/calm-backend` | Routes `POST /api/calm/placeholders`, `GET /api/calm/architecture`, `GET /api/calm/pattern` |
 | `plugins/calm` | Frontend: architecture and pattern entity cards, the `CalmPlaceholders` form field |
-| `hub/` | CALM Hub (`finos/calm-hub:latest`, `no-auth`) and MongoDB in Docker; `seed.sh` (idempotent) |
+| `hub/` | CALM Hub (`finos/calm-hub:latest`, `no-auth`), MongoDB and an OCI registry (`registry:2`, port 5050) in Docker; `seed.sh` and `push-bundles.cjs` (both idempotent) |
 | `seed/` | Our pattern with a `oneOf` and an `anyOf` decision, two architectures, controls in domain `hackathon-security` |
-| `bundles/web-service/{1.0.0,2.0.0}` | Template bundles; `calm-backstage.json` names the pattern each one fits |
+| `bundles/web-service/<version>` | Template bundles; `calm-backstage.json` names the pattern each one fits. `yarn bundles:push` (part of `yarn hub:seed`) pushes them to the registry as `localhost:5050/calm-bundles/<name>:<version>`, which is where Backstage reads them |
 
 All CALM logic comes from published packages: the actions run the CLI, and the small parts the CLI does not offer as
 an API (options reader, Hub client, Mermaid transform, placeholders) live in `calm-common`. `FINDINGS.md` lists them
 as requests to the CALM project.
 
-Settings are under `calm:` in `app-config.yaml` (`hubUrl`, `namespaces`, `bundles`, `publish.localDir`).
+Settings are under `calm:` in `app-config.yaml` (`hubUrl`, `namespaces`, `bundleRegistry`, `publish.localDir`; `bundles`
+names local bundle folders while authoring).
 
 ## Checks
 
 ```sh
 yarn tsc
-yarn test            # calm-common: options reader, Hub client, placeholders, Mermaid transform
+yarn test            # options reader, Hub client, placeholders, Mermaid transform, OCI client, bundle reading
 yarn build:backend
 ```
 

@@ -30,6 +30,7 @@ export const catalogModuleCalm = createBackendModule({
           return;
         }
         const seconds = calm.getOptionalNumber('refreshSeconds') ?? 60;
+        const registry = calm.getOptionalConfig('bundleRegistry');
         catalog.addEntityProvider(
           new CalmEntityProvider(
             {
@@ -44,6 +45,14 @@ export const catalogModuleCalm = createBackendModule({
                   path: b.getString('path'),
                 }),
               ),
+              bundleRegistry: registry
+                ? {
+                    url: registry.getString('url'),
+                    repositoryPrefix:
+                      registry.getOptionalString('repositoryPrefix') ??
+                      'calm-bundles',
+                  }
+                : undefined,
             },
             scheduler.createScheduledTaskRunner({
               frequency: { seconds },

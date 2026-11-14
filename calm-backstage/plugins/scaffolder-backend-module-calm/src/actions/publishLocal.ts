@@ -34,6 +34,9 @@ export function serviceEntity(opts: {
   patternVersion: string;
   bundleName: string;
   bundleVersion: string;
+  /** OCI reference and manifest digest of the bundle, when it was pulled from the bundle registry. */
+  bundleRef?: string;
+  bundleDigest?: string;
   description?: string;
 }): Entity {
   return {
@@ -56,6 +59,8 @@ export function serviceEntity(opts: {
         [ANN.patternVersion]: opts.patternVersion,
         [ANN.bundle]: opts.bundleName,
         [ANN.bundleVersion]: opts.bundleVersion,
+        ...(opts.bundleRef ? { [ANN.bundleRef]: opts.bundleRef } : {}),
+        ...(opts.bundleDigest ? { [ANN.bundleDigest]: opts.bundleDigest } : {}),
         [ANN.architectureFile]: `./${ARCHITECTURE_FILE}`,
       },
       tags: ['calm', 'calm-service'],
@@ -116,6 +121,20 @@ export function createCalmPublishLocalAction(options: {
         patternVersion: z => z.string().describe('Pattern version'),
         bundle: z =>
           z.string().describe('Template bundle as `<name>@<version>`'),
+        bundleRef: z =>
+          z
+            .string()
+            .optional()
+            .describe(
+              'OCI reference the bundle was pulled from (calm:template output bundleRef); recorded as calm.finos.org/bundle-ref',
+            ),
+        bundleDigest: z =>
+          z
+            .string()
+            .optional()
+            .describe(
+              'Manifest digest of the bundle (calm:template output bundleDigest); recorded as calm.finos.org/bundle-digest',
+            ),
         owner: z =>
           z
             .string()
@@ -217,6 +236,9 @@ export function createCalmPublishLocalAction(options: {
         patternVersion,
         bundleName: bundle.name,
         bundleVersion: bundle.version,
+        // Empty when the bundle came from a local folder: then nothing is recorded.
+        bundleRef: ctx.input.bundleRef || undefined,
+        bundleDigest: ctx.input.bundleDigest || undefined,
       });
       const catalogInfoPath = path.join(target, CATALOG_INFO_FILE);
       await fs.writeFile(catalogInfoPath, YAML.stringify(entity));
