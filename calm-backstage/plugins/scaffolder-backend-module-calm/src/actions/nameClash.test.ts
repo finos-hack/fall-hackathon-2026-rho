@@ -84,6 +84,7 @@ describe('calm:publish:local', () => {
       catalog: catalog as any,
       auth,
       localDir,
+      namespacePrefix: 'calm-',
     });
 
     await expect(
@@ -105,6 +106,7 @@ describe('calm:publish:local', () => {
       catalog: catalog as any,
       auth,
       localDir,
+      namespacePrefix: 'calm-',
     });
 
     await expect(
@@ -124,6 +126,7 @@ describe('calm:publish:local', () => {
       catalog: fakeCatalog([entity]) as any,
       auth,
       localDir,
+      namespacePrefix: 'calm-',
     });
 
     await expect(
@@ -136,6 +139,7 @@ describe('calm:publish:local', () => {
       catalog: fakeCatalog() as any,
       auth,
       localDir,
+      namespacePrefix: 'calm-',
     });
     const ctx = context(publishInput, workspace);
 
@@ -163,6 +167,7 @@ describe('calm:publish:local', () => {
       catalog: fakeCatalog([component('orders-service', own)]) as any,
       auth,
       localDir,
+      namespacePrefix: 'calm-',
     });
     await fs.mkdir(path.join(localDir, 'orders-service'), { recursive: true });
 
