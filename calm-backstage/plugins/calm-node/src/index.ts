@@ -63,6 +63,7 @@ export {
   pullBundleCached,
   pushBundle,
   readBundleConfig,
+  readBundleManifest,
   resolveBundleDigest,
   sha256Digest,
   type OciDescriptor,
