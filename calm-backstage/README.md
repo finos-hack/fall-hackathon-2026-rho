@@ -54,15 +54,16 @@ The ports keep clear of other local Backstage and Hub instances on 3000, 7007, 8
 
 ![Service page of a deployed service, with its deployment recorded in CALM Hub](docs/demo/hub-recorded-service.png)
 
-Two recordings walk through this (the first is also on YouTube: https://youtu.be/XhFmQQTT6-k):
+Two recordings walk through this:
 
-- `docs/demo/calm-backstage-deploy-demo.webm` (135 s): the whole flow, ending with a service deployed to the local
-  cluster, its network policies on the card, its pods on the Kubernetes tab, and its architecture and deployment
-  in CALM Hub's own UI.
-- `docs/demo/calm-backstage-demo.webm` (78 s): the first part only, without the registry and the deployment.
+- [The full walkthrough](https://youtu.be/XhFmQQTT6-k) (135 s, YouTube): the whole flow, ending with a service
+  deployed to the local cluster, its network policies on the card, its pods on the Kubernetes tab, and its
+  architecture and deployment in CALM Hub's own UI.
+- [The first walkthrough](https://youtu.be/zQ1cLPv3Fmk) (78 s, YouTube; also `docs/demo/calm-backstage-demo.webm`):
+  the first part only, without the registry and the deployment.
 
-To record the first one again with the Hub, the cluster and Backstage running:
-`node docs/demo/record-demo.cjs <new-service-name>`.
+To record the full walkthrough again with the Hub, the cluster and Backstage running:
+`node docs/demo/record-demo.cjs <new-service-name>` (it prints where the `.webm` is).
 
 Bundle 2.0.0 renders a `Dockerfile` and a `deploy/` folder that 1.0.0 does not; the data store and add-ons change
 the compose services. `output/` is git-ignored, and services in it come back into the catalog after a restart.

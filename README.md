@@ -1,6 +1,6 @@
 # CALM Backstage
 
-**Hackathon Track:** _to be confirmed_
+**Hackathon Track:** CALM
 
 FINOS [CALM](https://calm.finos.org) architectures in [Backstage](https://backstage.io). Developers see the CALM
 architectures from CALM Hub in the Backstage catalog and see each architecture as a diagram on its service page. They
