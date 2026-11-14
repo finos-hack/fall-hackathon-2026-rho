@@ -7,6 +7,7 @@ import {
   bundleRef,
   listRepositories,
   listTags,
+  OciError,
   readBundleConfig,
 } from '@internal/backstage-plugin-calm-node';
 import type { BundleInfo } from './entities';
@@ -37,6 +38,12 @@ type TagRead = BundleTag & { ref: string } & (
   );
 
 const tagKey = (t: BundleTag) => `${t.name}@${t.version}`;
+
+/**
+ * The registry answered that the tag's manifest or config is not there (404): the tag is listed but gone, as some
+ * registries leave it after a delete, so an earlier copy must not stand in for it.
+ */
+const isGone = (e: unknown) => e instanceof OciError && e.status === 404;
 
 /** Lists the registry and reads every tag at once; throws when the registry cannot be listed. */
 async function readTags(
@@ -86,7 +93,8 @@ export async function readRegistryBundles(
 
 /**
  * The bundles that were read, in the registry's order. A tag that could not be read takes its entry in `previous`
- * when there is one (the copy of an earlier read, with a warning saying so) and is otherwise left out.
+ * when there is one (the copy of an earlier read, with a warning saying so) and is otherwise left out; so is a tag
+ * whose read got a 404.
  */
 function collect(
   tags: TagRead[],
@@ -101,7 +109,7 @@ function collect(
       continue;
     }
     unread.push({ name: tag.name, version: tag.version });
-    const kept = previous.get(tagKey(tag));
+    const kept = isGone(tag.error) ? undefined : previous.get(tagKey(tag));
     if (kept) {
       bundles.push(kept);
       warnings.push(
@@ -117,8 +125,8 @@ function collect(
 /**
  * Reads the registry on each call and keeps the bundles of the last read that worked. When the registry cannot be
  * listed it gives those instead, with `failed` set, so a registry restart does not empty the catalog's bundles. When
- * it can be listed but a tag cannot be read, that tag keeps its bundle from the last read (with a warning); a tag
- * the registry no longer lists is dropped.
+ * it can be listed but a tag cannot be read, that tag keeps its bundle from the last read (with a warning). A tag
+ * the registry no longer lists, or whose manifest or config it answers with 404, is dropped.
  */
 export function lastGoodRegistryReader(
   registry: BundleRegistrySettings,
@@ -175,11 +183,10 @@ export function mergeBundles(
   local: BundleInfo[],
   registry: BundleInfo[],
 ): { bundles: BundleInfo[]; replaced: string[] } {
-  const key = (b: BundleInfo) => `${b.name}@${b.version}`;
-  const inLocal = new Set(local.map(key));
-  const replaced = registry.map(key).filter(k => inLocal.has(k));
+  const inLocal = new Set(local.map(tagKey));
+  const replaced = registry.map(tagKey).filter(k => inLocal.has(k));
   return {
-    bundles: [...local, ...registry.filter(b => !inLocal.has(key(b)))],
+    bundles: [...local, ...registry.filter(b => !inLocal.has(tagKey(b)))],
     replaced,
   };
 }

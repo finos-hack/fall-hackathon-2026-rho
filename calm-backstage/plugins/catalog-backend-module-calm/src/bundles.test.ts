@@ -1,4 +1,5 @@
 import { CALM_ANNOTATIONS as ANN } from '@internal/backstage-plugin-calm-common';
+import { OciError } from '@internal/backstage-plugin-calm-node';
 import {
   BundleRegistryClient,
   mergeBundles,
@@ -180,6 +181,41 @@ describe('lastGoodRegistryReader', () => {
     const second = await read();
     expect(second.bundles.map(b => b.version)).toEqual(['2.0.0']);
     expect(second.warnings).toEqual([]);
+  });
+
+  it('drops a bundle whose tag is still listed but whose manifest the registry answers with 404', async () => {
+    let state: 'up' | 'gone' | 'down' = 'up';
+    const manifest =
+      'http://localhost:5050/v2/calm-bundles/web-service/manifests/1.0.0';
+    const read = lastGoodRegistryReader(
+      registry,
+      fakeClient({
+        listRepositories: async () => {
+          if (state === 'down') {
+            throw new Error('connect ECONNREFUSED');
+          }
+          return ['calm-bundles/web-service'];
+        },
+        readBundleConfig: async ref => {
+          if (state !== 'up' && ref.endsWith(':1.0.0')) {
+            throw new OciError(404, manifest, `GET ${manifest} -> 404`);
+          }
+          return { digest: `sha256:${ref.slice(-5)}`, config: {} };
+        },
+      }),
+    );
+    await read();
+
+    state = 'gone';
+    const second = await read();
+    expect(second.bundles.map(b => b.version)).toEqual(['2.0.0']);
+    expect(second.warnings).toEqual([
+      `bundle localhost:5050/calm-bundles/web-service:1.0.0 skipped: OciError: GET ${manifest} -> 404`,
+    ]);
+
+    // Nor does a later listing failure bring it back.
+    state = 'down';
+    expect((await read()).bundles).toEqual(second.bundles);
   });
 
   it('leaves out a bundle that cannot be read and was never read before', async () => {
