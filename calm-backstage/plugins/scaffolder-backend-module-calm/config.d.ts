@@ -23,5 +23,22 @@ export interface Config {
        */
       localDir?: string;
     };
+    deploy?: {
+      /**
+       * The one Kubernetes cluster calm:image:build and calm:deploy:k8s work on (the local minikube profile started
+       * by `yarn k8s:up`), also read by calm-backend for the architecture card. Without `kubeconfig` and `context`
+       * both actions refuse to run: the user's default kubeconfig and current context are never used.
+       */
+      kubernetes?: {
+        /** Kubeconfig file, relative to the backend's working directory (packages/backend), e.g. ../../.kube/config. */
+        kubeconfig?: string;
+        /** Context in that file; passed to every kubectl call. */
+        context?: string;
+        /** minikube profile whose image store calm:image:build builds into. Default: the context. */
+        minikubeProfile?: string;
+        /** A service <name> is deployed to the namespace <namespacePrefix><name>. Default: calm-. */
+        namespacePrefix?: string;
+      };
+    };
   };
 }

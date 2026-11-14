@@ -243,6 +243,15 @@ calm:
   publish:
     # calm:publish:local writes new services to <localDir>/<name> (relative to packages/backend; git-ignored)
     localDir: ../../output
+  deploy:
+    # calm:image:build and calm:deploy:k8s work only on this cluster: the minikube profile `yarn k8s:up` starts, through
+    # its own kubeconfig (relative to packages/backend; git-ignored). They never use your default kubeconfig or context.
+    kubernetes:
+      kubeconfig: ../../.kube/config
+      context: calm-backstage
+      minikubeProfile: calm-backstage
+      # A service <name> is deployed to the namespace <namespacePrefix><name>
+      namespacePrefix: calm-
 
 kubernetes:
   # see https://backstage.io/docs/features/kubernetes/configuration for kubernetes configuration options

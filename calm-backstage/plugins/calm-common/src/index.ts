@@ -12,3 +12,4 @@ export * from './hubClient';
 export * from './placeholders';
 export * from './entityNames';
 export * from './mermaid';
+export * from './deploy';

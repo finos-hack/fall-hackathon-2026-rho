@@ -12,7 +12,13 @@ import { createCalmValidateAction } from './actions/validate';
 import { createCalmTemplateAction } from './actions/template';
 import { createCalmPublishLocalAction } from './actions/publishLocal';
 import { createCalmRegisterLocalAction } from './actions/registerLocal';
-import { calmBin } from '@internal/backstage-plugin-calm-node';
+import { createCalmImageBuildAction } from './actions/imageBuild';
+import { createCalmDeployK8sAction } from './actions/deployK8s';
+import {
+  DEFAULT_NAMESPACE_PREFIX,
+  calmBin,
+  readKubernetesDeploySettings,
+} from '@internal/backstage-plugin-calm-node';
 
 export const scaffolderModuleCalm = createBackendModule({
   pluginId: 'scaffolder',
@@ -54,6 +60,13 @@ export const scaffolderModuleCalm = createBackendModule({
         const localDir = path.resolve(
           config.getOptionalString('calm.publish.localDir') ?? '../../output',
         );
+        // The one cluster calm:image:build and calm:deploy:k8s work on; without it both refuse to run.
+        const kubernetes = readKubernetesDeploySettings(config);
+        logger.info(
+          kubernetes
+            ? `calm:image:build and calm:deploy:k8s use kubeconfig ${kubernetes.kubeconfig}, context ${kubernetes.context}, minikube profile ${kubernetes.minikubeProfile}, namespaces ${kubernetes.namespacePrefix}<name>`
+            : 'calm:image:build and calm:deploy:k8s: no calm.deploy.kubernetes kubeconfig and context, so both refuse to run',
+        );
         logger.info(`calm CLI bin: ${process.execPath} ${calmBin()}`);
         logger.info(`calm:publish:local writes to ${localDir}`);
         logger.info(
@@ -66,7 +79,15 @@ export const scaffolderModuleCalm = createBackendModule({
           createCalmFillAction(),
           createCalmValidateAction({ hubUrl }),
           createCalmTemplateAction({ bundles, registry, cacheDir }),
-          createCalmPublishLocalAction({ catalog, auth, localDir }),
+          createCalmPublishLocalAction({
+            catalog,
+            auth,
+            localDir,
+            namespacePrefix:
+              kubernetes?.namespacePrefix ?? DEFAULT_NAMESPACE_PREFIX,
+          }),
+          createCalmImageBuildAction({ settings: kubernetes, localDir }),
+          createCalmDeployK8sAction({ settings: kubernetes, localDir }),
           createCalmRegisterLocalAction({ catalog, auth, localDir }),
         );
       },
