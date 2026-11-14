@@ -136,7 +136,11 @@ function GitopsSection(props: {
         Git and Flux
       </Typography>
       <Typography variant="body2">
-        {g.repoUrl ? <Link to={g.repoUrl}>Git repository</Link> : 'Git repository'}{' '}
+        {g.repoUrl ? (
+          <Link to={g.repoUrl}>Git repository</Link>
+        ) : (
+          'Git repository'
+        )}{' '}
         deployed by the Flux Kustomization <code>{g.kustomization}</code>:{' '}
         <Chip
           size="small"

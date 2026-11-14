@@ -302,12 +302,15 @@ describe('bundles in a registry', () => {
       dir: bundleDir,
       ref,
       annotations: {
-        'org.opencontainers.image.source': 'http://localhost:3300/calm-templates/bundles/src/commit/abc/web-service/2.0.0',
+        'org.opencontainers.image.source':
+          'http://localhost:3300/calm-templates/bundles/src/commit/abc/web-service/2.0.0',
         'org.opencontainers.image.revision': 'abc',
       },
     });
     const manifest = JSON.parse(
-      registry.manifests.get('calm-bundles/web-service:2.0.0')!.body.toString('utf8'),
+      registry.manifests
+        .get('calm-bundles/web-service:2.0.0')!
+        .body.toString('utf8'),
     );
     expect(manifest.annotations).toMatchObject({
       'org.opencontainers.image.version': '2.0.0',
@@ -318,7 +321,9 @@ describe('bundles in a registry', () => {
   it('with immutable, skips an identical layer without touching the manifest', async () => {
     const ref = `${host}/calm-bundles/web-service:2.0.0`;
     const first = await pushBundle({ dir: bundleDir, ref });
-    const before = registry.manifests.get('calm-bundles/web-service:2.0.0')!.body;
+    const before = registry.manifests.get(
+      'calm-bundles/web-service:2.0.0',
+    )!.body;
     const again = await pushBundle({
       dir: bundleDir,
       ref,
@@ -326,14 +331,18 @@ describe('bundles in a registry', () => {
       annotations: { 'org.opencontainers.image.revision': 'new' },
     });
     expect(again).toEqual({ ref, digest: first.digest, skipped: true });
-    expect(registry.manifests.get('calm-bundles/web-service:2.0.0')!.body).toEqual(before);
+    expect(
+      registry.manifests.get('calm-bundles/web-service:2.0.0')!.body,
+    ).toEqual(before);
   });
 
   it('with immutable, refuses different content for an existing tag', async () => {
     const ref = `${host}/calm-bundles/web-service:2.0.0`;
     await pushBundle({ dir: bundleDir, ref });
     await fs.writeFile(path.join(bundleDir, 'index.json'), '{"changed":true}');
-    await expect(pushBundle({ dir: bundleDir, ref, immutable: true })).rejects.toThrow(
+    await expect(
+      pushBundle({ dir: bundleDir, ref, immutable: true }),
+    ).rejects.toThrow(
       /already published with different content; publish a new version/,
     );
   });

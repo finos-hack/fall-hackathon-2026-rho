@@ -56,7 +56,10 @@ export function gitopsInfo(
 ): GitopsInfo {
   const status = readFluxStatus(obj);
   const commit = revisionCommit(status.appliedRevision);
-  const repo = repoUrl && /^https?:\/\//.test(repoUrl) ? repoUrl.replace(/\/+$/, '') : undefined;
+  const repo =
+    repoUrl && /^https?:\/\//.test(repoUrl)
+      ? repoUrl.replace(/\/+$/, '')
+      : undefined;
   return {
     kustomization: `${ks.namespace}/${ks.name}`,
     ready: status.ready,
@@ -81,7 +84,16 @@ export async function readGitops(
     await requireKubernetesDeploy(settings);
     const { stdout } = await runKubectl(
       settings,
-      ['-n', ks.namespace, 'get', 'kustomization', ks.name, '--ignore-not-found', '-o', 'json'],
+      [
+        '-n',
+        ks.namespace,
+        'get',
+        'kustomization',
+        ks.name,
+        '--ignore-not-found',
+        '-o',
+        'json',
+      ],
       {
         cwd: process.cwd(),
         logger,
@@ -92,10 +104,16 @@ export async function readGitops(
     if (!stdout.trim()) {
       return undefined;
     }
-    return gitopsInfo(ks, JSON.parse(stdout), entity.metadata.annotations?.[ANN.gitRepo]);
+    return gitopsInfo(
+      ks,
+      JSON.parse(stdout),
+      entity.metadata.annotations?.[ANN.gitRepo],
+    );
   } catch (e) {
     logger.warn(
-      `The Flux status of ${entity.metadata.name} was not read: ${(e as Error).message ?? e}`,
+      `The Flux status of ${entity.metadata.name} was not read: ${
+        (e as Error).message ?? e
+      }`,
     );
     return undefined;
   }

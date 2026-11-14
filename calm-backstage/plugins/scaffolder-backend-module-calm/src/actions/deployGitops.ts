@@ -58,8 +58,7 @@ export async function waitForKustomization(
 ): Promise<FluxStatus> {
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const pollMs = opts.pollMs ?? DEFAULT_POLL_MS;
-  const sleep =
-    opts.sleep ?? (ms => new Promise<void>(r => setTimeout(r, ms)));
+  const sleep = opts.sleep ?? (ms => new Promise<void>(r => setTimeout(r, ms)));
   const now = opts.now ?? Date.now;
   const name = fluxObjectName(service);
   const deadline = now() + timeoutMs;
@@ -67,7 +66,16 @@ export async function waitForKustomization(
   let lastMessage = '';
   for (;;) {
     const text = await kubectl(
-      ['-n', FLUX_NAMESPACE, 'get', 'kustomization', name, '--ignore-not-found', '-o', 'json'],
+      [
+        '-n',
+        FLUX_NAMESPACE,
+        'get',
+        'kustomization',
+        name,
+        '--ignore-not-found',
+        '-o',
+        'json',
+      ],
       true,
     );
     last = text.trim()
@@ -104,7 +112,11 @@ export function createCalmDeployGitopsAction(options: {
   localDir: string;
   /** For tests: kubectl, and the Flux wait's timing. */
   kubectl?: (settings: KubernetesDeploySettings, cwd: string) => Kubectl;
-  wait?: { timeoutMs?: number; pollMs?: number; sleep?: (ms: number) => Promise<void> };
+  wait?: {
+    timeoutMs?: number;
+    pollMs?: number;
+    sleep?: (ms: number) => Promise<void>;
+  };
 }) {
   return createTemplateAction({
     id: 'calm:deploy:gitops',
@@ -119,7 +131,9 @@ export function createCalmDeployGitopsAction(options: {
               'The service working copy (calm:publish:local output path), inside calm.publish.localDir',
             ),
         name: z =>
-          z.string().describe('Service name: names the namespace and the Flux objects'),
+          z
+            .string()
+            .describe('Service name: names the namespace and the Flux objects'),
         image: z =>
           z.string().describe('Image for the service, as <name>:<tag>'),
       },
@@ -190,7 +204,9 @@ export function createCalmDeployGitopsAction(options: {
       );
       // From now on the service is deployed from Git: the catalog and the upgrade Template find it by this.
       const catalogInfo = path.join(dir, CATALOG_INFO_FILE);
-      const info = await fs.readFile(catalogInfo, 'utf-8').catch(() => undefined);
+      const info = await fs
+        .readFile(catalogInfo, 'utf-8')
+        .catch(() => undefined);
       if (info !== undefined) {
         await fs.writeFile(catalogInfo, withGitopsAnnotations(info, name));
       }
@@ -229,7 +245,10 @@ export function createCalmDeployGitopsAction(options: {
         `${FLUX_RECONCILE_ANNOTATION}=${new Date().toISOString()}`,
       ]);
       ctx.logger.info(
-        `Waiting for Flux to apply ${commit.slice(0, 12)} (${FLUX_NAMESPACE}/${fluxName})`,
+        `Waiting for Flux to apply ${commit.slice(
+          0,
+          12,
+        )} (${FLUX_NAMESPACE}/${fluxName})`,
       );
       await waitForKustomization(kubectl, name, commit, {
         ...options.wait,
@@ -238,7 +257,9 @@ export function createCalmDeployGitopsAction(options: {
 
       const deployed = await listAndWaitForRollouts(kubectl, namespace);
       ctx.logger.info(
-        `Flux deployed ${name} at ${commit.slice(0, 12)} to ${settings.context} / ${namespace}: ${deployed.deployments.join(', ')}`,
+        `Flux deployed ${name} at ${commit.slice(0, 12)} to ${
+          settings.context
+        } / ${namespace}: ${deployed.deployments.join(', ')}`,
       );
       ctx.output('namespace', namespace);
       ctx.output('deployments', deployed.deployments);

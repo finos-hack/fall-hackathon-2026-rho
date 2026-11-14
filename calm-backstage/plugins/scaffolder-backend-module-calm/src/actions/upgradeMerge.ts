@@ -1,7 +1,10 @@
 import path from 'node:path';
 import { resolveSafeChildPath } from '@backstage/backend-plugin-api';
 import { createTemplateAction } from '@backstage/plugin-scaffolder-node';
-import { GiteaClient, deployNamespace } from '@internal/backstage-plugin-calm-common';
+import {
+  GiteaClient,
+  deployNamespace,
+} from '@internal/backstage-plugin-calm-common';
 import {
   GitopsSettings,
   KubernetesDeploySettings,
@@ -19,7 +22,11 @@ import {
 import { GITOPS_OVERLAY_HEADER, OVERLAY_DIR, writeOverlay } from './deployK8s';
 
 /** The pull request body: what changes, the files, and what happens after the merge. */
-export function pullRequestBody(o: { summary: string; diffStat: string; image: string }): string {
+export function pullRequestBody(o: {
+  summary: string;
+  diffStat: string;
+  image: string;
+}): string {
   return [
     o.summary,
     '',
@@ -55,11 +62,18 @@ export function createCalmUpgradeMergeAction(options: {
       'Sets the image on an upgrade branch, pushes it, opens a pull request on the Git server, merges it and brings main up to date.',
     schema: {
       input: {
-        dir: z => z.string().describe('The working copy (calm:upgrade:render output dir)'),
+        dir: z =>
+          z
+            .string()
+            .describe('The working copy (calm:upgrade:render output dir)'),
         name: z => z.string().describe('Service name: the repository'),
         branch: z => z.string().describe('The upgrade branch'),
         image: z => z.string().describe('The image to deploy after the merge'),
-        summary: z => z.string().optional().describe('What changes (calm:upgrade:render output summary)'),
+        summary: z =>
+          z
+            .string()
+            .optional()
+            .describe('What changes (calm:upgrade:render output summary)'),
       },
       output: {
         prUrl: z => z.string(),
@@ -81,7 +95,8 @@ export function createCalmUpgradeMergeAction(options: {
       if ((await gitCurrentBranch(dir, git)) !== branch) {
         throw new Error(`${dir} is not on the branch ${branch}`);
       }
-      const prefix = options.settings?.namespacePrefix ?? DEFAULT_NAMESPACE_PREFIX;
+      const prefix =
+        options.settings?.namespacePrefix ?? DEFAULT_NAMESPACE_PREFIX;
       await writeOverlay(
         dir,
         { name, namespace: deployNamespace(prefix, name), image },
@@ -91,13 +106,22 @@ export function createCalmUpgradeMergeAction(options: {
       const diffStat = await gitDiffStat(dir, gitops.branch, git);
       const repo = serviceRepository(gitops, name);
       // The upgrade branch is this action's own: a run that failed after pushing it left an older one there.
-      await gitPush(dir, repo.pushUrl, branch, gitops.auth, { ...git, force: true });
+      await gitPush(dir, repo.pushUrl, branch, gitops.auth, {
+        ...git,
+        force: true,
+      });
 
-      const gitea = options.gitea ?? new GiteaClient(gitops.gitUrl, gitops.auth);
+      const gitea =
+        options.gitea ?? new GiteaClient(gitops.gitUrl, gitops.auth);
       const summary = ctx.input.summary ?? 'Upgrade';
       const title = `Upgrade ${name}: ${summary.split('\n').join('; ')}`;
       const pr =
-        (await gitea.findOpenPullRequest(gitops.servicesOrg, name, branch, gitops.branch)) ??
+        (await gitea.findOpenPullRequest(
+          gitops.servicesOrg,
+          name,
+          branch,
+          gitops.branch,
+        )) ??
         (await gitea.createPullRequest(gitops.servicesOrg, name, {
           head: branch,
           base: gitops.branch,
@@ -108,10 +132,18 @@ export function createCalmUpgradeMergeAction(options: {
       // Gitea checks whether a new pull request can be merged in the background, and refuses until it knows.
       for (let attempt = 1; ; attempt++) {
         try {
-          await gitea.mergePullRequest(gitops.servicesOrg, name, pr.number, title);
+          await gitea.mergePullRequest(
+            gitops.servicesOrg,
+            name,
+            pr.number,
+            title,
+          );
           break;
         } catch (e) {
-          if (attempt >= (options.mergeAttempts ?? 6) || !/returned 405/.test(String(e))) {
+          if (
+            attempt >= (options.mergeAttempts ?? 6) ||
+            !/returned 405/.test(String(e))
+          ) {
             throw e;
           }
           ctx.logger.info(`Gitea cannot merge #${pr.number} yet; trying again`);

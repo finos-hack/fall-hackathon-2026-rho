@@ -22,7 +22,12 @@ async function load(file) {
   if (file) {
     return fs.readFileSync(file, 'utf8');
   }
-  const cache = path.resolve(__dirname, '..', '.kube', `flux-install-${FLUX_VERSION}.yaml`);
+  const cache = path.resolve(
+    __dirname,
+    '..',
+    '.kube',
+    `flux-install-${FLUX_VERSION}.yaml`,
+  );
   if (fs.existsSync(cache)) {
     return fs.readFileSync(cache, 'utf8');
   }
@@ -56,8 +61,12 @@ function dropped(doc) {
   // Without the notification controller, each event would be retried five times before giving up, which delays
   // every reconcile by about 15 s. No events address: the controllers then only log.
   for (const d of docs) {
-    for (const c of d.kind === 'Deployment' ? d.spec?.template?.spec?.containers ?? [] : []) {
-      c.args = (c.args ?? []).filter(a => !String(a).startsWith('--events-addr'));
+    for (const c of d.kind === 'Deployment'
+      ? d.spec?.template?.spec?.containers ?? []
+      : []) {
+      c.args = (c.args ?? []).filter(
+        a => !String(a).startsWith('--events-addr'),
+      );
     }
   }
   process.stdout.write(docs.map(d => `---\n${YAML.stringify(d)}`).join(''));

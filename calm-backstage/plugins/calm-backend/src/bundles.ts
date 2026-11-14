@@ -47,7 +47,9 @@ export function groupBundles(bundles: RegistryBundle[]): ExplorerBundle[] {
   }
   return [...byName.entries()]
     .map(([name, list]) => {
-      const versions = [...list].sort((a, b) => compareVersions(b.version, a.version));
+      const versions = [...list].sort((a, b) =>
+        compareVersions(b.version, a.version),
+      );
       return {
         name,
         kind: versions[0].kind,
@@ -57,9 +59,15 @@ export function groupBundles(bundles: RegistryBundle[]): ExplorerBundle[] {
           digest: v.digest,
           patterns: v.patterns,
           ...(v.size !== undefined ? { size: v.size } : {}),
-          ...(v.annotations[CREATED] ? { created: v.annotations[CREATED] } : {}),
-          ...(isHttp(v.annotations[SOURCE]) ? { source: v.annotations[SOURCE] } : {}),
-          ...(v.annotations[REVISION] ? { revision: v.annotations[REVISION] } : {}),
+          ...(v.annotations[CREATED]
+            ? { created: v.annotations[CREATED] }
+            : {}),
+          ...(isHttp(v.annotations[SOURCE])
+            ? { source: v.annotations[SOURCE] }
+            : {}),
+          ...(v.annotations[REVISION]
+            ? { revision: v.annotations[REVISION] }
+            : {}),
           ...(v.description ? { description: v.description } : {}),
           ...(v.runtime ? { runtime: v.runtime } : {}),
         })),
@@ -67,12 +75,15 @@ export function groupBundles(bundles: RegistryBundle[]): ExplorerBundle[] {
     })
     .sort(
       (a, b) =>
-        KIND_ORDER.indexOf(a.kind) - KIND_ORDER.indexOf(b.kind) || a.name.localeCompare(b.name),
+        KIND_ORDER.indexOf(a.kind) - KIND_ORDER.indexOf(b.kind) ||
+        a.name.localeCompare(b.name),
     );
 }
 
 /** Every regular file in a pulled bundle, with its size, sorted. */
-export async function bundleFiles(dir: string): Promise<{ path: string; size: number }[]> {
+export async function bundleFiles(
+  dir: string,
+): Promise<{ path: string; size: number }[]> {
   const out: { path: string; size: number }[] = [];
   const walk = async (d: string) => {
     for (const e of await fs.readdir(d, { withFileTypes: true })) {
@@ -80,7 +91,10 @@ export async function bundleFiles(dir: string): Promise<{ path: string; size: nu
       if (e.isDirectory()) {
         await walk(p);
       } else if (e.isFile()) {
-        out.push({ path: path.relative(dir, p).split(path.sep).join('/'), size: (await fs.stat(p)).size });
+        out.push({
+          path: path.relative(dir, p).split(path.sep).join('/'),
+          size: (await fs.stat(p)).size,
+        });
       }
     }
   };
@@ -89,7 +103,10 @@ export async function bundleFiles(dir: string): Promise<{ path: string; size: nu
 }
 
 /** The text of one file of a pulled bundle; undefined unless `file` is one of the bundle's own files. */
-export async function bundleFile(dir: string, file: string): Promise<string | undefined> {
+export async function bundleFile(
+  dir: string,
+  file: string,
+): Promise<string | undefined> {
   const listed = (await bundleFiles(dir)).map(f => f.path);
   if (!listed.includes(file)) {
     return undefined;
@@ -124,7 +141,15 @@ export async function bundleDiff(
     out.push({
       path: p,
       status: !a.has(p) ? 'added' : !b.has(p) ? 'removed' : 'changed',
-      patch: createTwoFilesPatch(`${from}/${p}`, `${to}/${p}`, before, after, '', '', { context: 3 }),
+      patch: createTwoFilesPatch(
+        `${from}/${p}`,
+        `${to}/${p}`,
+        before,
+        after,
+        '',
+        '',
+        { context: 3 },
+      ),
     });
   }
   return out;

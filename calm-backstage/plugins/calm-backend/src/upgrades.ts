@@ -25,12 +25,19 @@ export interface UpgradesResponse {
   note?: string;
 }
 
-export function upgradesFor(entity: Entity, available: BundleMeta[]): UpgradesResponse {
+export function upgradesFor(
+  entity: Entity,
+  available: BundleMeta[],
+): UpgradesResponse {
   const a = entity.metadata.annotations ?? {};
   const current = serviceBundles(a);
   const inGit = Boolean(a[ANN.gitops]);
   if (!current.starter || !current.pattern) {
-    return { inGit, kind: 'none', note: 'Not made from a CALM pattern with a template bundle.' };
+    return {
+      inGit,
+      kind: 'none',
+      note: 'Not made from a CALM pattern with a template bundle.',
+    };
   }
   const t = upgradeTargets(current, available, current.pattern);
   if (!current.deploy) {
@@ -46,7 +53,11 @@ export function upgradesFor(entity: Entity, available: BundleMeta[]): UpgradesRe
     inGit,
     kind: 'starter',
     ...t,
-    ...(inGit && canUpgrade ? { upgradePath: upgradeTemplatePath(stringifyEntityRef(entity)) } : {}),
-    ...(!inGit ? { note: 'Not in Git, so it cannot be upgraded through a pull request.' } : {}),
+    ...(inGit && canUpgrade
+      ? { upgradePath: upgradeTemplatePath(stringifyEntityRef(entity)) }
+      : {}),
+    ...(!inGit
+      ? { note: 'Not in Git, so it cannot be upgraded through a pull request.' }
+      : {}),
   };
 }

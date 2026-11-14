@@ -214,7 +214,9 @@ function bundleEntity(b: BundleInfo, hubUrl: string): Entity {
     metadata: {
       name: bundleEntityName(b.name, b.version),
       title: `${b.name} ${b.version}${
-        kind === 'full' ? '' : ` (${kind === 'starter' ? 'starter' : 'deployment rules'})`
+        kind === 'full'
+          ? ''
+          : ` (${kind === 'starter' ? 'starter' : 'deployment rules'})`
       }`,
       description: `${
         b.description ?? `CALM template bundle ${b.name} ${b.version}`
@@ -239,7 +241,9 @@ function bundleEntity(b: BundleInfo, hubUrl: string): Entity {
       ...(fits.length
         ? {
             dependsOn: [
-              ...new Set(fits.map(f => resourceRef(patternEntityName(f.patternId)))),
+              ...new Set(
+                fits.map(f => resourceRef(patternEntityName(f.patternId))),
+              ),
             ],
           }
         : {}),
@@ -254,7 +258,11 @@ export function bundlesFor(
 ): BundleInfo[] {
   return bundles
     .filter(b =>
-      fitsPattern({ patterns: bundlePatterns(b) }, pattern.namespace, pattern.id),
+      fitsPattern(
+        { patterns: bundlePatterns(b) },
+        pattern.namespace,
+        pattern.id,
+      ),
     )
     .sort(
       (a, b) =>
@@ -352,8 +360,12 @@ export function templateEntity(
   });
   const value = (b: BundleInfo) => `${b.name}@${b.version}`;
   const codeBundles = fitting.filter(b => bundleKind(b) !== 'deployment');
-  const starters = codeBundles.filter(b => bundleKind(b) === 'starter').map(value);
-  const deployRules = fitting.filter(b => bundleKind(b) === 'deployment').map(value);
+  const starters = codeBundles
+    .filter(b => bundleKind(b) === 'starter')
+    .map(value);
+  const deployRules = fitting
+    .filter(b => bundleKind(b) === 'deployment')
+    .map(value);
   const bundleValues = codeBundles.map(value);
   if (bundleValues.length) {
     // Starters first (newest of each first), then the older full bundles.
@@ -374,7 +386,9 @@ export function templateEntity(
             bundleKind(b) === 'full' ? ' (full bundle)' : ''
           }`,
       ),
-      default: starters.length ? starters[starters.length - 1] : bundleValues[bundleValues.length - 1],
+      default: starters.length
+        ? starters[starters.length - 1]
+        : bundleValues[bundleValues.length - 1],
       'ui:widget': 'radio',
     };
   }
@@ -789,23 +803,28 @@ export function upgradeTemplateEntity(hubUrl: string): Entity {
           properties: {
             service: {
               title: 'Service',
-              description: 'A service created from a CALM pattern with a starter, in Git and deployed by Flux.',
+              description:
+                'A service created from a CALM pattern with a starter, in Git and deployed by Flux.',
               type: 'string',
               'ui:field': 'EntityPicker',
               'ui:options': {
-                catalogFilter: [{ kind: 'Component', 'metadata.tags': CALM_GITOPS_TAG }],
+                catalogFilter: [
+                  { kind: 'Component', 'metadata.tags': CALM_GITOPS_TAG },
+                ],
                 defaultKind: 'Component',
               },
             },
             upgradeCode: {
               title: 'Upgrade the code (starter)',
-              description: 'Re-render the starter with its newest version and build a new image.',
+              description:
+                'Re-render the starter with its newest version and build a new image.',
               type: 'boolean',
               default: true,
             },
             upgradeDeploy: {
               title: 'Upgrade the deployment rules',
-              description: 'Re-render deploy/k8s with the newest deployment rules.',
+              description:
+                'Re-render deploy/k8s with the newest deployment rules.',
               type: 'boolean',
               default: true,
             },
@@ -890,7 +909,11 @@ export function upgradeTemplateEntity(hubUrl: string): Entity {
       ],
       output: {
         links: [
-          { title: 'Open the service', icon: 'catalog', entityRef: '${{ parameters.service }}' },
+          {
+            title: 'Open the service',
+            icon: 'catalog',
+            entityRef: '${{ parameters.service }}',
+          },
           { title: 'Pull request', url: '${{ steps.merge.output.prUrl }}' },
         ],
         text: [

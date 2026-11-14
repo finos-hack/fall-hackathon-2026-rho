@@ -87,12 +87,16 @@ export function createCalmDecorateDeploymentAction(options: {
           z
             .string()
             .optional()
-            .describe('Web URL of the Git repository Flux deployed from (calm:deploy:gitops output repoUrl)'),
+            .describe(
+              'Web URL of the Git repository Flux deployed from (calm:deploy:gitops output repoUrl)',
+            ),
         gitCommit: z =>
           z
             .string()
             .optional()
-            .describe('The commit Flux applied (calm:deploy:gitops output commit)'),
+            .describe(
+              'The commit Flux applied (calm:deploy:gitops output commit)',
+            ),
       },
       output: {
         id: z =>
@@ -177,7 +181,9 @@ export function createCalmDecorateDeploymentAction(options: {
         // The workloads are in applies-to.
         notes:
           ctx.input.gitRepo && ctx.input.gitCommit
-            ? `Deployed by Flux from ${ctx.input.gitRepo} at ${ctx.input.gitCommit.slice(
+            ? `Deployed by Flux from ${
+                ctx.input.gitRepo
+              } at ${ctx.input.gitCommit.slice(
                 0,
                 12,
               )} to the cluster ${cluster}, namespace ${namespace}.`

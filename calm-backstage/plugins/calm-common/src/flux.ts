@@ -75,7 +75,9 @@ export function readFluxStatus(obj: any): FluxStatus {
 }
 
 /** The commit SHA in a Flux revision (`main@sha1:<sha>`, or a bare SHA). */
-export function revisionCommit(revision: string | undefined): string | undefined {
+export function revisionCommit(
+  revision: string | undefined,
+): string | undefined {
   const m = /(?:^|:)([0-9a-f]{40})$/.exec(revision ?? '');
   return m?.[1];
 }

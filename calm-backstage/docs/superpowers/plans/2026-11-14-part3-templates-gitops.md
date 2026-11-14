@@ -282,3 +282,25 @@ kafkajs 2.2.4, Nisshi 0.8.x, Playwright.
 Native: Claude implements every task in this session (the tasks share interfaces tightly and Jim is away), then one
 fresh reviewer checks the whole branch before the wrap-up. Status page: `docs/plan/calm-backstage-part3-status.html`,
 published as a private Artifact and updated at every task start and finish.
+
+## Results (2026-11-14)
+
+All 11 tasks done on branch `feat/part3-templates-gitops`; 194 tests pass, `yarn tsc` and `yarn build:backend` pass.
+The status page `docs/plan/calm-backstage-part3-status.html` has the evidence per task and every deviation (D1–D13);
+the main ones:
+
+- **Ports:** this checkout ran on 3200/7207 beside another checkout on 3100/7107 (shared Hub, registry, Gitea and
+  cluster).
+- **Gitops annotation:** `calm.finos.org/gitops` and the `calm-gitops` tag are written by `calm:deploy:gitops`, not
+  `calm:git:publish`, so a service that was never deployed is not offered upgrades (review finding).
+- **Upgrade actions:** `calm:upgrade:render` refuses uncommitted work on `main` and a never-deployed service;
+  `calm:upgrade:merge` force-pushes only `upgrade/*` branches, reuses an open pull request and retries Gitea's 405.
+- **App proxy:** sets its own Content-Security-Policy (Backstage's blocked the starters' inline script).
+- **Bundle versions beyond the plan:** `k8s-deploy` 1.2.0 (Recreate for backing services) and 1.2.1 (`maxSurge: 0`,
+  because 1.2.0 could not be applied over 1.0.0), `nisshi-stream-app` 1.0.1 (recreates its topic). They exist because
+  published versions never change.
+- **From scratch:** the cluster was rebuilt with `yarn k8s:down && yarn k8s:up` (98 s, Flux from `up.sh`) and the
+  seeds' create path ran against throwaway Gitea and registry containers (3 created, 14 published, then idempotent).
+  The shared Compose volumes were not deleted (refused: shared with the other checkout).
+- **Demo:** `docs/demo/calm-backstage-full-demo.webm` (5:25, contents card, 8 chapters), recorded with
+  `docs/demo/record-full-demo.cjs`; `docs/demo/cleanup.sh` frees service names for a retake.

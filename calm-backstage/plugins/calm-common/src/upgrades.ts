@@ -31,14 +31,23 @@ export function serviceBundles(annotations: Record<string, string> = {}): {
 } {
   const starter =
     annotations[ANN.bundle] && annotations[ANN.bundleVersion]
-      ? { name: annotations[ANN.bundle], version: annotations[ANN.bundleVersion] }
+      ? {
+          name: annotations[ANN.bundle],
+          version: annotations[ANN.bundleVersion],
+        }
       : undefined;
   const deploy =
     annotations[ANN.deployBundle] && annotations[ANN.deployBundleVersion]
-      ? { name: annotations[ANN.deployBundle], version: annotations[ANN.deployBundleVersion] }
+      ? {
+          name: annotations[ANN.deployBundle],
+          version: annotations[ANN.deployBundleVersion],
+        }
       : undefined;
   const pattern = annotations[ANN.pattern]
-    ? { namespace: annotations[ANN.namespace], patternId: annotations[ANN.pattern] }
+    ? {
+        namespace: annotations[ANN.namespace],
+        patternId: annotations[ANN.pattern],
+      }
     : undefined;
   return { starter, deploy, pattern };
 }
@@ -51,11 +60,18 @@ function side(
   if (!current) {
     return undefined;
   }
-  const newest = newestFitting(available, current.name, pattern.namespace, pattern.patternId);
+  const newest = newestFitting(
+    available,
+    current.name,
+    pattern.namespace,
+    pattern.patternId,
+  );
   return {
     name: current.name,
     from: current.version,
-    ...(newest && compareVersions(newest.version, current.version) > 0 ? { to: newest.version } : {}),
+    ...(newest && compareVersions(newest.version, current.version) > 0
+      ? { to: newest.version }
+      : {}),
   };
 }
 

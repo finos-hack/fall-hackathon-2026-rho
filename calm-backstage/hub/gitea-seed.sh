@@ -10,7 +10,7 @@
 set -euo pipefail
 
 GITEA_URL="${CALM_GITEA_URL:-http://localhost:3300}"
-CONTAINER="calm-backstage-gitea"
+CONTAINER="${CALM_GITEA_CONTAINER:-calm-backstage-gitea}"
 GITEA_USER="${CALM_GITEA_USER:-calm}"
 GITEA_PASSWORD="${CALM_GITEA_PASSWORD:-calm-local-dev}"
 ORGS=(calm-templates calm-services)

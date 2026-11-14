@@ -2,9 +2,21 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import YAML from 'yaml';
-import { git, gitCommitAll, gitInit, gitPush } from '@internal/backstage-plugin-calm-node';
-import { createCalmDeployGitopsAction, waitForKustomization } from './deployGitops';
-import { createCalmGitPublishAction, withGitAnnotations, withGitopsAnnotations } from './gitPublish';
+import {
+  git,
+  gitCommitAll,
+  gitInit,
+  gitPush,
+} from '@internal/backstage-plugin-calm-node';
+import {
+  createCalmDeployGitopsAction,
+  waitForKustomization,
+} from './deployGitops';
+import {
+  createCalmGitPublishAction,
+  withGitAnnotations,
+  withGitopsAnnotations,
+} from './gitPublish';
 
 let root: string;
 let localDir: string;
@@ -59,13 +71,20 @@ const settings = () => ({
 async function service(name: string) {
   const dir = path.join(localDir, name);
   await fs.mkdir(path.join(dir, 'deploy', 'k8s'), { recursive: true });
-  await fs.writeFile(path.join(dir, 'deploy', 'k8s', 'kustomization.yaml'), 'resources: []\n');
+  await fs.writeFile(
+    path.join(dir, 'deploy', 'k8s', 'kustomization.yaml'),
+    'resources: []\n',
+  );
   await fs.writeFile(
     path.join(dir, 'catalog-info.yaml'),
     YAML.stringify({
       apiVersion: 'backstage.io/v1alpha1',
       kind: 'Component',
-      metadata: { name, annotations: { 'calm.finos.org/bundle': 'node-service' }, tags: ['calm'] },
+      metadata: {
+        name,
+        annotations: { 'calm.finos.org/bundle': 'node-service' },
+        tags: ['calm'],
+      },
       spec: { type: 'service' },
     }),
   );
@@ -90,7 +109,9 @@ describe('withGitAnnotations', () => {
         'orders',
       ),
     );
-    expect(YAML.parse(once).metadata.annotations['calm.finos.org/gitops']).toBeUndefined();
+    expect(
+      YAML.parse(once).metadata.annotations['calm.finos.org/gitops'],
+    ).toBeUndefined();
     expect(twice.metadata.annotations).toEqual({
       'calm.finos.org/git-repo': 'http://localhost:3300/calm-services/orders',
       'calm.finos.org/gitops': 'flux-system/calm-orders',
@@ -105,7 +126,9 @@ describe('calm:git:publish', () => {
     const remote = await bare('orders');
     const dir = await service('orders');
     const c = ctx({ dir, name: 'orders' });
-    await createCalmGitPublishAction({ settings: gitops(), localDir }).handler(c);
+    await createCalmGitPublishAction({ settings: gitops(), localDir }).handler(
+      c,
+    );
     const out = outputs(c);
     expect(out.repoUrl).toBe(`file://${remoteBase}/calm-services/orders`);
     expect(await git(remote, ['rev-parse', 'main'])).toBe(out.commit);
@@ -133,12 +156,18 @@ describe('calm:git:publish', () => {
       createCalmGitPublishAction({ settings: gitops(), localDir }).handler(
         ctx({ dir, name: 'orders' }),
       ),
-    ).rejects.toThrow(/refused \(rejected\).*delete that repository or pick another name/);
+    ).rejects.toThrow(
+      /refused \(rejected\).*delete that repository or pick another name/,
+    );
   });
 });
 
 /** A kubectl that answers from the state of a fake cluster; Flux "applies" the remote's main. */
-function fakeKubectl(opts: { remote: string; namespace?: any; failFlux?: string }) {
+function fakeKubectl(opts: {
+  remote: string;
+  namespace?: any;
+  failFlux?: string;
+}) {
   const calls: string[][] = [];
   const kubectl = async (args: string[]) => {
     calls.push(args);
@@ -150,9 +179,19 @@ function fakeKubectl(opts: { remote: string; namespace?: any; failFlux?: string 
       const sha = await git(opts.remote, ['rev-parse', 'main']);
       return JSON.stringify({
         status: opts.failFlux
-          ? { conditions: [{ type: 'Ready', status: 'False', message: opts.failFlux }] }
+          ? {
+              conditions: [
+                { type: 'Ready', status: 'False', message: opts.failFlux },
+              ],
+            }
           : {
-              conditions: [{ type: 'Ready', status: 'True', message: `Applied revision: main@sha1:${sha}` }],
+              conditions: [
+                {
+                  type: 'Ready',
+                  status: 'True',
+                  message: `Applied revision: main@sha1:${sha}`,
+                },
+              ],
               lastAppliedRevision: `main@sha1:${sha}`,
             },
       });
@@ -161,7 +200,11 @@ function fakeKubectl(opts: { remote: string; namespace?: any; failFlux?: string 
       return JSON.stringify({
         items: [
           { kind: 'Deployment', metadata: { name: 'web-service' } },
-          { kind: 'Service', metadata: { name: 'api-gateway' }, spec: { ports: [{ port: 80 }] } },
+          {
+            kind: 'Service',
+            metadata: { name: 'api-gateway' },
+            spec: { ports: [{ port: 80 }] },
+          },
         ],
       });
     }
@@ -174,7 +217,9 @@ describe('calm:deploy:gitops', () => {
   async function published(name: string) {
     const remote = await bare(name);
     const dir = await service(name);
-    await createCalmGitPublishAction({ settings: gitops(), localDir }).handler(ctx({ dir, name }));
+    await createCalmGitPublishAction({ settings: gitops(), localDir }).handler(
+      ctx({ dir, name }),
+    );
     return { remote, dir };
   }
 
@@ -191,11 +236,15 @@ describe('calm:deploy:gitops', () => {
     }).handler(c);
     const out = outputs(c);
     expect(await git(remote, ['rev-parse', 'main'])).toBe(out.commit);
-    expect(await git(remote, ['log', '-1', '--format=%s', 'main'])).toBe('Deploy orders:abc123');
+    expect(await git(remote, ['log', '-1', '--format=%s', 'main'])).toBe(
+      'Deploy orders:abc123',
+    );
     const overlay = YAML.parse(
       await git(remote, ['show', 'main:deploy/k8s-overlay/kustomization.yaml']),
     );
-    expect(overlay.images).toEqual([{ name: 'calm-service', newName: 'orders', newTag: 'abc123' }]);
+    expect(overlay.images).toEqual([
+      { name: 'calm-service', newName: 'orders', newTag: 'abc123' },
+    ]);
     expect(await git(remote, ['show', 'main:catalog-info.yaml'])).toContain(
       'calm.finos.org/gitops: flux-system/calm-orders',
     );
@@ -209,7 +258,10 @@ describe('calm:deploy:gitops', () => {
     expect(applied).toBeDefined();
     const annotate = fake.calls.find(c2 => c2.includes('annotate'))!;
     expect(annotate).toEqual(
-      expect.arrayContaining(['gitrepository/calm-orders', 'kustomization/calm-orders']),
+      expect.arrayContaining([
+        'gitrepository/calm-orders',
+        'kustomization/calm-orders',
+      ]),
     );
     expect(annotate.at(-1)).toMatch(/^reconcile\.fluxcd\.io\/requestedAt=/);
     expect(fake.calls.some(c2 => c2.includes('rollout'))).toBe(true);
@@ -238,7 +290,9 @@ describe('calm:deploy:gitops', () => {
     const before = await git(remote, ['rev-parse', 'main']);
     const fake = fakeKubectl({
       remote,
-      namespace: { metadata: { labels: { 'calm.finos.org/service': 'billing' } } },
+      namespace: {
+        metadata: { labels: { 'calm.finos.org/service': 'billing' } },
+      },
     });
     await expect(
       createCalmDeployGitopsAction({
@@ -259,7 +313,11 @@ describe('waitForKustomization', () => {
       JSON.stringify({
         status: {
           conditions: [
-            { type: 'Ready', status: 'False', message: 'failed to checkout: connection refused' },
+            {
+              type: 'Ready',
+              status: 'False',
+              message: 'failed to checkout: connection refused',
+            },
           ],
         },
       });
@@ -272,7 +330,9 @@ describe('waitForKustomization', () => {
           t += ms;
         },
       }),
-    ).rejects.toThrow(/did not apply aaaaaaaaaaaa within 10 s.*not Ready.*connection refused/);
+    ).rejects.toThrow(
+      /did not apply aaaaaaaaaaaa within 10 s.*not Ready.*connection refused/,
+    );
   });
 
   it('keeps waiting while Flux has applied an older commit', async () => {
@@ -288,7 +348,10 @@ describe('waitForKustomization', () => {
         },
       });
     };
-    const s = await waitForKustomization(kubectl, 'orders', sha, { pollMs: 0, sleep: async () => {} });
+    const s = await waitForKustomization(kubectl, 'orders', sha, {
+      pollMs: 0,
+      sleep: async () => {},
+    });
     expect(polls).toBe(3);
     expect(s.appliedRevision).toBe(`main@sha1:${sha}`);
   });

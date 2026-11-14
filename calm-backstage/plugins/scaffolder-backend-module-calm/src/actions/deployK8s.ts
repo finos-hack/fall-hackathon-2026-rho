@@ -145,7 +145,9 @@ export async function writeOverlay(
 }
 
 /** The image the overlay deploys (`<newName>:<newTag>` of its `calm-service` entry), or undefined without one. */
-export async function readOverlayImage(dir: string): Promise<string | undefined> {
+export async function readOverlayImage(
+  dir: string,
+): Promise<string | undefined> {
   const text = await fs
     .readFile(path.join(dir, OVERLAY_DIR, 'kustomization.yaml'), 'utf-8')
     .catch(() => undefined);
@@ -168,7 +170,14 @@ export async function listAndWaitForRollouts(
   namespace: string,
 ): Promise<Deployed> {
   const listed = await kubectl(
-    ['-n', namespace, 'get', 'deployments,networkpolicies,services', '-o', 'json'],
+    [
+      '-n',
+      namespace,
+      'get',
+      'deployments,networkpolicies,services',
+      '-o',
+      'json',
+    ],
     true,
   );
   const deployed = summariseObjects(JSON.parse(listed).items ?? []);

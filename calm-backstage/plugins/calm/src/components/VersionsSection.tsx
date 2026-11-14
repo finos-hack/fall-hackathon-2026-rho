@@ -52,7 +52,12 @@ export function VersionsSection(props: { entityRef: string }) {
       )}
       {value.upgradePath && (
         <Box mt={1}>
-          <LinkButton to={value.upgradePath} variant="contained" color="primary" size="small">
+          <LinkButton
+            to={value.upgradePath}
+            variant="contained"
+            color="primary"
+            size="small"
+          >
             Upgrade
           </LinkButton>
         </Box>

@@ -188,10 +188,20 @@ export async function gitPush(
   } = {},
 ): Promise<void> {
   try {
-    await git(dir, ['push', '-q', ...(opts.force ? ['--force'] : []), remoteUrl, `${branch}:${branch}`], {
-      ...opts,
-      auth,
-    });
+    await git(
+      dir,
+      [
+        'push',
+        '-q',
+        ...(opts.force ? ['--force'] : []),
+        remoteUrl,
+        `${branch}:${branch}`,
+      ],
+      {
+        ...opts,
+        auth,
+      },
+    );
   } catch (e) {
     const msg = (e as Error).message ?? String(e);
     if (/rejected|non-fast-forward|fetch first/.test(msg)) {

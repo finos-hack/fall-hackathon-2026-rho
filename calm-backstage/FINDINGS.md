@@ -179,7 +179,8 @@ build of Quarkus 3.33.4 and 3.40.1 (BOM `com.redhat.quarkus.platform:quarkus-bom
 - **kafkajs works against Nisshi** (topics, produce, consumer groups). The broker's advertised listener must be its
   in-cluster name (`ADVERTISED_LISTENER_URL=tcp://nisshi-broker:9092`).
 - **A broker on SQLite in the pod loses its topics when it restarts**, and a rolling update briefly runs two brokers.
-  The rules roll out backing services with `Recreate` (1.2.0) and the app creates its topic again (1.0.1).
+  The rules roll out backing services one pod at a time (`maxSurge: 0`, 1.2.1; 1.2.0's `Recreate` could not be
+  applied over older deployments) and the app creates its topic again (1.0.1).
 
 ### Backstage
 

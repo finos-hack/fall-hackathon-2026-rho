@@ -1,5 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Content, Header, Link, LinkButton, Page } from '@backstage/core-components';
+import {
+  Content,
+  Header,
+  Link,
+  LinkButton,
+  Page,
+} from '@backstage/core-components';
 import { useApi } from '@backstage/frontend-plugin-api';
 import { catalogApiRef, EntityRefLink } from '@backstage/plugin-catalog-react';
 import { Entity, stringifyEntityRef } from '@backstage/catalog-model';
@@ -62,8 +68,14 @@ const useStyles = makeStyles(theme => ({
     background: theme.palette.type === 'dark' ? '#14181f' : '#f6f8fa',
     borderRadius: 6,
   },
-  add: { color: theme.palette.type === 'dark' ? '#7ddca1' : '#11663a', display: 'block' },
-  del: { color: theme.palette.type === 'dark' ? '#ff9a94' : '#a3201c', display: 'block' },
+  add: {
+    color: theme.palette.type === 'dark' ? '#7ddca1' : '#11663a',
+    display: 'block',
+  },
+  del: {
+    color: theme.palette.type === 'dark' ? '#ff9a94' : '#a3201c',
+    display: 'block',
+  },
   hunk: { color: theme.palette.text.secondary, display: 'block' },
   files: {
     display: 'grid',
@@ -71,12 +83,24 @@ const useStyles = makeStyles(theme => ({
     gap: theme.spacing(2),
     [theme.breakpoints.down('sm')]: { gridTemplateColumns: 'minmax(0, 1fr)' },
   },
-  meta: { '& td': { borderBottom: 'none', padding: '4px 12px 4px 0', verticalAlign: 'top' } },
-  mono: { fontFamily: 'ui-monospace, Menlo, monospace', fontSize: 12.5, overflowWrap: 'anywhere' },
+  meta: {
+    '& td': {
+      borderBottom: 'none',
+      padding: '4px 12px 4px 0',
+      verticalAlign: 'top',
+    },
+  },
+  mono: {
+    fontFamily: 'ui-monospace, Menlo, monospace',
+    fontSize: 12.5,
+    overflowWrap: 'anywhere',
+  },
 }));
 
-const shortSha = (s?: string) => (s ? s.replace(/^sha256:/, '').slice(0, 12) : '');
-const kb = (n?: number) => (n === undefined ? '-' : `${(n / 1024).toFixed(1)} KiB`);
+const shortSha = (s?: string) =>
+  s ? s.replace(/^sha256:/, '').slice(0, 12) : '';
+const kb = (n?: number) =>
+  n === undefined ? '-' : `${(n / 1024).toFixed(1)} KiB`;
 
 function FileViewer(props: { name: string; version: string; file?: string }) {
   const classes = useStyles();
@@ -109,14 +133,19 @@ function FileViewer(props: { name: string; version: string; file?: string }) {
 
 function FilesTab(props: { name: string; version: string }) {
   const classes = useStyles();
-  const { value, loading, error } = useCalmBackend<{ files: { path: string; size: number }[] }>(
-    `/bundles/${encodeURIComponent(props.name)}/${encodeURIComponent(props.version)}/files`,
+  const { value, loading, error } = useCalmBackend<{
+    files: { path: string; size: number }[];
+  }>(
+    `/bundles/${encodeURIComponent(props.name)}/${encodeURIComponent(
+      props.version,
+    )}/files`,
   );
   const [file, setFile] = useState<string>();
   useEffect(() => {
     const files = value?.files ?? [];
     const first =
-      files.find(f => f.path === 'calm-backstage.json') ?? files.find(f => f.path.endsWith('.hbs'));
+      files.find(f => f.path === 'calm-backstage.json') ??
+      files.find(f => f.path.endsWith('.hbs'));
     setFile(first?.path);
   }, [value]);
   if (loading) {
@@ -129,7 +158,12 @@ function FilesTab(props: { name: string; version: string }) {
     <Box className={classes.files}>
       <List dense data-testid="calm-explorer-files">
         {(value?.files ?? []).map(f => (
-          <ListItem key={f.path} button selected={f.path === file} onClick={() => setFile(f.path)}>
+          <ListItem
+            key={f.path}
+            button
+            selected={f.path === file}
+            onClick={() => setFile(f.path)}
+          >
             <ListItemText
               primary={<span className={classes.mono}>{f.path}</span>}
               secondary={`${f.size} bytes`}
@@ -159,7 +193,11 @@ function Patch(props: { patch: string }) {
               ? classes.hunk
               : undefined
           }
-          style={l.startsWith('+') || l.startsWith('-') || l.startsWith('@@') ? undefined : { display: 'block' }}
+          style={
+            l.startsWith('+') || l.startsWith('-') || l.startsWith('@@')
+              ? undefined
+              : { display: 'block' }
+          }
         >
           {l || ' '}
         </span>
@@ -176,19 +214,28 @@ function ChangesTab(props: { bundle: Bundle; version: string }) {
   useEffect(() => setFrom(older[0]), [props.version, props.bundle.name]); // eslint-disable-line react-hooks/exhaustive-deps
   const { value, loading, error } = useCalmBackend<BundleDiffResponse>(
     from
-      ? `/bundles/${encodeURIComponent(props.bundle.name)}/diff?from=${encodeURIComponent(
-          from,
-        )}&to=${encodeURIComponent(props.version)}`
+      ? `/bundles/${encodeURIComponent(
+          props.bundle.name,
+        )}/diff?from=${encodeURIComponent(from)}&to=${encodeURIComponent(
+          props.version,
+        )}`
       : undefined,
   );
   if (!older.length) {
-    return <Typography color="textSecondary">{props.version} is the first version of {props.bundle.name}.</Typography>;
+    return (
+      <Typography color="textSecondary">
+        {props.version} is the first version of {props.bundle.name}.
+      </Typography>
+    );
   }
   return (
     <Box data-testid="calm-explorer-diff">
       <Box display="flex" alignItems="center" style={{ gap: 8 }} mb={2}>
         <Typography>What changed from</Typography>
-        <Select value={from ?? ''} onChange={e => setFrom(String(e.target.value))}>
+        <Select
+          value={from ?? ''}
+          onChange={e => setFrom(String(e.target.value))}
+        >
           {older.map(v => (
             <MenuItem key={v} value={v}>
               {v}
@@ -199,7 +246,9 @@ function ChangesTab(props: { bundle: Bundle; version: string }) {
       </Box>
       {loading && <LinearProgress />}
       {error && <Alert severity="error">{error.message}</Alert>}
-      {value && value.files.length === 0 && <Typography>No file changed.</Typography>}
+      {value && value.files.length === 0 && (
+        <Typography>No file changed.</Typography>
+      )}
       {value?.files.map(f => (
         <Box key={f.path} mb={2}>
           <Typography variant="subtitle2" className={classes.mono}>
@@ -207,7 +256,13 @@ function ChangesTab(props: { bundle: Bundle; version: string }) {
             <Chip
               size="small"
               label={f.status}
-              color={f.status === 'added' ? 'primary' : f.status === 'removed' ? 'secondary' : 'default'}
+              color={
+                f.status === 'added'
+                  ? 'primary'
+                  : f.status === 'removed'
+                  ? 'secondary'
+                  : 'default'
+              }
             />
           </Typography>
           <Patch patch={f.patch} />
@@ -223,7 +278,9 @@ function useServices(): Entity[] | undefined {
   useEffect(() => {
     let cancelled = false;
     catalog
-      .getEntities({ filter: { kind: 'Component', 'metadata.tags': 'calm-service' } })
+      .getEntities({
+        filter: { kind: 'Component', 'metadata.tags': 'calm-service' },
+      })
       .then(r => !cancelled && setServices(r.items))
       .catch(() => !cancelled && setServices([]));
     return () => {
@@ -237,7 +294,9 @@ function useServices(): Entity[] | undefined {
 function usedVersion(e: Entity, bundle: Bundle): string | undefined {
   const a = e.metadata.annotations ?? {};
   if (bundle.kind === 'deployment') {
-    return a[ANN.deployBundle] === bundle.name ? a[ANN.deployBundleVersion] : undefined;
+    return a[ANN.deployBundle] === bundle.name
+      ? a[ANN.deployBundleVersion]
+      : undefined;
   }
   return a[ANN.bundle] === bundle.name ? a[ANN.bundleVersion] : undefined;
 }
@@ -252,7 +311,11 @@ function UsedByTab(props: { bundle: Bundle; services?: Entity[] }) {
     .filter((u): u is { e: Entity; version: string } => Boolean(u.version))
     .sort((a, b) => compareVersions(a.version, b.version));
   if (!users.length) {
-    return <Typography color="textSecondary">No service uses {props.bundle.name} yet.</Typography>;
+    return (
+      <Typography color="textSecondary">
+        No service uses {props.bundle.name} yet.
+      </Typography>
+    );
   }
   return (
     <Table size="small" data-testid="calm-explorer-used-by">
@@ -278,19 +341,30 @@ function UsedByTab(props: { bundle: Bundle; services?: Entity[] }) {
               <TableCell>{version}</TableCell>
               <TableCell>
                 {behind ? (
-                  <Chip size="small" color="secondary" label={`${latest} available`} />
+                  <Chip
+                    size="small"
+                    color="secondary"
+                    label={`${latest} available`}
+                  />
                 ) : (
                   <Chip size="small" variant="outlined" label="up to date" />
                 )}
               </TableCell>
               <TableCell>
                 {behind && inGit && !full ? (
-                  <LinkButton to={upgradeTemplatePath(ref)} size="small" variant="outlined" color="primary">
+                  <LinkButton
+                    to={upgradeTemplatePath(ref)}
+                    size="small"
+                    variant="outlined"
+                    color="primary"
+                  >
                     Upgrade
                   </LinkButton>
                 ) : behind ? (
                   <Typography variant="caption" color="textSecondary">
-                    {full ? 'full bundle: create again with a starter' : 'not in Git'}
+                    {full
+                      ? 'full bundle: create again with a starter'
+                      : 'not in Git'}
                   </Typography>
                 ) : null}
               </TableCell>
@@ -312,10 +386,25 @@ function BundleDetail(props: { bundle: Bundle; services?: Entity[] }) {
     bundle.versions.find(x => x.version === version) ?? bundle.versions[0];
   return (
     <Paper variant="outlined" style={{ padding: 20, minWidth: 0 }}>
-      <Box display="flex" alignItems="center" flexWrap="wrap" style={{ gap: 12 }} mb={1}>
+      <Box
+        display="flex"
+        alignItems="center"
+        flexWrap="wrap"
+        style={{ gap: 12 }}
+        mb={1}
+      >
         <Typography variant="h5">{bundle.name}</Typography>
-        <Chip size="small" label={bundle.kind === 'deployment' ? 'deployment rules' : bundle.kind} />
-        <Box display="flex" style={{ gap: 6 }} data-testid="calm-explorer-versions">
+        <Chip
+          size="small"
+          label={
+            bundle.kind === 'deployment' ? 'deployment rules' : bundle.kind
+          }
+        />
+        <Box
+          display="flex"
+          style={{ gap: 6 }}
+          data-testid="calm-explorer-versions"
+        >
           {bundle.versions.map(x => (
             <Chip
               key={x.version}
@@ -353,11 +442,13 @@ function BundleDetail(props: { bundle: Bundle; services?: Entity[] }) {
             <TableCell>
               {v.source ? (
                 <Link to={v.source}>
-                  calm-templates/bundles at {v.revision?.slice(0, 12) ?? 'its commit'}
+                  calm-templates/bundles at{' '}
+                  {v.revision?.slice(0, 12) ?? 'its commit'}
                 </Link>
               ) : (
                 <Typography variant="body2" color="textSecondary">
-                  Not recorded: published before bundles were published from Git.
+                  Not recorded: published before bundles were published from
+                  Git.
                 </Typography>
               )}
             </TableCell>
@@ -374,8 +465,12 @@ function BundleDetail(props: { bundle: Bundle; services?: Entity[] }) {
               {v.patterns.map(p => (
                 <Box component="span" mr={1} key={p.patternId}>
                   <EntityRefLink
-                    entityRef={`resource:default/${patternEntityName(p.patternId)}`}
-                    title={`${p.namespace ? `${p.namespace}/` : ''}${p.patternId}`}
+                    entityRef={`resource:default/${patternEntityName(
+                      p.patternId,
+                    )}`}
+                    title={`${p.namespace ? `${p.namespace}/` : ''}${
+                      p.patternId
+                    }`}
                   />
                 </Box>
               ))}
@@ -383,7 +478,12 @@ function BundleDetail(props: { bundle: Bundle; services?: Entity[] }) {
           </TableRow>
         </TableBody>
       </Table>
-      <Tabs value={tab} onChange={(_e, t) => setTab(t)} indicatorColor="primary" style={{ marginTop: 12 }}>
+      <Tabs
+        value={tab}
+        onChange={(_e, t) => setTab(t)}
+        indicatorColor="primary"
+        style={{ marginTop: 12 }}
+      >
         <Tab label="Files" />
         <Tab label="Changes" />
         <Tab label="Used by" />
@@ -413,7 +513,8 @@ export function TemplateExplorerPage() {
     }
   }, [bundles, selected]);
   const bundle = bundles.find(b => b.name === selected);
-  const users = (b: Bundle) => (services ?? []).filter(e => usedVersion(e, b)).length;
+  const users = (b: Bundle) =>
+    (services ?? []).filter(e => usedVersion(e, b)).length;
 
   return (
     <Page themeId="tool">
@@ -432,7 +533,14 @@ export function TemplateExplorerPage() {
                   const group = bundles.filter(b => b.kind === kind);
                   return group.length ? (
                     <Box key={kind}>
-                      <ListSubheader disableSticky style={{ lineHeight: 1.4, paddingTop: 14, paddingBottom: 6 }}>
+                      <ListSubheader
+                        disableSticky
+                        style={{
+                          lineHeight: 1.4,
+                          paddingTop: 14,
+                          paddingBottom: 6,
+                        }}
+                      >
                         {KIND_TITLES[kind]}
                       </ListSubheader>
                       {group.map(b => (
@@ -444,7 +552,14 @@ export function TemplateExplorerPage() {
                         >
                           <ListItemText
                             primary={`${b.name} ${b.versions[0].version}`}
-                            secondary={`${b.versions[0].runtime ?? `${b.versions.length} version${b.versions.length > 1 ? 's' : ''}`} · ${users(b)} service${users(b) === 1 ? '' : 's'}`}
+                            secondary={`${
+                              b.versions[0].runtime ??
+                              `${b.versions.length} version${
+                                b.versions.length > 1 ? 's' : ''
+                              }`
+                            } · ${users(b)} service${
+                              users(b) === 1 ? '' : 's'
+                            }`}
                           />
                         </ListItem>
                       ))}

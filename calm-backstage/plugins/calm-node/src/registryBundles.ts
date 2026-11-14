@@ -31,7 +31,9 @@ export async function listRegistryBundles(
     for (const version of await listTags(registry.url, repository)) {
       const ref = bundleRef(registry.url, prefix, name, version);
       try {
-        const { digest, config, annotations, size } = await readBundleConfig(ref);
+        const { digest, config, annotations, size } = await readBundleConfig(
+          ref,
+        );
         bundles.push({
           ...readBundleMeta(config, { name, version }),
           name,

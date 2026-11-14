@@ -67,7 +67,11 @@ export interface BundlesResponse {
 export interface BundleDiffResponse {
   from: string;
   to: string;
-  files: { path: string; status: 'added' | 'removed' | 'changed'; patch: string }[];
+  files: {
+    path: string;
+    status: 'added' | 'removed' | 'changed';
+    patch: string;
+  }[];
 }
 
 /** Response of calm-backend `GET /upgrades`. */

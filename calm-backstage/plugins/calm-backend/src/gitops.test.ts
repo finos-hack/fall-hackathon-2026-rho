@@ -21,7 +21,9 @@ describe('gitops status', () => {
     expect(kustomizationOf(entity())).toBeUndefined();
     expect(kustomizationOf(entity('kube-system/calm-orders'))).toBeUndefined();
     expect(kustomizationOf(entity('flux-system/other'))).toBeUndefined();
-    expect(kustomizationOf(entity('flux-system/calm-Bad_Name'))).toBeUndefined();
+    expect(
+      kustomizationOf(entity('flux-system/calm-Bad_Name')),
+    ).toBeUndefined();
   });
 
   it('gives the applied commit and links it in the repository', () => {

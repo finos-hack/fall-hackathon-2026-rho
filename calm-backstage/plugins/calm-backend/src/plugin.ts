@@ -43,7 +43,8 @@ export const calmPlugin = createBackendPlugin({
             registry: readBundleRegistrySettings(config),
             // The scaffolder's bundle cache: one pull per digest.
             bundleCacheDir: path.join(
-              config.getOptionalString('backend.workingDirectory') ?? os.tmpdir(),
+              config.getOptionalString('backend.workingDirectory') ??
+                os.tmpdir(),
               'calm-bundles',
             ),
           }),

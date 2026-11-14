@@ -20,7 +20,10 @@ import YAML from 'yaml';
 import { CATALOG_INFO_FILE } from './publishLocal';
 
 /** Adds the Flux Kustomization and the `calm-gitops` tag (a service deployed from Git) to a catalog-info.yaml text. */
-export function withGitopsAnnotations(catalogInfo: string, name: string): string {
+export function withGitopsAnnotations(
+  catalogInfo: string,
+  name: string,
+): string {
   const entity = YAML.parse(catalogInfo);
   entity.metadata.annotations = {
     ...(entity.metadata.annotations ?? {}),
@@ -76,8 +79,7 @@ export function createCalmGitPublishAction(options: {
               'The published folder (calm:publish:local output path), inside calm.publish.localDir',
             ),
         name: z => z.string().describe('Service name: the repository name'),
-        message: z =>
-          z.string().optional().describe('Commit message'),
+        message: z => z.string().optional().describe('Commit message'),
       },
       output: {
         repoUrl: z => z.string().describe('Web URL of the repository'),
@@ -101,7 +103,9 @@ export function createCalmGitPublishAction(options: {
       const repo = serviceRepository(settings, name);
 
       const catalogInfo = path.join(dir, CATALOG_INFO_FILE);
-      const text = await fs.readFile(catalogInfo, 'utf-8').catch(() => undefined);
+      const text = await fs
+        .readFile(catalogInfo, 'utf-8')
+        .catch(() => undefined);
       if (text !== undefined) {
         await fs.writeFile(
           catalogInfo,

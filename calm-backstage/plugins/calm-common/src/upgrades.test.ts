@@ -1,8 +1,22 @@
 import { readBundleMeta } from './bundleMeta';
-import { serviceBundles, upgradeTargets, upgradeTemplatePath } from './upgrades';
+import {
+  serviceBundles,
+  upgradeTargets,
+  upgradeTemplatePath,
+} from './upgrades';
 
-const meta = (name: string, version: string, kind: string, patternId = 'web-service') =>
-  readBundleMeta({ name, version, kind, patterns: [{ namespace: 'hackathon', patternId }] });
+const meta = (
+  name: string,
+  version: string,
+  kind: string,
+  patternId = 'web-service',
+) =>
+  readBundleMeta({
+    name,
+    version,
+    kind,
+    patterns: [{ namespace: 'hackathon', patternId }],
+  });
 const pattern = { namespace: 'hackathon', patternId: 'web-service' };
 const available = [
   meta('spring-boot-service', '1.0.0', 'starter'),
@@ -40,7 +54,11 @@ describe('upgradeTargets', () => {
 
   it('returns nothing to upgrade when up to date, and no side the service lacks', () => {
     expect(
-      upgradeTargets({ deploy: { name: 'k8s-deploy', version: '1.1.0' } }, available, pattern),
+      upgradeTargets(
+        { deploy: { name: 'k8s-deploy', version: '1.1.0' } },
+        available,
+        pattern,
+      ),
     ).toEqual({ deploy: { name: 'k8s-deploy', from: '1.1.0' } });
   });
 });

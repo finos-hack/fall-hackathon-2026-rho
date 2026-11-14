@@ -505,9 +505,7 @@ export async function listTags(
  * The manifest digest and the config (the bundle's `calm-backstage.json`) of a bundle in the registry. The config
  * blob is checked against the digest in the manifest.
  */
-export async function readBundleConfig(
-  ref: string,
-): Promise<{
+export async function readBundleConfig(ref: string): Promise<{
   digest: string;
   config: any;
   annotations: Record<string, string>;

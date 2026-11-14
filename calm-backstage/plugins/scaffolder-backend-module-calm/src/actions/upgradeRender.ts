@@ -39,7 +39,9 @@ export type RenderInto = (
   logger: LoggerService,
 ) => Promise<{ files: string[]; ref?: string; digest?: string }>;
 
-export function defaultRenderInto(options: CalmTemplateActionOptions): RenderInto {
+export function defaultRenderInto(
+  options: CalmTemplateActionOptions,
+): RenderInto {
   return async (bundle, architecturePath, outDir, logger) => {
     const resolved = await resolveBundle(bundle, options);
     const r = await renderBundle({
@@ -58,7 +60,9 @@ export function upgradeBranch(t: UpgradeTargets): string {
   const code = t.starter?.to;
   const deploy = t.deploy?.to;
   if (code && deploy) {
-    return `upgrade/both-${t.starter!.name}-${code}-${t.deploy!.name}-${deploy}`;
+    return `upgrade/both-${t.starter!.name}-${code}-${
+      t.deploy!.name
+    }-${deploy}`;
   }
   return code
     ? `upgrade/code-${t.starter!.name}-${code}`
@@ -68,8 +72,12 @@ export function upgradeBranch(t: UpgradeTargets): string {
 /** One line per side that changes, for the commit message and the pull request. */
 export function upgradeSummary(t: UpgradeTargets): string[] {
   return [
-    ...(t.starter?.to ? [`Code: starter ${t.starter.name} ${t.starter.from} → ${t.starter.to}`] : []),
-    ...(t.deploy?.to ? [`Deployment rules: ${t.deploy.name} ${t.deploy.from} → ${t.deploy.to}`] : []),
+    ...(t.starter?.to
+      ? [`Code: starter ${t.starter.name} ${t.starter.from} → ${t.starter.to}`]
+      : []),
+    ...(t.deploy?.to
+      ? [`Deployment rules: ${t.deploy.name} ${t.deploy.from} → ${t.deploy.to}`]
+      : []),
   ];
 }
 
@@ -153,22 +161,31 @@ export function createCalmUpgradeRenderAction(options: {
     schema: {
       input: {
         entityRef: z => z.string().describe('The service Component'),
-        upgradeCode: z => z.boolean().optional().describe('Upgrade the starter. Default true'),
-        upgradeDeploy: z => z.boolean().optional().describe('Upgrade the deployment rules. Default true'),
+        upgradeCode: z =>
+          z.boolean().optional().describe('Upgrade the starter. Default true'),
+        upgradeDeploy: z =>
+          z
+            .boolean()
+            .optional()
+            .describe('Upgrade the deployment rules. Default true'),
       },
       output: {
         changed: z => z.boolean().describe('Something was upgraded'),
-        codeChanged: z => z.boolean().describe('The starter was upgraded: build a new image'),
+        codeChanged: z =>
+          z.boolean().describe('The starter was upgraded: build a new image'),
         name: z => z.string(),
         dir: z => z.string().describe('The working copy'),
         branch: z => z.string(),
         commit: z => z.string(),
         shortCommit: z => z.string(),
-        currentImage: z => z.string().describe('The image the overlay deploys now'),
+        currentImage: z =>
+          z.string().describe('The image the overlay deploys now'),
         summary: z => z.string().describe('What changes, one line per side'),
         starter: z => z.string().describe('<name>@<version> after the upgrade'),
-        deployBundle: z => z.string().describe('<name>@<version> after the upgrade, or empty'),
-        architecturePath: z => z.string().describe('The architecture, copied into the workspace'),
+        deployBundle: z =>
+          z.string().describe('<name>@<version> after the upgrade, or empty'),
+        architecturePath: z =>
+          z.string().describe('The architecture, copied into the workspace'),
         hubNamespace: z => z.string(),
         architecture: z => z.string(),
         architectureVersion: z => z.string(),
@@ -176,7 +193,9 @@ export function createCalmUpgradeRenderAction(options: {
     },
     async handler(ctx) {
       if (!options.gitops) {
-        throw new Error('calm.gitops is not configured: only services in Git can be upgraded');
+        throw new Error(
+          'calm.gitops is not configured: only services in Git can be upgraded',
+        );
       }
       const ref = stringifyEntityRef(parseEntityRef(ctx.input.entityRef));
       const entity = await options.catalog.getEntityByRef(ref, {
@@ -199,12 +218,21 @@ export function createCalmUpgradeRenderAction(options: {
         );
       }
       const dir = resolveSafeChildPath(options.localDir, name);
-      const targets = upgradeTargets(current, await options.listBundles(), current.pattern);
+      const targets = upgradeTargets(
+        current,
+        await options.listBundles(),
+        current.pattern,
+      );
       const wanted: UpgradeTargets = {
-        ...(ctx.input.upgradeCode !== false && targets.starter?.to ? { starter: targets.starter } : {}),
-        ...(ctx.input.upgradeDeploy !== false && targets.deploy?.to ? { deploy: targets.deploy } : {}),
+        ...(ctx.input.upgradeCode !== false && targets.starter?.to
+          ? { starter: targets.starter }
+          : {}),
+        ...(ctx.input.upgradeDeploy !== false && targets.deploy?.to
+          ? { deploy: targets.deploy }
+          : {}),
       };
-      const hubNamespace = a[ANN.architectureNamespace] ?? a[ANN.namespace] ?? '';
+      const hubNamespace =
+        a[ANN.architectureNamespace] ?? a[ANN.namespace] ?? '';
       const git = { logger: ctx.logger, signal: ctx.signal };
       const base = {
         name,
@@ -217,8 +245,14 @@ export function createCalmUpgradeRenderAction(options: {
       for (const [k, v] of Object.entries(base)) {
         ctx.output(k as any, v);
       }
-      const workspaceArchitecture = resolveSafeChildPath(ctx.workspacePath, ARCHITECTURE_FILE);
-      await fs.copyFile(path.join(dir, ARCHITECTURE_FILE), workspaceArchitecture);
+      const workspaceArchitecture = resolveSafeChildPath(
+        ctx.workspacePath,
+        ARCHITECTURE_FILE,
+      );
+      await fs.copyFile(
+        path.join(dir, ARCHITECTURE_FILE),
+        workspaceArchitecture,
+      );
       ctx.output('architecturePath', ARCHITECTURE_FILE);
 
       const summary = upgradeSummary(wanted);
@@ -232,8 +266,14 @@ export function createCalmUpgradeRenderAction(options: {
         ctx.output('commit', '');
         ctx.output('shortCommit', '');
         ctx.output('summary', 'Already up to date.');
-        ctx.output('starter', `${current.starter.name}@${current.starter.version}`);
-        ctx.output('deployBundle', `${current.deploy.name}@${current.deploy.version}`);
+        ctx.output(
+          'starter',
+          `${current.starter.name}@${current.starter.version}`,
+        );
+        ctx.output(
+          'deployBundle',
+          `${current.deploy.name}@${current.deploy.version}`,
+        );
         return;
       }
 
@@ -251,7 +291,13 @@ export function createCalmUpgradeRenderAction(options: {
         await gitCheckoutBranch(dir, options.gitops.branch, false, git);
       }
       const repo = serviceRepository(options.gitops, name);
-      await gitPull(dir, repo.pushUrl, options.gitops.branch, options.gitops.auth, git);
+      await gitPull(
+        dir,
+        repo.pushUrl,
+        options.gitops.branch,
+        options.gitops.auth,
+        git,
+      );
       const currentImage = await readOverlayImage(dir);
       if (!currentImage) {
         throw new Error(
@@ -269,22 +315,43 @@ export function createCalmUpgradeRenderAction(options: {
         const arch = path.join(dir, ARCHITECTURE_FILE);
         if (wanted.starter?.to) {
           const old = await options.renderInto(
-            `${wanted.starter.name}@${wanted.starter.from}`, arch, path.join(tmp, 'old'), ctx.logger);
+            `${wanted.starter.name}@${wanted.starter.from}`,
+            arch,
+            path.join(tmp, 'old'),
+            ctx.logger,
+          );
           const now = await options.renderInto(
-            `${wanted.starter.name}@${wanted.starter.to}`, arch, path.join(tmp, 'new'), ctx.logger);
+            `${wanted.starter.name}@${wanted.starter.to}`,
+            arch,
+            path.join(tmp, 'new'),
+            ctx.logger,
+          );
           starterRef = now;
           for (const f of old.files.filter(x => !now.files.includes(x))) {
             await fs.rm(resolveSafeChildPath(dir, f), { force: true });
           }
           await copyFiles(path.join(tmp, 'new'), now.files, dir);
-          ctx.logger.info(`Re-rendered the code with ${wanted.starter.name} ${wanted.starter.to}: ${now.files.join(', ')}`);
+          ctx.logger.info(
+            `Re-rendered the code with ${wanted.starter.name} ${
+              wanted.starter.to
+            }: ${now.files.join(', ')}`,
+          );
         }
         if (wanted.deploy?.to) {
           const now = await options.renderInto(
-            `${wanted.deploy.name}@${wanted.deploy.to}`, arch, path.join(tmp, 'deploy'), ctx.logger);
-          await fs.rm(path.join(dir, BASE_DIR), { recursive: true, force: true });
+            `${wanted.deploy.name}@${wanted.deploy.to}`,
+            arch,
+            path.join(tmp, 'deploy'),
+            ctx.logger,
+          );
+          await fs.rm(path.join(dir, BASE_DIR), {
+            recursive: true,
+            force: true,
+          });
           await copyFiles(path.join(tmp, 'deploy'), now.files, dir);
-          ctx.logger.info(`Re-rendered ${BASE_DIR} with ${wanted.deploy.name} ${wanted.deploy.to}`);
+          ctx.logger.info(
+            `Re-rendered ${BASE_DIR} with ${wanted.deploy.name} ${wanted.deploy.to}`,
+          );
         }
       } finally {
         await fs.rm(tmp, { recursive: true, force: true });
@@ -293,14 +360,24 @@ export function createCalmUpgradeRenderAction(options: {
       const catalogInfo = path.join(dir, CATALOG_INFO_FILE);
       await fs.writeFile(
         catalogInfo,
-        withUpgradedBundles(await fs.readFile(catalogInfo, 'utf-8'), wanted, starterRef),
+        withUpgradedBundles(
+          await fs.readFile(catalogInfo, 'utf-8'),
+          wanted,
+          starterRef,
+        ),
       );
-      const commit = await gitCommitAll(dir, [`Upgrade ${name}`, '', ...summary].join('\n'), git);
+      const commit = await gitCommitAll(
+        dir,
+        [`Upgrade ${name}`, '', ...summary].join('\n'),
+        git,
+      );
       if (!commit) {
         // The new versions render the same files: nothing to merge.
         await gitCheckoutBranch(dir, options.gitops.branch, false, git);
         await gitDeleteBranch(dir, branch, git);
-        ctx.logger.info('The new versions render the same files; nothing to upgrade');
+        ctx.logger.info(
+          'The new versions render the same files; nothing to upgrade',
+        );
         ctx.output('changed', false);
         ctx.output('codeChanged', false);
         ctx.output('branch', '');

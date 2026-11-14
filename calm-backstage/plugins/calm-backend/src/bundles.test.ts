@@ -21,8 +21,18 @@ async function folder(name: string, files: Record<string, string>) {
   return dir;
 }
 
-const reg = (name: string, version: string, kind: string, annotations: Record<string, string> = {}) => ({
-  ...readBundleMeta({ name, version, kind, patterns: [{ patternId: 'web-service' }] }),
+const reg = (
+  name: string,
+  version: string,
+  kind: string,
+  annotations: Record<string, string> = {},
+) => ({
+  ...readBundleMeta({
+    name,
+    version,
+    kind,
+    patterns: [{ patternId: 'web-service' }],
+  }),
   ref: `localhost:5050/calm-bundles/${name}:${version}`,
   digest: `sha256:${name}${version}`,
   annotations,
@@ -34,7 +44,8 @@ describe('groupBundles', () => {
       reg('web-service', '3.0.0', 'full'),
       reg('k8s-deploy', '1.0.0', 'deployment'),
       reg('k8s-deploy', '1.1.0', 'deployment', {
-        'org.opencontainers.image.source': 'http://localhost:3300/calm-templates/bundles/src/commit/abc/k8s-deploy/1.1.0',
+        'org.opencontainers.image.source':
+          'http://localhost:3300/calm-templates/bundles/src/commit/abc/k8s-deploy/1.1.0',
         'org.opencontainers.image.revision': 'abc',
         'org.opencontainers.image.created': '2026-11-14T17:44:12Z',
       }),
@@ -47,7 +58,8 @@ describe('groupBundles', () => {
     ]);
     expect(grouped[1].versions.map(v => v.version)).toEqual(['1.1.0', '1.0.0']);
     expect(grouped[1].versions[0]).toMatchObject({
-      source: 'http://localhost:3300/calm-templates/bundles/src/commit/abc/k8s-deploy/1.1.0',
+      source:
+        'http://localhost:3300/calm-templates/bundles/src/commit/abc/k8s-deploy/1.1.0',
       revision: 'abc',
       created: '2026-11-14T17:44:12Z',
     });
@@ -56,7 +68,9 @@ describe('groupBundles', () => {
 
   it('drops a source annotation that is not an http(s) URL', () => {
     const [g] = groupBundles([
-      reg('x', '1.0.0', 'starter', { 'org.opencontainers.image.source': 'javascript:alert(1)' }),
+      reg('x', '1.0.0', 'starter', {
+        'org.opencontainers.image.source': 'javascript:alert(1)',
+      }),
     ]);
     expect(g.versions[0].source).toBeUndefined();
   });
@@ -64,7 +78,10 @@ describe('groupBundles', () => {
 
 describe('bundle files', () => {
   it('lists the files and refuses a path not listed in the bundle', async () => {
-    const dir = await folder('b', { 'index.json': '{}', 'templates/app.hbs': 'hello' });
+    const dir = await folder('b', {
+      'index.json': '{}',
+      'templates/app.hbs': 'hello',
+    });
     await folder('secret', { 'x.txt': 'no' });
     expect(await bundleFiles(dir)).toEqual([
       { path: 'index.json', size: 2 },
@@ -76,8 +93,16 @@ describe('bundle files', () => {
   });
 
   it('reports added, removed and changed files with a unified patch', async () => {
-    const a = await folder('a', { 'same.txt': 's', 'gone.txt': 'g', 'app.js': 'one\ntwo\n' });
-    const b = await folder('b', { 'same.txt': 's', 'new.txt': 'n', 'app.js': 'one\nthree\n' });
+    const a = await folder('a', {
+      'same.txt': 's',
+      'gone.txt': 'g',
+      'app.js': 'one\ntwo\n',
+    });
+    const b = await folder('b', {
+      'same.txt': 's',
+      'new.txt': 'n',
+      'app.js': 'one\nthree\n',
+    });
     const diff = await bundleDiff(a, b, '1.0.0', '1.1.0');
     expect(diff.map(d => [d.path, d.status])).toEqual([
       ['app.js', 'changed'],

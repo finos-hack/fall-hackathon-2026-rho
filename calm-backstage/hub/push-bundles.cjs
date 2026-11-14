@@ -26,23 +26,40 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
-const { bundleRef, checkBundle, pushBundle } = require('../plugins/calm-node/src/oci.ts');
+const {
+  bundleRef,
+  checkBundle,
+  pushBundle,
+} = require('../plugins/calm-node/src/oci.ts');
 
 const REGISTRY = process.env.CALM_BUNDLE_REGISTRY || 'http://localhost:5050';
 const PREFIX = process.env.CALM_BUNDLE_PREFIX || 'calm-bundles';
-const GITEA = (process.env.CALM_GITEA_URL || 'http://localhost:3300').replace(/\/+$/, '');
+const GITEA = (process.env.CALM_GITEA_URL || 'http://localhost:3300').replace(
+  /\/+$/,
+  '',
+);
 const GITEA_USER = process.env.CALM_GITEA_USER || 'calm';
 const GITEA_PASSWORD = process.env.CALM_GITEA_PASSWORD || 'calm-local-dev';
-const TEMPLATES_REPO = process.env.CALM_TEMPLATES_REPO || 'calm-templates/bundles';
+const TEMPLATES_REPO =
+  process.env.CALM_TEMPLATES_REPO || 'calm-templates/bundles';
 const ROOT = path.resolve(__dirname, '..');
 const CONFIG_FILE = 'calm-backstage.json';
 const FIXED_DATE = '2026-11-14T00:00:00Z';
 const AUTHOR = { name: 'CALM Backstage', email: 'calm-backstage@localhost' };
 
 function git(cwd, args, { auth = false, date } = {}) {
-  const config = ['-c', 'core.hooksPath=/dev/null', '-c', 'credential.helper=', '-c', 'commit.gpgsign=false'];
+  const config = [
+    '-c',
+    'core.hooksPath=/dev/null',
+    '-c',
+    'credential.helper=',
+    '-c',
+    'commit.gpgsign=false',
+  ];
   if (auth) {
-    const basic = Buffer.from(`${GITEA_USER}:${GITEA_PASSWORD}`).toString('base64');
+    const basic = Buffer.from(`${GITEA_USER}:${GITEA_PASSWORD}`).toString(
+      'base64',
+    );
     config.push('-c', `http.extraHeader=Authorization: Basic ${basic}`);
   }
   return execFileSync('git', [...config, ...args], {
@@ -126,7 +143,7 @@ function mirror(dir) {
       '',
       'The sources of the template bundles Backstage offers: starters (the code a service begins with),',
       'deployment rules (how any service runs) and the older full bundles. One folder per `<name>/<version>`;',
-      "each has a `calm-backstage.json` that says its kind and the CALM patterns it fits.",
+      'each has a `calm-backstage.json` that says its kind and the CALM patterns it fits.',
       '',
       'Change a bundle by adding a new version folder (a published version never changes), then publish it:',
       '`node hub/push-bundles.cjs --from-git` in calm-backstage.',
@@ -135,11 +152,19 @@ function mirror(dir) {
   );
   git(dir, ['add', '-A']);
   if (git(dir, ['status', '--porcelain'])) {
-    git(dir, ['commit', '-q', '-m', 'Sync bundles from calm-backstage'], { date: FIXED_DATE });
-    git(dir, ['push', '-q', `${GITEA}/${TEMPLATES_REPO}.git`, 'main:main'], { auth: true });
-    console.log(`commit   ${TEMPLATES_REPO} ${git(dir, ['rev-parse', 'HEAD'])}`);
+    git(dir, ['commit', '-q', '-m', 'Sync bundles from calm-backstage'], {
+      date: FIXED_DATE,
+    });
+    git(dir, ['push', '-q', `${GITEA}/${TEMPLATES_REPO}.git`, 'main:main'], {
+      auth: true,
+    });
+    console.log(
+      `commit   ${TEMPLATES_REPO} ${git(dir, ['rev-parse', 'HEAD'])}`,
+    );
   } else {
-    console.log(`same     ${TEMPLATES_REPO} ${git(dir, ['rev-parse', 'HEAD'])}`);
+    console.log(
+      `same     ${TEMPLATES_REPO} ${git(dir, ['rev-parse', 'HEAD'])}`,
+    );
   }
   return git(dir, ['rev-parse', 'HEAD']);
 }
@@ -149,14 +174,19 @@ async function publish(dirs, root, revision) {
   let skipped = 0;
   const refused = [];
   for (const dir of dirs) {
-    const meta = JSON.parse(fs.readFileSync(path.join(dir, CONFIG_FILE), 'utf8'));
+    const meta = JSON.parse(
+      fs.readFileSync(path.join(dir, CONFIG_FILE), 'utf8'),
+    );
     if (typeof meta.name !== 'string' || typeof meta.version !== 'string') {
-      throw new Error(`${path.join(dir, CONFIG_FILE)} needs a name and a version`);
+      throw new Error(
+        `${path.join(dir, CONFIG_FILE)} needs a name and a version`,
+      );
     }
     const rel = path.relative(root, dir).split(path.sep).join('/');
     const annotations = {
       'org.opencontainers.image.created': new Date().toISOString(),
-      'calm.finos.org/bundle-kind': typeof meta.kind === 'string' ? meta.kind : 'full',
+      'calm.finos.org/bundle-kind':
+        typeof meta.kind === 'string' ? meta.kind : 'full',
       ...(revision
         ? {
             'org.opencontainers.image.source': `${GITEA}/${TEMPLATES_REPO}/src/commit/${revision}/${rel}`,
@@ -170,7 +200,9 @@ async function publish(dirs, root, revision) {
       r = await pushBundle({ dir, ref, annotations, immutable: true });
     } catch (e) {
       // A changed published version: report it and go on with the others. Anything else is a real failure.
-      if (!/already published with different content/.test(String(e.message ?? e))) {
+      if (
+        !/already published with different content/.test(String(e.message ?? e))
+      ) {
         throw e;
       }
       refused.push(`${meta.name}@${meta.version}`);
@@ -185,10 +217,14 @@ async function publish(dirs, root, revision) {
       console.log(`pushed   ${r.ref}  ${r.digest}`);
     }
   }
-  console.log(`bundles: ${pushed} published, ${skipped} already there (${REGISTRY})`);
+  console.log(
+    `bundles: ${pushed} published, ${skipped} already there (${REGISTRY})`,
+  );
   if (refused.length) {
     throw new Error(
-      `${refused.join(', ')} changed after being published; give each change a new version (a published version never changes)`,
+      `${refused.join(
+        ', ',
+      )} changed after being published; give each change a new version (a published version never changes)`,
     );
   }
 }
@@ -201,28 +237,47 @@ async function main() {
     process.exit(2);
   }
   if (!(await waitFor(`${REGISTRY.replace(/\/+$/, '')}/v2/`, 'registry'))) {
-    throw new Error(`bundle registry not reachable at ${REGISTRY} (start it with: yarn hub:up)`);
+    throw new Error(
+      `bundle registry not reachable at ${REGISTRY} (start it with: yarn hub:up)`,
+    );
   }
   if (!(await waitFor(`${GITEA}/api/healthz`, 'gitea', fromGit ? 30 : 5))) {
     if (fromGit) {
-      throw new Error(`Gitea not reachable at ${GITEA} (start it with: yarn hub:up)`);
+      throw new Error(
+        `Gitea not reachable at ${GITEA} (start it with: yarn hub:up)`,
+      );
     }
-    console.warn(`bundles: Gitea not reachable at ${GITEA}; publishing from bundles/ without source annotations`);
-    await publish(bundleDirs(path.join(ROOT, 'bundles')), path.join(ROOT, 'bundles'), undefined);
+    console.warn(
+      `bundles: Gitea not reachable at ${GITEA}; publishing from bundles/ without source annotations`,
+    );
+    await publish(
+      bundleDirs(path.join(ROOT, 'bundles')),
+      path.join(ROOT, 'bundles'),
+      undefined,
+    );
     return;
   }
   if (!fromGit) {
     // Refuse before anything reaches Gitea: its main must never hold a version that differs from the registry's.
     const changed = [];
     for (const dir of bundleDirs(path.join(ROOT, 'bundles'))) {
-      const meta = JSON.parse(fs.readFileSync(path.join(dir, CONFIG_FILE), 'utf8'));
-      if ((await checkBundle({ dir, ref: bundleRef(REGISTRY, PREFIX, meta.name, meta.version) })) === 'changed') {
+      const meta = JSON.parse(
+        fs.readFileSync(path.join(dir, CONFIG_FILE), 'utf8'),
+      );
+      if (
+        (await checkBundle({
+          dir,
+          ref: bundleRef(REGISTRY, PREFIX, meta.name, meta.version),
+        })) === 'changed'
+      ) {
         changed.push(`${meta.name}@${meta.version}`);
       }
     }
     if (changed.length) {
       throw new Error(
-        `${changed.join(', ')} changed after being published; give each change a new version (a published version never changes). Nothing was committed to Gitea or published.`,
+        `${changed.join(
+          ', ',
+        )} changed after being published; give each change a new version (a published version never changes). Nothing was committed to Gitea or published.`,
       );
     }
   }

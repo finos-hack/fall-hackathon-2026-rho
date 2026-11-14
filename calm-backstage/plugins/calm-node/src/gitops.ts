@@ -33,7 +33,8 @@ export function readGitopsSettings(
     gitUrl,
     clusterGitUrl: trim(g.getOptionalString('clusterGitUrl') ?? gitUrl),
     servicesOrg: g.getOptionalString('servicesOrg') ?? 'calm-services',
-    templatesRepo: g.getOptionalString('templatesRepo') ?? 'calm-templates/bundles',
+    templatesRepo:
+      g.getOptionalString('templatesRepo') ?? 'calm-templates/bundles',
     branch: g.getOptionalString('branch') ?? 'main',
     auth: {
       username: g.getString('username'),

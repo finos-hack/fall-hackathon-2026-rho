@@ -316,6 +316,17 @@ image pulls are warmed before recording.
 **Cut line**, if time runs short: Nisshi as one `full` bundle; drop the explorer's version diff; Quarkus with one
 version. The demo video is not cut.
 
+## What changed while building (2026-11-14)
+
+- `calm.finos.org/gitops` and the `calm-gitops` tag mark a service once `calm:deploy:gitops` has deployed it (not at
+  `calm:git:publish`), so never-deployed services are not offered upgrades.
+- Extra bundle versions: `k8s-deploy` 1.2.0 and 1.2.1 (backing services never run twice during a rollout; 1.2.1's
+  `maxSurge: 0` replaces 1.2.0's `Recreate`, which an existing deployment refuses) and `nisshi-stream-app` 1.0.1
+  (creates its topic again after a broker restart on empty storage). The demo upgrades `k8s-deploy` 1.0.0 → 1.2.1.
+- The app proxy sets its own Content-Security-Policy.
+- No full from-scratch run on empty Compose volumes: they are shared with another checkout. The cluster was rebuilt
+  from scratch and the seeds' create path was run against throwaway containers.
+
 ## Left to the builder
 
 File layout inside plugins, test split, exact UI layout, and whether a step is one action or two, within the above.

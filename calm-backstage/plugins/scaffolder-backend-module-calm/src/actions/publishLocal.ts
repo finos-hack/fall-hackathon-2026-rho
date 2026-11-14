@@ -69,9 +69,7 @@ export function serviceEntity(opts: {
         opts.description ??
         `Service created from the CALM pattern ${
           opts.namespace ? `${opts.namespace}/` : ''
-        }${opts.patternId} ${
-          opts.patternVersion
-        }, rendered with ${
+        }${opts.patternId} ${opts.patternVersion}, rendered with ${
           opts.deployBundle
             ? `the starter ${opts.bundleName} ${opts.bundleVersion} and the deployment rules ${opts.deployBundle.name} ${opts.deployBundle.version}`
             : `the template bundle ${opts.bundleName} ${opts.bundleVersion}`

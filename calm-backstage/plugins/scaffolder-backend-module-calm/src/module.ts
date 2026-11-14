@@ -139,7 +139,11 @@ export const scaffolderModuleCalm = createBackendModule({
                   .then(t => JSON.parse(t))
                   .catch(() => undefined);
                 if (json) {
-                  local.push({ ...readBundleMeta(json, b), name: b.name, version: b.version });
+                  local.push({
+                    ...readBundleMeta(json, b),
+                    name: b.name,
+                    version: b.version,
+                  });
                 }
               }
               const fromRegistry = registry
@@ -149,7 +153,11 @@ export const scaffolderModuleCalm = createBackendModule({
             },
             renderInto: defaultRenderInto({ bundles, registry, cacheDir }),
           }),
-          createCalmUpgradeMergeAction({ gitops, settings: kubernetes, localDir }),
+          createCalmUpgradeMergeAction({
+            gitops,
+            settings: kubernetes,
+            localDir,
+          }),
           createCalmCatalogRefreshAction({ catalog }),
           createCalmDeployGitopsAction({
             settings: kubernetes,

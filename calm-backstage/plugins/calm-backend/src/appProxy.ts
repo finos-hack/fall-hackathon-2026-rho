@@ -92,18 +92,33 @@ const fileOrData = async (file?: string, data?: string) =>
   data ? Buffer.from(data, 'base64') : file ? fs.readFile(file) : undefined;
 
 /** The API server and credentials of the kubeconfig's context (files or inline data, client certificate or token). */
-export async function readApiServer(settings: KubernetesDeploySettings): Promise<ApiServer> {
+export async function readApiServer(
+  settings: KubernetesDeploySettings,
+): Promise<ApiServer> {
   const kc = YAML.parse(await fs.readFile(settings.kubeconfig, 'utf-8'));
-  const ctx = (kc.contexts ?? []).find((c: any) => c.name === settings.context)?.context;
-  const cluster = (kc.clusters ?? []).find((c: any) => c.name === ctx?.cluster)?.cluster;
-  const user = (kc.users ?? []).find((u: any) => u.name === ctx?.user)?.user ?? {};
+  const ctx = (kc.contexts ?? []).find(
+    (c: any) => c.name === settings.context,
+  )?.context;
+  const cluster = (kc.clusters ?? []).find(
+    (c: any) => c.name === ctx?.cluster,
+  )?.cluster;
+  const user =
+    (kc.users ?? []).find((u: any) => u.name === ctx?.user)?.user ?? {};
   if (!cluster?.server) {
-    throw new Error(`${settings.kubeconfig} has no cluster for the context ${settings.context}`);
+    throw new Error(
+      `${settings.kubeconfig} has no cluster for the context ${settings.context}`,
+    );
   }
   return {
     server: new URL(cluster.server),
-    ca: await fileOrData(cluster['certificate-authority'], cluster['certificate-authority-data']),
-    cert: await fileOrData(user['client-certificate'], user['client-certificate-data']),
+    ca: await fileOrData(
+      cluster['certificate-authority'],
+      cluster['certificate-authority-data'],
+    ),
+    cert: await fileOrData(
+      user['client-certificate'],
+      user['client-certificate-data'],
+    ),
     key: await fileOrData(user['client-key'], user['client-key-data']),
     token: typeof user.token === 'string' ? user.token : undefined,
   };
@@ -115,7 +130,11 @@ function request(
   path: string,
   headers: Record<string, string>,
   body?: Buffer,
-): Promise<{ status: number; headers: IncomingHttpHeaders; stream: NodeJS.ReadableStream }> {
+): Promise<{
+  status: number;
+  headers: IncomingHttpHeaders;
+  stream: NodeJS.ReadableStream;
+}> {
   return new Promise((resolve, reject) => {
     const req = https.request(
       {
@@ -133,9 +152,16 @@ function request(
         },
         timeout: 15000,
       },
-      res => resolve({ status: res.statusCode ?? 502, headers: res.headers, stream: res }),
+      res =>
+        resolve({
+          status: res.statusCode ?? 502,
+          headers: res.headers,
+          stream: res,
+        }),
     );
-    req.on('timeout', () => req.destroy(new Error('the API server did not answer in 15 s')));
+    req.on('timeout', () =>
+      req.destroy(new Error('the API server did not answer in 15 s')),
+    );
     req.on('error', reject);
     if (body) {
       req.write(body);
@@ -157,13 +183,19 @@ export function createAppProxy(settings: KubernetesDeploySettings | undefined) {
   const allowed = new Map<string, number>();
   let api: Promise<ApiServer> | undefined;
 
-  async function isCalmService(a: ApiServer, namespace: string, name: string): Promise<boolean> {
+  async function isCalmService(
+    a: ApiServer,
+    namespace: string,
+    name: string,
+  ): Promise<boolean> {
     const key = `${namespace}/${name}`;
     const until = allowed.get(key);
     if (until && until > Date.now()) {
       return true;
     }
-    const r = await request(a, 'GET', `/api/v1/namespaces/${namespace}`, { Accept: 'application/json' });
+    const r = await request(a, 'GET', `/api/v1/namespaces/${namespace}`, {
+      Accept: 'application/json',
+    });
     if (r.status !== 200) {
       r.stream.resume();
       return false;
@@ -182,7 +214,10 @@ export function createAppProxy(settings: KubernetesDeploySettings | undefined) {
     const at = req.originalUrl.indexOf(marker);
     const rest = at >= 0 ? req.originalUrl.slice(at + marker.length) : '';
     if (!settings) {
-      res.status(404).type('text/plain').send('No cluster is configured (calm.deploy.kubernetes).');
+      res
+        .status(404)
+        .type('text/plain')
+        .send('No cluster is configured (calm.deploy.kubernetes).');
       return;
     }
     if (rest === '' || rest.startsWith('?')) {
@@ -192,14 +227,20 @@ export function createAppProxy(settings: KubernetesDeploySettings | undefined) {
     }
     const target = appTarget(name, rest, settings.namespacePrefix);
     if (!target) {
-      res.status(404).type('text/plain').send('Not a deployed CALM service path.');
+      res
+        .status(404)
+        .type('text/plain')
+        .send('Not a deployed CALM service path.');
       return;
     }
     try {
       api ??= readApiServer(settings);
       const a = await api;
       if (!(await isCalmService(a, target.namespace, name))) {
-        res.status(404).type('text/plain').send(`${name} is not a deployed CALM service.`);
+        res
+          .status(404)
+          .type('text/plain')
+          .send(`${name} is not a deployed CALM service.`);
         return;
       }
       const headers: Record<string, string> = {};
@@ -212,7 +253,9 @@ export function createAppProxy(settings: KubernetesDeploySettings | undefined) {
       let body: Buffer | undefined;
       if (req.method !== 'GET' && req.method !== 'HEAD') {
         body = Buffer.from(
-          req.body !== undefined && typeof req.body === 'object' && headers['content-type']?.includes('json')
+          req.body !== undefined &&
+            typeof req.body === 'object' &&
+            headers['content-type']?.includes('json')
             ? JSON.stringify(req.body)
             : '',
         );
@@ -221,7 +264,11 @@ export function createAppProxy(settings: KubernetesDeploySettings | undefined) {
       const up = await request(a, req.method, target.path, headers, body);
       res.status(up.status);
       for (const [k, v] of Object.entries(up.headers)) {
-        if (v !== undefined && !HOP_BY_HOP.has(k.toLowerCase()) && k.toLowerCase() !== 'set-cookie') {
+        if (
+          v !== undefined &&
+          !HOP_BY_HOP.has(k.toLowerCase()) &&
+          k.toLowerCase() !== 'set-cookie'
+        ) {
           res.setHeader(k, v as string | string[]);
         }
       }
@@ -230,7 +277,10 @@ export function createAppProxy(settings: KubernetesDeploySettings | undefined) {
       up.stream.pipe(res);
     } catch (e) {
       api = undefined;
-      res.status(502).type('text/plain').send(`The service could not be reached: ${(e as Error).message ?? e}`);
+      res
+        .status(502)
+        .type('text/plain')
+        .send(`The service could not be reached: ${(e as Error).message ?? e}`);
     }
   };
 }

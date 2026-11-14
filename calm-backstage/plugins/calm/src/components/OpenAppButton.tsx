@@ -14,7 +14,11 @@ export function OpenAppButton(props: { name: string }) {
     let cancelled = false;
     discovery
       .getBaseUrl('calm')
-      .then(base => !cancelled && setHref(`${base}/app/${encodeURIComponent(props.name)}/`));
+      .then(
+        base =>
+          !cancelled &&
+          setHref(`${base}/app/${encodeURIComponent(props.name)}/`),
+      );
     return () => {
       cancelled = true;
     };

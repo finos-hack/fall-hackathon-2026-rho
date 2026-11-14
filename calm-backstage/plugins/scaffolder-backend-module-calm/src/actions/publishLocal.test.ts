@@ -45,12 +45,22 @@ const input = {
 describe('calm:publish:local with deployment rules', () => {
   it('merges the deployment rules and records the deployment bundle', async () => {
     await action().handler(
-      ctx({ ...input, deployBundle: 'k8s-deploy@1.0.0', deploySourceDir: 'rendered-deploy' }),
+      ctx({
+        ...input,
+        deployBundle: 'k8s-deploy@1.0.0',
+        deploySourceDir: 'rendered-deploy',
+      }),
     );
     const dir = path.join(root, 'output', 'orders');
-    await expect(fs.stat(path.join(dir, 'deploy/k8s/kustomization.yaml'))).resolves.toBeTruthy();
-    await expect(fs.stat(path.join(dir, 'src/server.js'))).resolves.toBeTruthy();
-    const entity = YAML.parse(await fs.readFile(path.join(dir, 'catalog-info.yaml'), 'utf-8'));
+    await expect(
+      fs.stat(path.join(dir, 'deploy/k8s/kustomization.yaml')),
+    ).resolves.toBeTruthy();
+    await expect(
+      fs.stat(path.join(dir, 'src/server.js')),
+    ).resolves.toBeTruthy();
+    const entity = YAML.parse(
+      await fs.readFile(path.join(dir, 'catalog-info.yaml'), 'utf-8'),
+    );
     expect(entity.metadata.annotations).toMatchObject({
       'calm.finos.org/bundle': 'node-service',
       'calm.finos.org/bundle-version': '1.0.0',
@@ -71,16 +81,34 @@ describe('calm:publish:local with deployment rules', () => {
     await write('rendered/deploy/k8s/kustomization.yaml');
     await expect(
       action().handler(
-        ctx({ ...input, deployBundle: 'k8s-deploy@1.0.0', deploySourceDir: 'rendered-deploy' }),
+        ctx({
+          ...input,
+          deployBundle: 'k8s-deploy@1.0.0',
+          deploySourceDir: 'rendered-deploy',
+        }),
       ),
-    ).rejects.toThrow(/Both the starter and the deployment rules rendered deploy\/k8s\/kustomization.yaml/);
+    ).rejects.toThrow(
+      /Both the starter and the deployment rules rendered deploy\/k8s\/kustomization.yaml/,
+    );
   });
 
   it('records no deployment bundle for a full bundle (empty inputs)', async () => {
-    await action().handler(ctx({ ...input, bundle: 'web-service@3.0.0', deployBundle: '', deploySourceDir: '' }));
-    const entity = YAML.parse(
-      await fs.readFile(path.join(root, 'output', 'orders', 'catalog-info.yaml'), 'utf-8'),
+    await action().handler(
+      ctx({
+        ...input,
+        bundle: 'web-service@3.0.0',
+        deployBundle: '',
+        deploySourceDir: '',
+      }),
     );
-    expect(entity.metadata.annotations['calm.finos.org/deploy-bundle']).toBeUndefined();
+    const entity = YAML.parse(
+      await fs.readFile(
+        path.join(root, 'output', 'orders', 'catalog-info.yaml'),
+        'utf-8',
+      ),
+    );
+    expect(
+      entity.metadata.annotations['calm.finos.org/deploy-bundle'],
+    ).toBeUndefined();
   });
 });

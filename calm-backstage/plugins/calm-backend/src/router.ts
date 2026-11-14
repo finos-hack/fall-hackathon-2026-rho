@@ -350,7 +350,8 @@ export async function createRouter(options: {
     if (!pull) {
       pull = pullBundleCached({
         ref: b.ref,
-        cacheDir: options.bundleCacheDir ?? path.join(os.tmpdir(), 'calm-bundles'),
+        cacheDir:
+          options.bundleCacheDir ?? path.join(os.tmpdir(), 'calm-bundles'),
       }).then(p => p.dir);
       pulls.set(key, pull);
       pull.catch(() => pulls.delete(key));
@@ -377,7 +378,9 @@ export async function createRouter(options: {
     const dir = await pulledBundle(req.params.name, req.params.version);
     const text = await bundleFile(dir, file);
     if (text === undefined) {
-      throw new NotFoundError(`${req.params.name}@${req.params.version} has no file ${file}`);
+      throw new NotFoundError(
+        `${req.params.name}@${req.params.version} has no file ${file}`,
+      );
     }
     res.type('text/plain').send(text);
   });

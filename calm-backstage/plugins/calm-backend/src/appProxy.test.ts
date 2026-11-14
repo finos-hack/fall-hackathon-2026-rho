@@ -12,7 +12,14 @@ describe('appTarget', () => {
   });
 
   it('rejects .. segments, encoded slashes and backslashes', () => {
-    for (const rest of ['/../../kube-system', '/a/%2e%2e/b', '/a%2Fb', '/a%5cb', '/a\\b', '/%zz']) {
+    for (const rest of [
+      '/../../kube-system',
+      '/a/%2e%2e/b',
+      '/a%2Fb',
+      '/a%5cb',
+      '/a\\b',
+      '/%zz',
+    ]) {
       expect(appTarget('orders', rest, 'calm-')).toBeUndefined();
     }
   });
