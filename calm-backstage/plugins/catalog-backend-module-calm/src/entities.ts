@@ -67,6 +67,8 @@ export interface CalmSnapshot {
   architectures: HubDocument[];
   controls: ControlDocument[];
   bundles: BundleInfo[];
+  /** `calm.gitops` is configured: services are pushed to Git and deployed by Flux. */
+  gitops?: boolean;
 }
 
 const resourceRef = (name: string) => `resource:default/${name}`;
@@ -267,6 +269,16 @@ const DEPLOYED_TEXT = {
   ].join('\n'),
 };
 
+/** The output text about the service's Git repository and, when it was deployed, the commit Flux applied. */
+const GIT_TEXT = {
+  title: 'Git and Flux',
+  content: [
+    'Repository: ${{ steps["git-publish"].output.repoUrl }} (the working copy is the published folder).',
+    '',
+    '${{ ("Flux (`" + steps.deploy.output.kustomization + "`) applied commit `" + steps.deploy.output.commit + "`.") if steps.deploy.output.kustomization else "Not deployed, so Flux was not set up for it." }}',
+  ].join('\n'),
+};
+
 /**
  * The output text about CALM Hub: the architecture version and, in a Template that can deploy, the deployment
  * decorator when one was posted.
@@ -288,6 +300,7 @@ export function templateEntity(
   p: HubDocument,
   bundles: BundleInfo[],
   hubUrl: string,
+  opts: { gitops?: boolean } = {},
 ): Entity {
   const decisions = readPatternDecisions(p.doc);
   const fitting = bundlesFor(p, bundles);
@@ -438,7 +451,11 @@ export function templateEntity(
           },
         },
         ...(bundleValues.length
-          ? publishSteps(p, deployable.length ? isDeployable : undefined)
+          ? publishSteps(
+              p,
+              deployable.length ? isDeployable : undefined,
+              Boolean(opts.gitops),
+            )
           : []),
       ],
       output: bundleValues.length
@@ -461,6 +478,7 @@ export function templateEntity(
                   'Architecture: **${{ steps.generate.output.nodeCount }} nodes**, **${{ steps.generate.output.relationshipCount }} relationships**, ${{ steps.fill.output.filledCount }} placeholders filled. `calm validate`: ${{ steps.validate.output.errorCount }} errors, ${{ steps.validate.output.warningCount }} warnings.',
                 ].join('\n'),
               },
+              ...(opts.gitops ? [GIT_TEXT] : []),
               ...(deployable.length ? [DEPLOYED_TEXT] : []),
               hubText(deployable.length > 0),
             ],
@@ -484,7 +502,11 @@ export function templateEntity(
  * Kubernetes manifests (`isDeployable`, an expression over the parameters) and with the `deploy` box ticked, build
  * the image, deploy it and record the deployment in the Hub; last, register the new service.
  */
-function publishSteps(p: HubDocument, isDeployable?: string): object[] {
+function publishSteps(
+  p: HubDocument,
+  isDeployable: string | undefined,
+  gitops: boolean,
+): object[] {
   return [
     {
       // Before the render, so the rendered files and the published architecture.json carry the $id.
@@ -530,6 +552,21 @@ function publishSteps(p: HubDocument, isDeployable?: string): object[] {
         ...(isDeployable ? { deployable: `\${{ ${isDeployable} }}` } : {}),
       },
     },
+    ...(gitops
+      ? [
+          {
+            // The published folder becomes the working copy of the service's repository.
+            id: 'git-publish',
+            name: 'Push the service to its Git repository',
+            action: 'calm:git:publish',
+            input: {
+              dir: '${{ steps.publish.output.path }}',
+              name: '${{ parameters.name }}',
+              message: `Create \${{ parameters.name }} from the CALM pattern ${p.namespace}/${p.id} ${p.version} with \${{ parameters.bundle }}`,
+            },
+          },
+        ]
+      : []),
     ...(isDeployable
       ? [
           {
@@ -540,15 +577,24 @@ function publishSteps(p: HubDocument, isDeployable?: string): object[] {
             input: {
               dir: '${{ steps.publish.output.path }}',
               name: '${{ parameters.name }}',
-              // Unique per run, so a rerun rolls out the new image.
-              tag: '${{ context.task.id }}',
+              ...(gitops
+                ? {
+                    // The commit the image is built from.
+                    tag: '${{ steps["git-publish"].output.shortCommit }}',
+                  }
+                : {
+                    // Unique per run, so a rerun rolls out the new image.
+                    tag: '${{ context.task.id }}',
+                  }),
             },
           },
           {
             id: 'deploy',
-            name: 'Deploy to the local Kubernetes cluster (kubectl apply)',
+            name: gitops
+              ? 'Deploy through Git and Flux (commit the overlay, wait for Flux)'
+              : 'Deploy to the local Kubernetes cluster (kubectl apply)',
             if: `\${{ parameters.deploy and ${isDeployable} }}`,
-            action: 'calm:deploy:k8s',
+            action: gitops ? 'calm:deploy:gitops' : 'calm:deploy:k8s',
             input: {
               dir: '${{ steps.publish.output.path }}',
               name: '${{ parameters.name }}',
@@ -572,6 +618,12 @@ function publishSteps(p: HubDocument, isDeployable?: string): object[] {
               startTime: '${{ steps.deploy.output.startTime }}',
               endTime: '${{ steps.deploy.output.endTime }}',
               status: 'completed',
+              ...(gitops
+                ? {
+                    gitRepo: '${{ steps.deploy.output.repoUrl }}',
+                    gitCommit: '${{ steps.deploy.output.commit }}',
+                  }
+                : {}),
             },
           },
         ]
@@ -641,7 +693,7 @@ export function buildEntities(s: CalmSnapshot): {
   );
   for (const p of s.patterns) {
     add(patternEntity(p, s.hubUrl, emittedControls));
-    add(templateEntity(p, s.bundles, s.hubUrl));
+    add(templateEntity(p, s.bundles, s.hubUrl, { gitops: s.gitops }));
   }
   const serviceArchitectures: string[] = [];
   for (const a of s.architectures) {

@@ -164,8 +164,8 @@ const bundle = (version: string, deploy?: string): BundleInfo => ({
 });
 const hubUrl = 'http://localhost:8090';
 
-function template(bundles: BundleInfo[]) {
-  const spec = templateEntity(pattern, bundles, hubUrl).spec as any;
+function template(bundles: BundleInfo[], opts: { gitops?: boolean } = {}) {
+  const spec = templateEntity(pattern, bundles, hubUrl, opts).spec as any;
   const steps: any[] = spec.steps;
   return {
     spec,
@@ -242,6 +242,45 @@ describe('templateEntity: build and deploy', () => {
       'CALM Hub',
     ]);
     expect(t.spec.output.text[1].content).not.toContain('decorate');
+  });
+});
+
+describe('templateEntity: Git and Flux', () => {
+  it('pushes the service to Git after publishing, tags the image with the commit and deploys with Flux', () => {
+    const t = template([bundle('3.0.0', 'kubernetes')], { gitops: true });
+    expect(t.stepIds).toEqual([
+      'check-cluster',
+      'generate',
+      'fill',
+      'validate',
+      'register-hub',
+      'template',
+      'publish',
+      'git-publish',
+      'build',
+      'deploy',
+      'decorate',
+      'register',
+    ]);
+    expect(t.step('git-publish')).toMatchObject({
+      action: 'calm:git:publish',
+      input: { dir: '${{ steps.publish.output.path }}' },
+    });
+    expect(t.step('build').input.tag).toBe(
+      '${{ steps["git-publish"].output.shortCommit }}',
+    );
+    expect(t.step('deploy').action).toBe('calm:deploy:gitops');
+    expect(t.step('decorate').input).toMatchObject({
+      gitRepo: '${{ steps.deploy.output.repoUrl }}',
+      gitCommit: '${{ steps.deploy.output.commit }}',
+    });
+  });
+
+  it('keeps kubectl apply without calm.gitops', () => {
+    const t = template([bundle('3.0.0', 'kubernetes')]);
+    expect(t.stepIds).not.toContain('git-publish');
+    expect(t.step('deploy').action).toBe('calm:deploy:k8s');
+    expect(t.step('build').input.tag).toBe('${{ context.task.id }}');
   });
 });
 

@@ -17,11 +17,14 @@ import { createCalmDeployK8sAction } from './actions/deployK8s';
 import { createCalmClusterCheckAction } from './actions/clusterCheck';
 import { createCalmRegisterHubAction } from './actions/registerHub';
 import { createCalmDecorateDeploymentAction } from './actions/decorateDeployment';
+import { createCalmGitPublishAction } from './actions/gitPublish';
+import { createCalmDeployGitopsAction } from './actions/deployGitops';
 import { CalmHubWriteClient } from '@internal/backstage-plugin-calm-common';
 import {
   DEFAULT_NAMESPACE_PREFIX,
   calmBin,
   readBundleRegistrySettings,
+  readGitopsSettings,
   readKubernetesDeploySettings,
   readPublishLocalDir,
 } from '@internal/backstage-plugin-calm-node';
@@ -63,6 +66,13 @@ export const scaffolderModuleCalm = createBackendModule({
             ? `calm:image:build and calm:deploy:k8s use kubeconfig ${kubernetes.kubeconfig}, context ${kubernetes.context}, minikube profile ${kubernetes.minikubeProfile}, namespaces ${kubernetes.namespacePrefix}<name>`
             : 'calm:image:build and calm:deploy:k8s: no calm.deploy.kubernetes kubeconfig and context, so both refuse to run',
         );
+        // The Git server each service is pushed to and Flux deploys from; without it the Template uses kubectl apply.
+        const gitops = readGitopsSettings(config);
+        logger.info(
+          gitops
+            ? `calm:git:publish and calm:deploy:gitops push to ${gitops.gitUrl}/${gitops.servicesOrg}/<name>; Flux clones ${gitops.clusterGitUrl}`
+            : 'calm:git:publish and calm:deploy:gitops: no calm.gitops, so both refuse to run',
+        );
         // Where calm:register:hub stores the architectures of new services, and calm:decorate:deployment their
         // deployments.
         const hub = new CalmHubWriteClient(hubUrl);
@@ -103,6 +113,12 @@ export const scaffolderModuleCalm = createBackendModule({
           createCalmDecorateDeploymentAction({
             hub,
             appBaseUrl: config.getString('app.baseUrl'),
+          }),
+          createCalmGitPublishAction({ settings: gitops, localDir }),
+          createCalmDeployGitopsAction({
+            settings: kubernetes,
+            gitops,
+            localDir,
           }),
           createCalmRegisterLocalAction({ catalog, auth, localDir }),
         );

@@ -46,6 +46,7 @@ export const catalogModuleCalm = createBackendModule({
                 }),
               ),
               bundleRegistry: readBundleRegistrySettings(config),
+              gitops: Boolean(calm.getOptionalConfig('gitops')),
             },
             scheduler.createScheduledTaskRunner({
               frequency: { seconds },

@@ -38,6 +38,7 @@ import {
 } from '@internal/backstage-plugin-calm-node';
 import { DeploymentInfo, readDeployment } from './deployment';
 import { readRecordedDeployments } from './hubDeployments';
+import { GitopsInfo, readGitops } from './gitops';
 
 /**
  * Body of `POST /placeholders`.
@@ -78,6 +79,8 @@ export interface ArchitectureResponse {
    * deployment decorators), newest first. Empty when none is recorded or the Hub could not be read.
    */
   deployments?: RecordedDeployment[];
+  /** For a service deployed through Git: its Flux Kustomization's status and the commit it applied. */
+  gitops?: GitopsInfo;
 }
 
 /** Response of `GET /pattern?entityRef=`. */
@@ -265,7 +268,7 @@ export async function createRouter(options: {
       );
     }
     const fromFile = fromTheHub ? undefined : await fileArchitecture(entity);
-    const [deployment, deployments] = await Promise.all([
+    const [deployment, deployments, gitops] = await Promise.all([
       deploymentRead,
       fromTheHub
         ? readRecordedDeployments(
@@ -274,6 +277,8 @@ export async function createRouter(options: {
             logger.child({ task: 'hub-deployments' }),
           )
         : undefined,
+      // Undefined for an entity without the Kubernetes annotations.
+      readGitops(entity, options.kubernetes, logger.child({ task: 'gitops' })),
     ]);
     const body: ArchitectureResponse = {
       architecture: fromTheHub?.architecture ?? fromFile?.architecture,
@@ -289,6 +294,7 @@ export async function createRouter(options: {
           }
         : { type: 'file', path: fromFile!.path },
       ...(deployment ? { deployment } : {}),
+      ...(gitops ? { gitops } : {}),
       ...(deployments ? { deployments } : {}),
     };
     res.json(body);

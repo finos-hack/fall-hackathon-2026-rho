@@ -86,3 +86,8 @@ export {
   type GitAuth,
   type GitOptions,
 } from './git';
+export {
+  readGitopsSettings,
+  serviceRepository,
+  type GitopsSettings,
+} from './gitops';

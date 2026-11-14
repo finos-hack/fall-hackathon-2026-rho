@@ -123,6 +123,46 @@ function DeploymentSection(props: {
   );
 }
 
+/** Where the service's code and manifests live, and what Flux last applied from there. */
+function GitopsSection(props: {
+  gitops: NonNullable<ArchitectureResponse['gitops']>;
+}) {
+  const g = props.gitops;
+  return (
+    <Box mb={2} data-testid="calm-gitops">
+      <Typography variant="overline" display="block">
+        Git and Flux
+      </Typography>
+      <Typography variant="body2">
+        {g.repoUrl ? <Link to={g.repoUrl}>Git repository</Link> : 'Git repository'}{' '}
+        deployed by the Flux Kustomization <code>{g.kustomization}</code>:{' '}
+        <Chip
+          size="small"
+          label={g.ready ? 'Ready' : 'Not ready'}
+          color={g.ready ? 'primary' : 'default'}
+        />
+      </Typography>
+      <Typography variant="body2">
+        {g.commit ? (
+          <>
+            Applied commit{' '}
+            {g.commitUrl ? (
+              <Link to={g.commitUrl}>
+                <code>{g.commit.slice(0, 12)}</code>
+              </Link>
+            ) : (
+              <code>{g.commit.slice(0, 12)}</code>
+            )}
+            {g.ready ? '' : `. ${g.message}`}
+          </>
+        ) : (
+          g.message
+        )}
+      </Typography>
+    </Box>
+  );
+}
+
 /** How many of the deployments recorded in the Hub the card lists. */
 const SHOWN_DEPLOYMENTS = 5;
 
@@ -281,6 +321,7 @@ export function CalmArchitectureCard() {
               </Box>
             )}
           </Box>
+          {value.gitops && <GitopsSection gitops={value.gitops} />}
           {value.deployment && (
             <DeploymentSection
               deployment={value.deployment}

@@ -29,6 +29,15 @@ export interface ArchitectureResponse {
   };
   /** The deployments CALM Hub holds for the architecture version (deployment decorators), newest first. */
   deployments?: RecordedDeployment[];
+  /** For a service deployed through Git: its Flux Kustomization's status and the commit it applied. */
+  gitops?: {
+    kustomization: string;
+    ready: boolean;
+    message: string;
+    commit?: string;
+    repoUrl?: string;
+    commitUrl?: string;
+  };
 }
 
 /** Response of calm-backend `GET /pattern`. */
