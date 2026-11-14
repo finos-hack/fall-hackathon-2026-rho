@@ -1,0 +1,8 @@
+{
+  "name": "nisshi-stream-app",
+  "version": "1.0.0",
+  "kind": "starter",
+  "runtime": "Node 22 with kafkajs 2.2.4",
+  "description": "Starter for event streaming: a Node service that creates its topic on a Nisshi broker (Kafka-compatible, nisshi.io), produces events and consumes them back, with a page to send events and watch them arrive. Deployed with deployment rules such as k8s-deploy, which run the broker and its storage.",
+  "patterns": [{ "namespace": "hackathon", "patternId": "event-streaming" }]
+}
