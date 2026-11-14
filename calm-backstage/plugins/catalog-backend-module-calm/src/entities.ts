@@ -7,6 +7,7 @@ import {
   CALM_ENTITY_TYPES as TYPES,
   BundleKind,
   BundlePatternRef,
+  CALM_GITOPS_TAG,
   PatternDecision,
   TemplateDecisionParameter,
   bundleEntityName,
@@ -758,6 +759,155 @@ function choicesInput(
   return out;
 }
 
+/** Name of the Template that upgrades a service's starter and deployment rules. */
+export const UPGRADE_TEMPLATE_NAME = 'calm-upgrade';
+
+/**
+ * The Template that upgrades a CALM service in Git: re-render with newer bundles on a branch, build when the code
+ * changed, merge a pull request (the merge commit carries the image), let Flux apply it, record the deployment.
+ */
+export function upgradeTemplateEntity(hubUrl: string): Entity {
+  const changed = '${{ steps.render.output.changed }}';
+  return {
+    apiVersion: 'scaffolder.backstage.io/v1beta3',
+    kind: 'Template',
+    metadata: {
+      name: UPGRADE_TEMPLATE_NAME,
+      title: 'Upgrade a CALM service',
+      description:
+        "Upgrade a service's code (its starter) and/or how it runs (its deployment rules) to the newest bundles that fit its CALM pattern, through a pull request in its Git repository and a Flux redeploy.",
+      annotations: { [ANN.hubUrl]: hubUrl },
+      tags: ['calm', 'calm-upgrade'],
+    },
+    spec: {
+      owner: OWNER,
+      type: 'service',
+      parameters: [
+        {
+          title: 'Upgrade',
+          required: ['service'],
+          properties: {
+            service: {
+              title: 'Service',
+              description: 'A service created from a CALM pattern with a starter, in Git and deployed by Flux.',
+              type: 'string',
+              'ui:field': 'EntityPicker',
+              'ui:options': {
+                catalogFilter: [{ kind: 'Component', 'metadata.tags': CALM_GITOPS_TAG }],
+                defaultKind: 'Component',
+              },
+            },
+            upgradeCode: {
+              title: 'Upgrade the code (starter)',
+              description: 'Re-render the starter with its newest version and build a new image.',
+              type: 'boolean',
+              default: true,
+            },
+            upgradeDeploy: {
+              title: 'Upgrade the deployment rules',
+              description: 'Re-render deploy/k8s with the newest deployment rules.',
+              type: 'boolean',
+              default: true,
+            },
+          },
+        },
+      ],
+      steps: [
+        {
+          id: 'render',
+          name: 'Re-render with the newer bundles on a branch',
+          action: 'calm:upgrade:render',
+          input: {
+            entityRef: '${{ parameters.service }}',
+            upgradeCode: '${{ parameters.upgradeCode }}',
+            upgradeDeploy: '${{ parameters.upgradeDeploy }}',
+          },
+        },
+        {
+          id: 'build',
+          name: 'Build the new image from the branch (minikube image build)',
+          if: '${{ steps.render.output.codeChanged }}',
+          action: 'calm:image:build',
+          input: {
+            dir: '${{ steps.render.output.dir }}',
+            name: '${{ steps.render.output.name }}',
+            tag: '${{ steps.render.output.shortCommit }}',
+          },
+        },
+        {
+          id: 'merge',
+          name: 'Open and merge the pull request',
+          if: changed,
+          action: 'calm:upgrade:merge',
+          input: {
+            dir: '${{ steps.render.output.dir }}',
+            name: '${{ steps.render.output.name }}',
+            branch: '${{ steps.render.output.branch }}',
+            image:
+              '${{ steps.build.output.image if steps.render.output.codeChanged else steps.render.output.currentImage }}',
+            summary: '${{ steps.render.output.summary }}',
+          },
+        },
+        {
+          id: 'deploy',
+          name: 'Wait for Flux to apply the merge commit',
+          if: changed,
+          action: 'calm:deploy:gitops',
+          input: {
+            dir: '${{ steps.render.output.dir }}',
+            name: '${{ steps.render.output.name }}',
+            image:
+              '${{ steps.build.output.image if steps.render.output.codeChanged else steps.render.output.currentImage }}',
+          },
+        },
+        {
+          id: 'decorate',
+          name: 'Record the deployment in CALM Hub',
+          if: changed,
+          action: 'calm:decorate:deployment',
+          input: {
+            hubNamespace: '${{ steps.render.output.hubNamespace }}',
+            architecture: '${{ steps.render.output.architecture }}',
+            version: '${{ steps.render.output.architectureVersion }}',
+            name: '${{ steps.render.output.name }}',
+            cluster: '${{ steps.deploy.output.cluster }}',
+            namespace: '${{ steps.deploy.output.namespace }}',
+            workloads: '${{ steps.deploy.output.deployments }}',
+            architecturePath: '${{ steps.render.output.architecturePath }}',
+            startTime: '${{ steps.deploy.output.startTime }}',
+            endTime: '${{ steps.deploy.output.endTime }}',
+            status: 'completed',
+            gitRepo: '${{ steps.deploy.output.repoUrl }}',
+            gitCommit: '${{ steps.deploy.output.commit }}',
+          },
+        },
+        {
+          id: 'refresh',
+          name: 'Refresh the service in the catalog',
+          action: 'calm:catalog:refresh',
+          input: { entityRef: '${{ parameters.service }}' },
+        },
+      ],
+      output: {
+        links: [
+          { title: 'Open the service', icon: 'catalog', entityRef: '${{ parameters.service }}' },
+          { title: 'Pull request', url: '${{ steps.merge.output.prUrl }}' },
+        ],
+        text: [
+          {
+            title: 'Upgrade',
+            content: [
+              '${{ steps.render.output.summary }}',
+              '',
+              '${{ ("Pull request " + steps.merge.output.prUrl + " merged; Flux applied `" + steps.deploy.output.commit + "`. Now: " + steps.render.output.starter + " and " + steps.render.output.deployBundle + ".") if steps.render.output.changed else "Nothing to upgrade: the service already uses the newest bundles that fit its pattern." }}',
+            ].join('\n'),
+          },
+        ],
+      },
+    },
+  };
+}
+
 /**
  * All entities for one snapshot. Later duplicates of an entity name are dropped and reported. A Hub architecture
  * that `calm:register:hub` stored for a service (its metadata names the service's entity) gets no Component here:
@@ -783,6 +933,9 @@ export function buildEntities(s: CalmSnapshot): {
   const emittedControls = new Set(
     s.controls.map(c => controlEntityName(c.domain, c.control)),
   );
+  if (s.gitops) {
+    add(upgradeTemplateEntity(s.hubUrl));
+  }
   for (const p of s.patterns) {
     add(patternEntity(p, s.hubUrl, emittedControls));
     add(templateEntity(p, s.bundles, s.hubUrl, { gitops: s.gitops }));

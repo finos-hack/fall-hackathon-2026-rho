@@ -318,6 +318,29 @@ describe('templateEntity: starters and deployment rules', () => {
   });
 });
 
+describe('upgrade Template', () => {
+  const snapshot = (gitops: boolean) =>
+    buildEntities({ hubUrl, patterns: [], architectures: [], controls: [], bundles: [], gitops });
+
+  it('is emitted only when services live in Git, with render, build, merge, deploy, decorate and refresh steps', () => {
+    expect(snapshot(false).entities.find(e => e.metadata.name === 'calm-upgrade')).toBeUndefined();
+    const t = snapshot(true).entities.find(e => e.metadata.name === 'calm-upgrade') as any;
+    expect(t.kind).toBe('Template');
+    expect(t.spec.steps.map((s: any) => s.action)).toEqual([
+      'calm:upgrade:render',
+      'calm:image:build',
+      'calm:upgrade:merge',
+      'calm:deploy:gitops',
+      'calm:decorate:deployment',
+      'calm:catalog:refresh',
+    ]);
+    expect(t.spec.steps[1].if).toBe('${{ steps.render.output.codeChanged }}');
+    expect(t.spec.parameters[0].properties.service['ui:options'].catalogFilter).toEqual([
+      { kind: 'Component', 'metadata.tags': 'calm-gitops' },
+    ]);
+  });
+});
+
 describe('templateEntity: Git and Flux', () => {
   it('pushes the service to Git after publishing, tags the image with the commit and deploys with Flux', () => {
     const t = template([bundle('3.0.0', 'kubernetes')], { gitops: true });

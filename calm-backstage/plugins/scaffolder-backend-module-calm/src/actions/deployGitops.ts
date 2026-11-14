@@ -28,7 +28,7 @@ import {
 import YAML from 'yaml';
 import {
   Kubectl,
-  OVERLAY_DIR,
+  GITOPS_OVERLAY_HEADER,
   checkExistingNamespace,
   listAndWaitForRollouts,
   requireBase,
@@ -178,7 +178,7 @@ export function createCalmDeployGitopsAction(options: {
       await writeOverlay(
         dir,
         { name, namespace, image },
-        `# Written by calm:deploy:gitops. Flux applies this folder (${OVERLAY_DIR}) from Git.`,
+        GITOPS_OVERLAY_HEADER,
       );
       const branch = await gitCurrentBranch(dir, git);
       if (branch !== gitops.branch) {

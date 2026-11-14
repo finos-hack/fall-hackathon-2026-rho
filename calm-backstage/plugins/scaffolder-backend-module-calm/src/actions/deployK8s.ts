@@ -105,6 +105,9 @@ export function applyArgs(overlayDir: string): string[] {
   return ['apply', '-k', overlayDir];
 }
 
+/** The first line of an overlay Flux applies: the same for every action that writes it, so rewriting it is no change. */
+export const GITOPS_OVERLAY_HEADER = `# Written by Backstage (calm:deploy:gitops, calm:upgrade:merge). Flux applies this folder (${OVERLAY_DIR}) from Git.`;
+
 /** Throws unless `<dir>/deploy/k8s` holds a kustomize base (a bundle that rendered Kubernetes manifests). */
 export async function requireBase(dir: string): Promise<void> {
   const base = path.join(dir, BASE_DIR);

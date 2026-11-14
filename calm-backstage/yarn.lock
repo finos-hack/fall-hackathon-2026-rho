@@ -5593,6 +5593,7 @@ __metadata:
     "@backstage/backend-plugin-api": "npm:^1.11.0"
     "@backstage/cli": "npm:^0.36.7"
     "@finos/calm-cli": "npm:1.71.0"
+    "@internal/backstage-plugin-calm-common": "workspace:^"
     tar: "npm:^7.5.7"
   languageName: unknown
   linkType: soft

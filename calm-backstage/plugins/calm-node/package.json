@@ -26,6 +26,7 @@
   "dependencies": {
     "@backstage/backend-plugin-api": "^1.11.0",
     "@finos/calm-cli": "1.71.0",
+    "@internal/backstage-plugin-calm-common": "workspace:^",
     "tar": "^7.5.7"
   },
   "devDependencies": {

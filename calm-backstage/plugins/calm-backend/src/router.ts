@@ -31,14 +31,18 @@ import {
   templateEntityName,
 } from '@internal/backstage-plugin-calm-common';
 import {
+  BundleRegistrySettings,
   CalmCliError,
   KubernetesDeploySettings,
+  RegistryBundle,
+  listRegistryBundles,
   generateArchitecture,
   normaliseChoices,
 } from '@internal/backstage-plugin-calm-node';
 import { DeploymentInfo, readDeployment } from './deployment';
 import { readRecordedDeployments } from './hubDeployments';
 import { GitopsInfo, readGitops } from './gitops';
+import { upgradesFor } from './upgrades';
 
 /**
  * Body of `POST /placeholders`.
@@ -119,6 +123,8 @@ export async function createRouter(options: {
   localDir: string;
   /** `calm.deploy.kubernetes`: the cluster a published service's deployment is read from. */
   kubernetes?: KubernetesDeploySettings;
+  /** `calm.bundleRegistry`: the bundles the upgrade check and the Template Explorer read. */
+  registry?: BundleRegistrySettings;
 }): Promise<express.Router> {
   const { logger, catalog, httpAuth, localDir } = options;
   const hub = new CalmHubClient(options.hubUrl);
@@ -298,6 +304,26 @@ export async function createRouter(options: {
       ...(deployments ? { deployments } : {}),
     };
     res.json(body);
+  });
+
+  // The registry is read at most every 10 s: the card asks once per page view.
+  let cachedBundles: { at: number; bundles: RegistryBundle[] } | undefined;
+  async function registryBundles(): Promise<RegistryBundle[]> {
+    if (!options.registry) {
+      return [];
+    }
+    if (cachedBundles && Date.now() - cachedBundles.at < 10_000) {
+      return cachedBundles.bundles;
+    }
+    const read = await listRegistryBundles(options.registry);
+    read.warnings.forEach(w => logger.warn(w));
+    cachedBundles = { at: Date.now(), bundles: read.bundles };
+    return read.bundles;
+  }
+
+  router.get('/upgrades', async (req, res) => {
+    const entity = await entityFrom(req);
+    res.json(upgradesFor(entity, await registryBundles()));
   });
 
   router.get('/pattern', async (req, res) => {

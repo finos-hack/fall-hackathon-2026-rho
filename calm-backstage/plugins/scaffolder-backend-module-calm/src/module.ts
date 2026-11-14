@@ -19,10 +19,22 @@ import { createCalmRegisterHubAction } from './actions/registerHub';
 import { createCalmDecorateDeploymentAction } from './actions/decorateDeployment';
 import { createCalmGitPublishAction } from './actions/gitPublish';
 import { createCalmDeployGitopsAction } from './actions/deployGitops';
-import { CalmHubWriteClient } from '@internal/backstage-plugin-calm-common';
+import {
+  createCalmUpgradeRenderAction,
+  defaultRenderInto,
+} from './actions/upgradeRender';
+import { createCalmUpgradeMergeAction } from './actions/upgradeMerge';
+import { createCalmCatalogRefreshAction } from './actions/catalogRefresh';
+import fs from 'node:fs/promises';
+import {
+  BundleMeta,
+  CalmHubWriteClient,
+  readBundleMeta,
+} from '@internal/backstage-plugin-calm-common';
 import {
   DEFAULT_NAMESPACE_PREFIX,
   calmBin,
+  listRegistryBundles,
   readBundleRegistrySettings,
   readGitopsSettings,
   readKubernetesDeploySettings,
@@ -115,6 +127,30 @@ export const scaffolderModuleCalm = createBackendModule({
             appBaseUrl: config.getString('app.baseUrl'),
           }),
           createCalmGitPublishAction({ settings: gitops, localDir }),
+          createCalmUpgradeRenderAction({
+            catalog,
+            gitops,
+            localDir,
+            listBundles: async () => {
+              const local: BundleMeta[] = [];
+              for (const b of bundles) {
+                const json = await fs
+                  .readFile(path.join(b.path, 'calm-backstage.json'), 'utf-8')
+                  .then(t => JSON.parse(t))
+                  .catch(() => undefined);
+                if (json) {
+                  local.push({ ...readBundleMeta(json, b), name: b.name, version: b.version });
+                }
+              }
+              const fromRegistry = registry
+                ? (await listRegistryBundles(registry)).bundles
+                : [];
+              return [...local, ...fromRegistry];
+            },
+            renderInto: defaultRenderInto({ bundles, registry, cacheDir }),
+          }),
+          createCalmUpgradeMergeAction({ gitops, settings: kubernetes, localDir }),
+          createCalmCatalogRefreshAction({ catalog }),
           createCalmDeployGitopsAction({
             settings: kubernetes,
             gitops,

@@ -92,3 +92,7 @@ export {
   serviceRepository,
   type GitopsSettings,
 } from './gitops';
+export {
+  listRegistryBundles,
+  type RegistryBundle,
+} from './registryBundles';

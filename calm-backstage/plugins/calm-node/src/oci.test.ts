@@ -376,6 +376,11 @@ describe('bundles in a registry', () => {
     expect(await readBundleConfig(ref)).toEqual({
       digest: pushed.digest,
       config: CONFIG,
+      annotations: {
+        'org.opencontainers.image.version': '2.0.0',
+        'org.opencontainers.image.description': 'A test bundle',
+      },
+      size: expect.any(Number),
     });
     await expect(
       readBundleConfig(`${host}/calm-bundles/web-service:9.9.9`),

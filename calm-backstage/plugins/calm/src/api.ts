@@ -40,6 +40,16 @@ export interface ArchitectureResponse {
   };
 }
 
+/** Response of calm-backend `GET /upgrades`. */
+export interface UpgradesResponse {
+  inGit: boolean;
+  kind: 'starter' | 'full' | 'none';
+  starter?: { name: string; from: string; to?: string };
+  deploy?: { name: string; from: string; to?: string };
+  upgradePath?: string;
+  note?: string;
+}
+
 /** Response of calm-backend `GET /pattern`. */
 export interface PatternResponse {
   pattern: {

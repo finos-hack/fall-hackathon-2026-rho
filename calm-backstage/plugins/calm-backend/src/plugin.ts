@@ -4,6 +4,7 @@ import {
 } from '@backstage/backend-plugin-api';
 import { catalogServiceRef } from '@backstage/plugin-catalog-node';
 import {
+  readBundleRegistrySettings,
   readKubernetesDeploySettings,
   readPublishLocalDir,
 } from '@internal/backstage-plugin-calm-node';
@@ -34,6 +35,7 @@ export const calmPlugin = createBackendPlugin({
             localDir,
             // The cluster calm:deploy:k8s deploys to; the architecture card shows what a service has there.
             kubernetes: readKubernetesDeploySettings(config),
+            registry: readBundleRegistrySettings(config),
           }),
         );
       },

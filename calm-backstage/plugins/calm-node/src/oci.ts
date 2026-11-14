@@ -507,12 +507,24 @@ export async function listTags(
  */
 export async function readBundleConfig(
   ref: string,
-): Promise<{ digest: string; config: any }> {
+): Promise<{
+  digest: string;
+  config: any;
+  annotations: Record<string, string>;
+  /** Size of the bundle layer in bytes. */
+  size?: number;
+}> {
   const parsed = parseRef(ref);
   const { digest, manifest } = await readManifest(parsed);
   const blob = await readBlob(parsed, manifest.config);
+  const layer = manifest.layers.find(l => l.mediaType === OCI_LAYER_MEDIA_TYPE);
   try {
-    return { digest, config: JSON.parse(blob.toString('utf8')) };
+    return {
+      digest,
+      config: JSON.parse(blob.toString('utf8')),
+      annotations: manifest.annotations ?? {},
+      ...(layer ? { size: layer.size } : {}),
+    };
   } catch (e) {
     throw new Error(`The config of ${ref} is not JSON: ${e}`);
   }
