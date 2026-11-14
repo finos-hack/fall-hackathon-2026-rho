@@ -157,8 +157,14 @@ build of Quarkus 3.33.4 and 3.40.1 (BOM `com.redhat.quarkus.platform:quarkus-bom
   render `deploy/k8s` from the architecture alone. They meet in a small contract (`$PORT`, `/health`, the image name
   `calm-service`, `CALM_*` environment variables), so one set of rules serves Node, Spring, Quarkus and Nisshi.
 - **A published version never changes, so a fix is a new version.** `k8s-deploy` 1.2.0 and `nisshi-stream-app`
-  1.0.1 exist because 1.0.0/1.1.0 were already published when a bug was found; `push-bundles` refuses changed
-  content before anything reaches Gitea.
+  1.0.1 exist because 1.0.0/1.1.0 were already published when a bug was found, and 1.2.1 because 1.2.0 had one too;
+  `push-bundles` refuses changed content before anything reaches Gitea.
+- **Deployment rules must apply over their own older versions, not only to a new namespace.** 1.2.0 set
+  `strategy: Recreate` on backing services. A new deployment took it; an upgrade from 1.0.0 did not: Kubernetes
+  refuses Recreate while the Deployment holds `rollingUpdate` settings, and server-side apply (Flux) cannot remove
+  them, even with `rollingUpdate: null`. Flux reported it and the upgrade failed cleanly after its merge. 1.2.1 uses
+  `RollingUpdate` with `maxSurge: 0` instead (the old pod stops first), which applies over 1.0.0. A test that
+  upgrades from every older version of a deployment bundle would have caught it.
 - **Handlebars reads `${PORT:{{port}}}` as a triple-stash** and stops rendering. Transformers give such values whole.
 - **An upgrade re-renders, it does not merge.** Files the old starter rendered are replaced; files the developer
   added stay. Edits to rendered files are overwritten (the pull request shows it). A three-way merge is the next step.

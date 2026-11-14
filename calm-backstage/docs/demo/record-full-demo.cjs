@@ -34,7 +34,7 @@ const CHAPTERS = [
   ['Red Hat build of Quarkus', 'The same pattern with another starter: built and run on Red Hat UBI images'],
   ['Event streaming with Nisshi', 'A second CALM pattern: a Kafka-compatible broker with a storage choice, events round-trip'],
   ['Git, Flux and CALM Hub', 'The service repositories, the template sources, and the deployments CALM Hub records'],
-  ['Upgrade code and deployment rules', 'Spring Boot 4.0.9 → 4.1.2 and k8s-deploy 1.0.0 → 1.2.0 through a pull request'],
+  ['Upgrade code and deployment rules', 'Spring Boot 4.0.9 → 4.1.2 and k8s-deploy 1.0.0 → 1.2.1 through a pull request'],
   ['Who uses what', 'Back in the Template Explorer: every service and the bundle versions it runs'],
 ];
 
@@ -133,7 +133,7 @@ const CHAPTERS = [
     await pause(1800);
     const href = await btn.getAttribute('href');
     await page.goto(href);
-    await page.getByText('Running').first().waitFor({ timeout: 60000 });
+    await page.locator('#status-text', { hasText: /^Running$/ }).waitFor({ timeout: 60000 });
     await pause(1200);
   }
 
@@ -147,11 +147,11 @@ const CHAPTERS = [
 
   // ---- 1. CALM in the catalog
   await chapter(0);
-  await go('/catalog?filters%5Bkind%5D=component&filters%5Btags%5D=calm-architecture&filters%5Buser%5D=all',
+  await go('/?filters%5Bkind%5D=component&filters%5Btags%5D=calm-architecture&filters%5Buser%5D=all',
     () => page.getByText('Orders Service').first().waitFor({ timeout: 60000 }));
   await caption('Backstage reads CALM architectures from CALM Hub into its catalog');
   await pause(3500);
-  await go('/catalog?filters%5Bkind%5D=resource&filters%5Btags%5D=calm-pattern&filters%5Buser%5D=all',
+  await go('/?filters%5Bkind%5D=resource&filters%5Btags%5D=calm-pattern&filters%5Buser%5D=all',
     () => page.getByText(/Event Streaming/).first().waitFor({ timeout: 60000 }));
   await caption('Two CALM patterns: a web service, and event streaming with Nisshi');
   await pause(3500);
@@ -176,7 +176,7 @@ const CHAPTERS = [
   await page.getByTestId('calm-explorer-file').waitFor();
   await caption('What is inside: the files it renders from the CALM architecture');
   await pause(4000);
-  await page.getByText('k8s-deploy 1.2.0').first().click();
+  await page.getByText('k8s-deploy 1.2.1').first().click();
   await pause(1200);
   await caption('Deployment rules are separate: written once by the platform team, used by every starter');
   await pause(3500);
@@ -184,7 +184,7 @@ const CHAPTERS = [
   await page.getByTestId('calm-explorer-diff').getByRole('button').first().click();
   await page.getByRole('option', { name: '1.0.0' }).click();
   await page.getByTestId('calm-explorer-diff').getByText('k8s-deploy-transformer.js').first().waitFor({ timeout: 60000 });
-  await caption('From 1.0.0 to 1.2.0: limits, liveness probes, no service-account tokens, Nisshi 0.8.2, Recreate for data');
+  await caption('From 1.0.0 to 1.2.1: limits, liveness probes, no service-account tokens, Nisshi 0.8.2, one pod at a time for data');
   await page.getByTestId('calm-explorer-diff').getByText('k8s-deploy-transformer.js').first().scrollIntoViewIfNeeded();
   await pause(5000);
   const source = await page.getByText(/calm-templates\/bundles at/).first().getAttribute('href');
@@ -275,7 +275,7 @@ const CHAPTERS = [
   await caption('Its architecture: stream app → Nisshi broker → PostgreSQL, each with its network policies');
   await pause(4500);
   await openApp();
-  await page.getByText('connected').first().waitFor({ timeout: 120000 });
+  await page.locator('#broker', { hasText: 'connected' }).waitFor({ timeout: 120000 });
   await caption('The app is connected to the broker: produce events and watch them come back');
   await page.locator('#extra').scrollIntoViewIfNeeded();
   await pause(2000);
@@ -312,7 +312,7 @@ const CHAPTERS = [
   await chapter(6);
   await go(`/catalog/default/component/${SPRING}`, svgIn);
   await page.getByTestId('calm-versions').scrollIntoViewIfNeeded();
-  await caption('New versions fit the pattern: Spring Boot 4.1.2 and deployment rules 1.2.0');
+  await caption('New versions fit the pattern: Spring Boot 4.1.2 and deployment rules 1.2.1');
   await pause(5000);
   await page.getByTestId('calm-versions').getByText('Upgrade').click();
   await page.getByText('Upgrade the code (starter)').waitFor();
@@ -342,13 +342,13 @@ const CHAPTERS = [
   await caption('The service is up to date, at the new commit');
   await pause(4000);
   await openApp();
-  await caption('Now running Spring Boot 4.1.2 under the deployment rules k8s-deploy 1.2.0');
+  await caption('Now running Spring Boot 4.1.2 under the deployment rules k8s-deploy 1.2.1');
   await pause(6000);
 
   // ---- 8. Who uses what
   await chapter(7);
   await go('/calm-templates', () => page.getByTestId('calm-explorer-bundles').waitFor());
-  await page.getByText('k8s-deploy 1.2.0').first().click();
+  await page.getByText('k8s-deploy 1.2.1').first().click();
   await page.getByRole('tab', { name: 'Used by' }).click();
   await page.getByTestId('calm-explorer-used-by').waitFor();
   await caption('Which services run which deployment rules, and which can be upgraded');
