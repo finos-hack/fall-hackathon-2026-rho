@@ -4,6 +4,7 @@ import { EntityRefLink, useEntity } from '@backstage/plugin-catalog-react';
 import { stringifyEntityRef } from '@backstage/catalog-model';
 import {
   CALM_ANNOTATIONS as ANN,
+  RecordedDeployment,
   controlEntityName,
   parsePatternUrl,
   parseRequirementUrl,
@@ -122,10 +123,70 @@ function DeploymentSection(props: {
   );
 }
 
+/** How many of the deployments recorded in the Hub the card lists. */
+const SHOWN_DEPLOYMENTS = 5;
+
+const dateTime = (iso?: string) =>
+  iso && !Number.isNaN(Date.parse(iso))
+    ? new Date(iso).toLocaleString()
+    : undefined;
+
+/** `32 s`, or `2 min 5 s`, between two ISO times. */
+function duration(start?: string, end?: string): string | undefined {
+  const ms = start && end ? Date.parse(end) - Date.parse(start) : NaN;
+  if (Number.isNaN(ms) || ms < 0) {
+    return undefined;
+  }
+  const seconds = Math.round(ms / 1000);
+  return seconds < 60
+    ? `${seconds} s`
+    : `${Math.floor(seconds / 60)} min ${seconds % 60} s`;
+}
+
+/** The deployments CALM Hub holds for this architecture version (deployment decorators), newest first. */
+function RecordedDeploymentsSection(props: {
+  deployments: RecordedDeployment[];
+}) {
+  const shown = props.deployments.slice(0, SHOWN_DEPLOYMENTS);
+  return (
+    <Box mb={2} data-testid="calm-recorded-deployments">
+      <Typography variant="overline" display="block">
+        Deployments recorded in CALM Hub
+      </Typography>
+      <Box component="ul" mt={0.5} mb={0.5} pl={3}>
+        {shown.map(d => {
+          const took = duration(d.startTime, d.endTime);
+          return (
+            <Typography key={d.id} component="li" variant="body2">
+              <strong>{d.status}</strong>
+              {dateTime(d.startTime) ? `, ${dateTime(d.startTime)}` : ''}
+              {took ? ` (${took})` : ''}
+              {d.appliesTo.length ? `: ${d.appliesTo.join(', ')}` : ''}
+              {d.notes ? ` · ${d.notes}` : ''}
+              {d.details && (
+                <>
+                  {' · '}
+                  <Link to={d.details}>details</Link>
+                </>
+              )}
+              {` · decorator ${d.id}`}
+            </Typography>
+          );
+        })}
+      </Box>
+      {props.deployments.length > shown.length && (
+        <Typography variant="body2" color="textSecondary">
+          The {shown.length} newest of {props.deployments.length}.
+        </Typography>
+      )}
+    </Box>
+  );
+}
+
 /**
  * The CALM architecture of an entity (a Hub architecture, or a service published from a pattern): pattern and version,
  * the controls it references, node and relationship counts, a Mermaid diagram and, for a service deployed to the
- * local cluster, where it runs and its network policies.
+ * local cluster, where it runs, its network policies and the deployments recorded in CALM Hub.
  */
 export function CalmArchitectureCard() {
   const { entity } = useEntity();
@@ -157,7 +218,9 @@ export function CalmArchitectureCard() {
       subheader={
         value?.source.type === 'file'
           ? `From ${annotations[ANN.architectureFile] ?? 'architecture.json'}`
-          : 'From CALM Hub'
+          : `From CALM Hub${
+              value?.source.version ? `, version ${value.source.version}` : ''
+            }`
       }
     >
       {loading && <LinearProgress aria-label="Loading the architecture" />}
@@ -223,6 +286,9 @@ export function CalmArchitectureCard() {
               deployment={value.deployment}
               architecture={value.architecture}
             />
+          )}
+          {value.deployments && value.deployments.length > 0 && (
+            <RecordedDeploymentsSection deployments={value.deployments} />
           )}
           <MermaidDiagram
             source={diagram.source}

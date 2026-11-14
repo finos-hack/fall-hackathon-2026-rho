@@ -4,12 +4,18 @@ import {
   fetchApiRef,
   useApi,
 } from '@backstage/frontend-plugin-api';
-import type { PatternDecision } from '@internal/backstage-plugin-calm-common';
+import type {
+  PatternDecision,
+  RecordedDeployment,
+} from '@internal/backstage-plugin-calm-common';
 
 /** Response of calm-backend `GET /architecture`. */
 export interface ArchitectureResponse {
   architecture: any;
-  source: { type: 'hub'; url: string } | { type: 'file'; path: string };
+  /** CALM Hub (with the version read), or the published service's own file. */
+  source:
+    | { type: 'hub'; url: string; version?: string }
+    | { type: 'file'; path: string };
   /** A published service's deployment in the local cluster; absent when it is not deployed or was not read. */
   deployment?: {
     cluster: string;
@@ -21,6 +27,8 @@ export interface ArchitectureResponse {
     }[];
     workloads: { name: string; ready: boolean }[];
   };
+  /** The deployments CALM Hub holds for the architecture version (deployment decorators), newest first. */
+  deployments?: RecordedDeployment[];
 }
 
 /** Response of calm-backend `GET /pattern`. */
