@@ -15,3 +15,4 @@ export * from './placeholders';
 export * from './entityNames';
 export * from './mermaid';
 export * from './deploy';
+export * from './gitea';

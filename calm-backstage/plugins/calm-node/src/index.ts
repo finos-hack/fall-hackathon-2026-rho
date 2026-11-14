@@ -69,3 +69,20 @@ export {
   type OciManifest,
   type OciRef,
 } from './oci';
+export {
+  GIT_AUTHOR,
+  git,
+  gitCheckoutBranch,
+  gitClone,
+  gitCommitAll,
+  gitCurrentBranch,
+  gitDeleteBranch,
+  gitDiffStat,
+  gitHead,
+  gitInit,
+  gitPull,
+  gitPush,
+  gitReset,
+  type GitAuth,
+  type GitOptions,
+} from './git';
