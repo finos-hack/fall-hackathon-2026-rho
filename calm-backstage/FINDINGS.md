@@ -124,3 +124,66 @@ Each is a candidate for a published, supported API.
   tries to pull it.
 - **`hub/push-bundles.cjs` loads a TypeScript file through Node's type stripping**, which Node 22 before 22.18
   does not do by default. It was run on Node 26 only.
+
+## Part 3 (2026-11-14): Git, Flux, starters, Nisshi
+
+Versions: Gitea 1.27.3, Flux v2.10.0 (source and kustomize controllers only), Spring Boot 4.0.9 and 4.1.2, Red Hat
+build of Quarkus 3.33.4 and 3.40.1 (BOM `com.redhat.quarkus.platform:quarkus-bom`), Nisshi 0.8.1 and 0.8.2, kafkajs
+2.2.4.
+
+### Git and Flux
+
+- **Flux without its CLI works from the release manifest.** `k8s/flux-install.cjs` keeps every CRD and only the
+  source and kustomize controllers. Without the notification controller, each controller retries every event five
+  times (about 15 s per reconcile) unless `--events-addr` is removed; it is.
+- **Flux in minikube reaches a Compose container through `host.minikube.internal`** and the published port; the two
+  are on different Docker networks. So Gitea must listen on the host's interfaces, not only on loopback.
+- **Ask for a reconcile with the annotation `reconcile.fluxcd.io/requestedAt`**, then wait until the Kustomization is
+  Ready with `status.lastAppliedRevision` naming the pushed commit (`main@sha1:<sha>`). Ready alone can still be the
+  previous commit.
+- **Write files a GitOps step rewrites byte for byte the same.** Two actions wrote the overlay with different header
+  comments, so every upgrade made one extra commit. They now share one header.
+- **Merge before you deploy, and build before you merge.** The upgrade builds the image from the upgrade branch and
+  puts its tag in the overlay on that branch, so `main` only ever holds a complete upgrade and the merge commit is
+  what Flux applies. A failed build leaves `main`, Gitea and the cluster untouched.
+- **Gitea creates a repository on the first push** into an organisation (`ENABLE_PUSH_CREATE_ORG`), and refuses to
+  merge a new pull request until it has checked it can be merged (405 "try again later"); the merge is retried.
+- **GitHub is not a drop-in.** Push-to-create, the pull request API and anonymous reads by Flux are Gitea's. The Git
+  host sits behind `GiteaClient`; a GitHub client is a track.
+
+### Template bundles
+
+- **Two kinds of bundle make upgrades separable.** A starter renders the code and its Dockerfile; deployment rules
+  render `deploy/k8s` from the architecture alone. They meet in a small contract (`$PORT`, `/health`, the image name
+  `calm-service`, `CALM_*` environment variables), so one set of rules serves Node, Spring, Quarkus and Nisshi.
+- **A published version never changes, so a fix is a new version.** `k8s-deploy` 1.2.0 and `nisshi-stream-app`
+  1.0.1 exist because 1.0.0/1.1.0 were already published when a bug was found; `push-bundles` refuses changed
+  content before anything reaches Gitea.
+- **Handlebars reads `${PORT:{{port}}}` as a triple-stash** and stops rendering. Transformers give such values whole.
+- **An upgrade re-renders, it does not merge.** Files the old starter rendered are replaced; files the developer
+  added stay. Edits to rendered files are overwritten (the pull request shows it). A three-way merge is the next step.
+- **Java builds in `minikube image build` are fine with a BuildKit cache mount.** Spring Boot: 96 s cold, 2 s after a
+  code change, 13 s after a Boot upgrade. Red Hat Quarkus: 454 s cold (the Red Hat Maven repository), 109 s for a new
+  platform version on a warm cache.
+- **The Red Hat build of Quarkus BOM and the UBI images need no login**; the UBI OpenJDK builder image ships Maven
+  and runs as uid 185 (the `.m2` cache mount needs `uid=185`).
+
+### Nisshi
+
+- **kafkajs works against Nisshi** (topics, produce, consumer groups). The broker's advertised listener must be its
+  in-cluster name (`ADVERTISED_LISTENER_URL=tcp://nisshi-broker:9092`).
+- **A broker on SQLite in the pod loses its topics when it restarts**, and a rolling update briefly runs two brokers.
+  The rules roll out backing services with `Recreate` (1.2.0) and the app creates its topic again (1.0.1).
+
+### Backstage
+
+- **A proxied app page needs its own Content-Security-Policy.** Backstage's default (no inline scripts,
+  `upgrade-insecure-requests`) left the starters' page empty in a browser while `curl` showed it fine.
+- **Security, open (local development only):**
+  - `/api/calm/app/*` is unauthenticated (a new tab carries no Backstage token) and serves the app on the backend's
+    origin, so the app's script is same-origin with Backstage's APIs. Use `user-cookie` auth or a separate origin.
+  - Anyone who can push to a service repository in Gitea (port 3300, fixed admin password) can apply anything
+    through Flux, which runs as cluster-admin. Give each Kustomization a namespaced service account and
+    `targetNamespace`, and seed a random password.
+- **A `PageBlueprint` gets a sidebar item from the plugin's `title` and `icon` and a `routeRef`**, not from the page's
+  own title.
