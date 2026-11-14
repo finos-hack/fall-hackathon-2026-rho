@@ -540,10 +540,15 @@ export async function pullBundle(opts: {
   return { digest, dir };
 }
 
+/** Cache folders being filled in this process, so two runs pulling the same digest share one pull. */
+const cacheFills = new Map<string, Promise<void>>();
+
 /**
  * Pulls a bundle into `<cacheDir>/<manifest digest without sha256:>/`, once per digest. A marker file
  * `<digest>.json` beside the folder is written last; when it is there, the folder is complete and is used as it is.
- * A folder without its marker (a pull that was cut short) is removed and pulled again.
+ * A folder without its marker (a pull that was cut short) is removed and pulled again. Runs that ask for the same
+ * digest while it is being pulled wait for that pull instead of starting their own, which would remove the folder
+ * the first run is about to use.
  */
 export async function pullBundleCached(opts: {
   ref: string;
@@ -553,22 +558,43 @@ export async function pullBundleCached(opts: {
   const hex = digest.replace(/^sha256:/, '');
   const dir = path.join(path.resolve(opts.cacheDir), hex);
   const marker = `${dir}.json`;
+  const running = cacheFills.get(dir);
+  if (running) {
+    await running;
+    return { digest, dir, cached: true };
+  }
   if ((await exists(marker)) && (await exists(dir))) {
     return { digest, dir, cached: true };
   }
+  // Checked again: another run may have started the pull while this one was looking at the folder.
+  const started = cacheFills.get(dir);
+  if (started) {
+    await started;
+    return { digest, dir, cached: true };
+  }
+  const fill = fillCache(opts.ref, digest, dir, marker).finally(() =>
+    cacheFills.delete(dir),
+  );
+  cacheFills.set(dir, fill);
+  await fill;
+  return { digest, dir, cached: false };
+}
+
+async function fillCache(
+  ref: string,
+  digest: string,
+  dir: string,
+  marker: string,
+): Promise<void> {
   await fs.rm(marker, { force: true });
   await fs.rm(dir, { recursive: true, force: true });
-  const pulled = await pullBundle({ ref: opts.ref, destDir: dir });
+  const pulled = await pullBundle({ ref, destDir: dir });
   if (pulled.digest !== digest) {
     // The tag moved between the two reads; the folder name would no longer match its content.
     await fs.rm(dir, { recursive: true, force: true });
     throw new Error(
-      `${opts.ref} changed during the pull (${digest} -> ${pulled.digest}); try again`,
+      `${ref} changed during the pull (${digest} -> ${pulled.digest}); try again`,
     );
   }
-  await fs.writeFile(
-    marker,
-    `${JSON.stringify({ ref: opts.ref, digest }, null, 2)}\n`,
-  );
-  return { digest, dir, cached: false };
+  await fs.writeFile(marker, `${JSON.stringify({ ref, digest }, null, 2)}\n`);
 }

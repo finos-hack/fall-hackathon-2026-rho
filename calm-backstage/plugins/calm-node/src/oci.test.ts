@@ -414,6 +414,24 @@ describe('bundles in a registry', () => {
     expect(await readAll(third.dir)).toEqual(await readAll(bundleDir));
   });
 
+  it('shares one pull between runs that ask for the same digest at once', async () => {
+    const ref = `${host}/calm-bundles/web-service:2.0.0`;
+    await pushBundle({ dir: bundleDir, ref });
+    const cacheDir = path.join(tmp, 'cache');
+    const layerReads = () =>
+      registry.requests.filter(r => /^GET .*\/blobs\//.test(r)).length;
+    const before = layerReads();
+
+    const results = await Promise.all(
+      [1, 2, 3].map(() => pullBundleCached({ ref, cacheDir })),
+    );
+
+    expect(new Set(results.map(r => r.dir)).size).toBe(1);
+    expect(results.filter(r => !r.cached)).toHaveLength(1);
+    expect(layerReads() - before).toBe(1);
+    expect(await readAll(results[0].dir)).toEqual(await readAll(bundleDir));
+  });
+
   it('reports a registry that is not there as an OciError', async () => {
     await registry.stop();
     await expect(listRepositories(`http://${host}`)).rejects.toBeInstanceOf(
