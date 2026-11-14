@@ -1,11 +1,25 @@
 /**
  * Node helpers shared by the CALM backend plugins: resolve and run the published `@finos/calm-cli` (generate,
- * validate, template), and push and pull template bundles as OCI artifacts.
+ * validate, template), push and pull template bundles as OCI artifacts, and run `kubectl` and `minikube` against the
+ * one cluster in `calm.deploy.kubernetes`.
  *
  * @packageDocumentation
  */
 
 export { calmBin, runCalm, CalmCliError } from './cli';
+export { ProcessError, runProcess, type RunProcessOptions } from './process';
+export {
+  DEFAULT_NAMESPACE_PREFIX,
+  kubectlArgs,
+  kubectlCommand,
+  minikubeArgs,
+  readKubernetesDeploySettings,
+  requireKubernetesDeploy,
+  runKubectl,
+  runMinikube,
+  type KubernetesDeploySettings,
+  type KubernetesRunOptions,
+} from './kubernetes';
 export {
   CHOICES_FILE,
   generateArchitecture,
