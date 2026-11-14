@@ -74,6 +74,11 @@ Each is a candidate for a published, supported API.
   nothing. A deployment decorator therefore names its architecture version by the path
   `/calm/namespaces/<ns>/architectures/<name>/versions/<v>`, not by its `$id`. `…/decorators/values` returns the
   decorators without their ids, so the card lists the ids and reads each one.
+- **The Hub's own UI finds an architecture's decorators by a different target.** Its Deployments tab asks for
+  `target=/api/calm/namespaces/<ns>/architectures/<numeric id>/versions/<version with hyphens>` (for example
+  `…/architectures/16/versions/1-0-0`). A decorator that names only the name-based path shows "No deployment history
+  found" there. `calm:decorate:deployment` therefore puts both entries in `target`. Request: one documented target
+  form for an architecture version, accepted by the API and used by the UI.
 - **Nothing in the Hub says who put an architecture there.** A service's architecture is marked in its own
   `metadata` (`"calm-backstage": { "entity": "component:default/<name>" }`), so the catalog provider can leave it to
   the service's entity and `calm:register:hub` can refuse to add versions to someone else's architecture.
@@ -98,3 +103,24 @@ Each is a candidate for a published, supported API.
 - **Hyphenated parameter names** need `parameters["add-ons"]` in template expressions.
 - **The default catalog database is in memory.** Published services come back after a restart through a file glob
   location over `output/*/catalog-info.yaml`.
+- **A scaffolder step's `if:` runs the step when the expression fails to render.** The scaffolder renders with
+  `nunjitsu`; a render error leaves a non-empty string, which counts as true. The build and deploy conditions were
+  evaluated with that renderer before use.
+- **A step that needs something outside Backstage should check it first.** Without the cluster, a run failed at the
+  image build after it had stored the architecture in CALM Hub and published the files. `calm:cluster:check` now
+  runs first, under the same condition as the build and deploy steps.
+- **`calm:publish:local` does not overwrite a folder**, so a second run for the same service name fails at publish
+  (after `calm:register:hub`, which reuses the stored version). Redeploying an existing service is not built.
+
+## Kubernetes
+
+- **A default-deny NetworkPolicy also blocks DNS.** The bundle adds `allow-dns` (egress to kube-system on 53);
+  without it a lookup by Service name fails and looks like a policy fault.
+- **A blocked connection times out; it is not refused.** Checks use `nc -z -w 3`.
+- **minikube's docker driver can give the API server a new port on each start.** `k8s/up.sh` rewrites
+  `app-config.local.yaml` every time, and Backstage needs a restart after it.
+- **Policies need a CNI that enforces them.** The profile is started with `--cni=calico`.
+- **An image built into minikube needs a tag other than `latest` and `imagePullPolicy: IfNotPresent`**, or the pod
+  tries to pull it.
+- **`hub/push-bundles.cjs` loads a TypeScript file through Node's type stripping**, which Node 22 before 22.18
+  does not do by default. It was run on Node 26 only.

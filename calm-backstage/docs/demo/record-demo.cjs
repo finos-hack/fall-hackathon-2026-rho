@@ -6,9 +6,9 @@
 // (yarn start) running. Creates output/<service-name>,
 // so pick a name that is not there yet.
 //
-//   node docs/demo/record-demo.cjs [service-name] [base-url]
+//   node docs/demo/record-demo.cjs [service-name] [base-url] [hub-url]
 //
-// Defaults: inventory-api, http://localhost:3100. Prints the path of the recorded .webm (in a temp folder).
+// Defaults: inventory-api, http://localhost:3100, http://localhost:8090. Prints the path of the recorded .webm (in a temp folder).
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -17,6 +17,7 @@ const { chromium } = createRequire(path.resolve(__dirname, '../../package.json')
 const S = fs.mkdtempSync(path.join(os.tmpdir(), 'calm-demo-'));
 const NAME = process.argv[2] || 'inventory-api';
 const BASE = process.argv[3] || 'http://localhost:3100';
+const HUB = process.argv[4] || 'http://localhost:8090';
 const W = 1440, H = 900;
 
 (async () => {
@@ -87,6 +88,13 @@ const W = 1440, H = 900;
   await scrollToDiagram();
   await caption('The CALM architecture card: pattern, controls and a Mermaid diagram');
   await pause(4000);
+
+  // The same architecture in CALM Hub's own UI
+  await page.goto(`${HUB}/#/hackathon/architectures/orders-service/1.0.0`);
+  await page.getByText('Deployments').first().waitFor({ timeout: 30000 });
+  await pause(2500);
+  await caption('The same architecture in CALM Hub: Backstage reads it from here');
+  await pause(4500);
 
   // 4. Catalog graph
   await go('/catalog-graph?rootEntityRefs%5B%5D=component%3Adefault%2Forders-service&maxDepth=3&selectedRelations%5B%5D=dependsOn&selectedKinds%5B%5D=component&selectedKinds%5B%5D=resource&unidirectional=true&mergeRelations=true&direction=LR&showFilters=false',
@@ -173,6 +181,17 @@ const W = 1440, H = 900;
   await pause(4500);
   await scrollBy(500);
   await pause(3000);
+
+  // Back in CALM Hub: the new architecture and its deployment
+  await page.goto(`${HUB}/#/hackathon/architectures/${NAME}/1.0.0`);
+  await page.getByText('Deployments').first().waitFor({ timeout: 30000 });
+  await pause(2500);
+  await caption(`CALM Hub now holds ${NAME}: Backstage stored the architecture it generated`);
+  await pause(5000);
+  await page.getByText('Deployments').first().click();
+  await pause(2000);
+  await caption('And the deployment Backstage recorded on it, as a CALM deployment decorator');
+  await pause(6000);
   await caption('CALM pattern → running service, end to end');
   await pause(2500);
 

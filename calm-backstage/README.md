@@ -56,8 +56,9 @@ The ports keep clear of other local Backstage and Hub instances on 3000, 7007, 8
 
 Two recordings walk through this:
 
-- `docs/demo/calm-backstage-deploy-demo.webm` (116 s): the whole flow, ending with a service deployed to the local
-  cluster, its network policies on the card and its pods on the Kubernetes tab.
+- `docs/demo/calm-backstage-deploy-demo.webm` (135 s): the whole flow, ending with a service deployed to the local
+  cluster, its network policies on the card, its pods on the Kubernetes tab, and its architecture and deployment
+  in CALM Hub's own UI.
 - `docs/demo/calm-backstage-demo.webm` (78 s): the first part only, without the registry and the deployment.
 
 To record the first one again with the Hub, the cluster and Backstage running:
