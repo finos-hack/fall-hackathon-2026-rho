@@ -46,6 +46,27 @@ function fakeHub(base: string) {
     const body = init?.body ? JSON.parse(init.body) : undefined;
     calls.push({ method, url, ...(body ? { body } : {}) });
     const u = new URL(url);
+    // The name-based list, with the numeric id the Hub's UI uses. billing-api is always listed as 16.
+    if (
+      method === 'GET' &&
+      u.pathname === '/calm/namespaces/hackathon/architectures'
+    ) {
+      return {
+        ok: true,
+        status: 200,
+        text: async () =>
+          JSON.stringify({
+            values: [
+              { customId: 'billing-api', namespace: 'hackathon', numericId: 16 },
+            ],
+          }),
+        json: async () => ({
+          values: [
+            { customId: 'billing-api', namespace: 'hackathon', numericId: 16 },
+          ],
+        }),
+      } as any;
+    }
     const arch =
       /^\/calm\/namespaces\/hackathon\/architectures\/([^/]+)\/versions(?:\/([^/]+))?$/.exec(
         u.pathname,
@@ -345,7 +366,11 @@ describe('with a workspace', () => {
               'https://calm.finos.org/draft/2026-03/standards/deployment/deployment.decorator.standard.json',
             'unique-id': 'billing-api-task-1',
             type: 'deployment',
-            target: [target],
+            // The second entry is the form CALM Hub's own UI filters by.
+            target: [
+              target,
+              '/api/calm/namespaces/hackathon/architectures/16/versions/1-0-0',
+            ],
             'target-type': ['architecture'],
             // api-gateway is not a node of this architecture.
             'applies-to': ['mongo-database', 'web-service'],

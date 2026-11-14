@@ -126,11 +126,29 @@ export const DEPLOYMENT_STATUSES = [
 ] as const;
 export type DeploymentStatus = (typeof DEPLOYMENT_STATUSES)[number];
 
+/**
+ * The target CALM Hub's own UI filters decorators by on an architecture page: the numeric API path with the version's
+ * dots as hyphens, e.g. `/api/calm/namespaces/hackathon/architectures/16/versions/1-0-0`. A decorator that should show
+ * on the Hub's Deployments tab needs this entry in `target` as well as the name-based path.
+ */
+export function architectureVersionUiTarget(
+  namespace: string,
+  numericId: number,
+  version: string,
+): string {
+  return `/api/calm/namespaces/${namespace}/architectures/${numericId}/versions/${version.replace(
+    /\./g,
+    '-',
+  )}`;
+}
+
 /** A deployment decorator in the shape the Hub is sent (kebab case), targeting one architecture version. */
 export function deploymentDecorator(opts: {
   uniqueId: string;
   /** `architectureVersionPath(...)` of the deployed architecture. */
   target: string;
+  /** More entries for `target`, e.g. `architectureVersionUiTarget(...)`. */
+  extraTargets?: string[];
   /** `unique-id`s of the deployed nodes. */
   appliesTo: string[];
   status: DeploymentStatus;
@@ -140,10 +158,13 @@ export function deploymentDecorator(opts: {
   details?: string;
   notes?: string;
 }): Record<string, unknown> {
-  if (!DECORATOR_TARGET.test(opts.target)) {
+  const bad = [opts.target, ...(opts.extraTargets ?? [])].find(
+    t => !DECORATOR_TARGET.test(t),
+  );
+  if (bad !== undefined) {
     throw new Error(
       `Decorator target ${JSON.stringify(
-        opts.target,
+        bad,
       )} would not be found again: the Hub's target filter accepts only ${
         DECORATOR_TARGET.source
       }`,
@@ -170,7 +191,7 @@ export function deploymentDecorator(opts: {
     $schema: DEPLOYMENT_DECORATOR_SCHEMA,
     'unique-id': opts.uniqueId,
     type: DEPLOYMENT_DECORATOR_TYPE,
-    target: [opts.target],
+    target: [opts.target, ...(opts.extraTargets ?? [])],
     'target-type': ['architecture'],
     'applies-to': opts.appliesTo,
     data: {

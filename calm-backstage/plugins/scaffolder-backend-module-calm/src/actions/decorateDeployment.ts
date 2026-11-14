@@ -7,6 +7,7 @@ import {
   DEPLOYMENT_STATUSES,
   DeploymentStatus,
   architectureVersionPath,
+  architectureVersionUiTarget,
   deploymentDecorator,
 } from '@internal/backstage-plugin-calm-common';
 
@@ -133,11 +134,26 @@ export function createCalmDecorateDeploymentAction(options: {
         );
       }
 
+      // CALM Hub's UI finds an architecture's decorators by its numeric id, so name that target as well.
+      const numericId = (await hub.architectures(hubNamespace)).find(
+        a => a.customId === architecture,
+      )?.numericId;
+      if (numericId === undefined) {
+        ctx.logger.warn(
+          `CALM Hub lists no numeric id for ${hubNamespace}/${architecture}, so its Deployments tab will not show this deployment`,
+        );
+      }
+      const extraTargets =
+        numericId === undefined
+          ? []
+          : [architectureVersionUiTarget(hubNamespace, numericId, version)];
+
       // One decorator per run: the task id, or the time when the action runs outside a task.
       const uniqueId = `${name}-${ctx.task?.id ?? Date.now()}`;
       const decorator = deploymentDecorator({
         uniqueId,
         target,
+        extraTargets,
         appliesTo,
         status,
         startTime: ctx.input.startTime,
