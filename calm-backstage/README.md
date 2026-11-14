@@ -16,7 +16,7 @@ You need Docker, Node 26 and the repository's own Yarn (`.yarn/releases`, picked
 
 ```sh
 yarn install
-yarn hub:up && yarn hub:seed    # CALM Hub on :8090, bundle registry on :5050, Gitea on :3300 (seeded, idempotent)
+yarn hub:up && yarn hub:seed    # CALM Hub on :8090, bundle registry on :5050 (both localhost only), Gitea on :3300
 yarn k8s:up                     # local Kubernetes (minikube profile calm-backstage, 6 GiB, 4 CPUs) with Flux
 yarn start                      # Backstage on http://localhost:3100 (backend on 7107)
 ```
