@@ -7,6 +7,25 @@ import { createTemplateAction } from '@backstage/plugin-scaffolder-node';
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
 /**
+ * A 409 from `addLocation`: a `ConflictError` in process, or the catalog client's `ResponseError`, which carries the
+ * status and puts the server's error (name `ConflictError`) in `cause`.
+ */
+export function isConflict(e: unknown): boolean {
+  const err = e as {
+    name?: unknown;
+    statusCode?: unknown;
+    response?: { status?: unknown };
+    cause?: { name?: unknown };
+  } | null;
+  return (
+    err?.name === 'ConflictError' ||
+    err?.statusCode === 409 ||
+    err?.response?.status === 409 ||
+    err?.cause?.name === 'ConflictError'
+  );
+}
+
+/**
  * `calm:register:local`: registers a `catalog-info.yaml` under `calm.publish.localDir` as a `file` location.
  * The built-in `catalog:register` always adds a `url` location, which cannot read a local file. The catalog module
  * allows the `file` type. Waits (up to `waitSeconds`) until the catalog holds the entity from this file.
@@ -82,6 +101,12 @@ export function createCalmRegisterLocalAction(options: {
         ctx.output('locationTarget', wanted);
         return;
       }
+      if (existing) {
+        // Fail before adding the location: a location whose entity the catalog cannot claim would stay registered.
+        throw new Error(
+          `${entityRef} already exists in the catalog, from ${existingLocation}; the new location cannot claim it`,
+        );
+      }
 
       ctx.logger.info(`Registering file:${target} (${entityRef})`);
       try {
@@ -90,7 +115,7 @@ export function createCalmRegisterLocalAction(options: {
           { credentials },
         );
       } catch (e) {
-        if ((e as Error)?.name !== 'ConflictError') {
+        if (!isConflict(e)) {
           throw e;
         }
         ctx.logger.info(`Location file:${target} is already registered`);

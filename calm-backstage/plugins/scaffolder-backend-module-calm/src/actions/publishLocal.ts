@@ -3,6 +3,7 @@ import path from 'node:path';
 import { resolveSafeChildPath } from '@backstage/backend-plugin-api';
 import type { Entity } from '@backstage/catalog-model';
 import { stringifyEntityRef } from '@backstage/catalog-model';
+import type { CatalogService } from '@backstage/plugin-catalog-node';
 import { createTemplateAction } from '@backstage/plugin-scaffolder-node';
 import {
   CALM_ANNOTATIONS as ANN,
@@ -74,7 +75,10 @@ export function serviceEntity(opts: {
  * `calm:publish:local`: copies the rendered files and the architecture into `<calm.publish.localDir>/<name>` and
  * writes a `catalog-info.yaml` Component for the new service. Refuses an existing folder unless `overwrite` is set.
  */
-export function createCalmPublishLocalAction(options: { localDir: string }) {
+export function createCalmPublishLocalAction(options: {
+  catalog: CatalogService;
+  localDir: string;
+}) {
   return createTemplateAction({
     id: 'calm:publish:local',
     description:
@@ -175,6 +179,23 @@ export function createCalmPublishLocalAction(options: { localDir: string }) {
 
       await fs.mkdir(options.localDir, { recursive: true });
       const target = resolveSafeChildPath(options.localDir, name);
+
+      // Refuse a name the catalog already holds from elsewhere (a Hub architecture, another service) before writing
+      // anything: calm:register:local could not claim it, and the folder would be left behind.
+      const entityRef = stringifyEntityRef({ kind: 'Component', name });
+      const existing = await options.catalog.getEntityByRef(entityRef, {
+        credentials: await ctx.getInitiatorCredentials(),
+      });
+      const existingLocation =
+        existing?.metadata.annotations?.['backstage.io/managed-by-location'];
+      const ownLocation = `file:${path.join(target, CATALOG_INFO_FILE)}`;
+      if (existing && existingLocation !== ownLocation) {
+        throw new Error(
+          `The catalog already has ${entityRef} (from ${
+            existingLocation ?? 'an unknown location'
+          }); choose another service name`,
+        );
+      }
       const exists = await fs
         .stat(target)
         .then(() => true)
@@ -204,7 +225,6 @@ export function createCalmPublishLocalAction(options: { localDir: string }) {
       await fs.writeFile(catalogInfoPath, YAML.stringify(entity));
 
       const files = await listFiles(target);
-      const entityRef = stringifyEntityRef(entity);
       ctx.logger.info(
         `Published ${entityRef} to ${target}: ${files.join(', ')}`,
       );

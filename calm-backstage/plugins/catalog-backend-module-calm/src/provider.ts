@@ -10,6 +10,7 @@ import type {
 } from '@backstage/plugin-catalog-node';
 import {
   CalmHubClient,
+  CalmHubError,
   latestVersion,
 } from '@internal/backstage-plugin-calm-common';
 import {
@@ -20,6 +21,43 @@ import {
   buildEntities,
   referencedRequirements,
 } from './entities';
+
+/**
+ * Reads the control requirements the documents reference from the configured Hub. A control the Hub does not hold
+ * (deleted, or referenced by a URL on another host whose path the local Hub lacks) is skipped with a warning, so one
+ * missing control does not stop the whole refresh; any other Hub failure still throws.
+ */
+export async function readControls(
+  client: Pick<CalmHubClient, 'controlRequirement'>,
+  requirements: {
+    url: string;
+    domain: string;
+    control: string;
+    version: string;
+  }[],
+  logger: Pick<LoggerService, 'warn'>,
+): Promise<ControlDocument[]> {
+  const controls: ControlDocument[] = [];
+  for (const r of requirements) {
+    try {
+      const doc = await client.controlRequirement(
+        r.domain,
+        r.control,
+        r.version,
+      );
+      controls.push({ ...r, doc });
+    } catch (e) {
+      if (e instanceof CalmHubError && e.status === 404) {
+        logger.warn(
+          `CALM catalog: control ${r.domain}/${r.control} ${r.version} skipped, not in CALM Hub (referenced as ${r.url})`,
+        );
+        continue;
+      }
+      throw e;
+    }
+  }
+  return controls;
+}
 
 export interface CalmProviderSettings {
   hubUrl: string;
@@ -89,7 +127,10 @@ export class CalmEntityProvider implements EntityProvider {
     );
   }
 
-  /** Reads everything first; any Hub error throws, so no partial full mutation is applied. */
+  /**
+   * Reads everything first; any Hub error throws (except a missing control, see `readControls`), so no partial full
+   * mutation is applied.
+   */
   private async read(): Promise<CalmSnapshot> {
     const patterns: HubDocument[] = [];
     const architectures: HubDocument[] = [];
@@ -122,18 +163,14 @@ export class CalmEntityProvider implements EntityProvider {
       }
     }
 
-    const controls: ControlDocument[] = [];
-    for (const r of referencedRequirements([
-      ...patterns.map(p => p.doc),
-      ...architectures.map(a => a.doc),
-    ])) {
-      const doc = await this.client.controlRequirement(
-        r.domain,
-        r.control,
-        r.version,
-      );
-      controls.push({ ...r, doc });
-    }
+    const controls = await readControls(
+      this.client,
+      referencedRequirements([
+        ...patterns.map(p => p.doc),
+        ...architectures.map(a => a.doc),
+      ]),
+      this.logger,
+    );
 
     return {
       hubUrl: this.client.baseUrl,

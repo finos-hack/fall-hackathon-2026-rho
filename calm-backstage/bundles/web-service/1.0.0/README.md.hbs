@@ -9,6 +9,7 @@
 {{/if}}{{#if messageQueue}}- Message queue: RabbitMQ
 {{/if}}{{#if observability}}- Observability: OpenTelemetry collector
 {{/if}}
-Run locally: `docker compose up`
+Run locally: build your service image and tag it `{{serviceName}}:latest` (this bundle has no Dockerfile;
+web-service 2.0.0 adds one), then `docker compose up`.
 
 Generated from CALM architecture {{architectureId}} (pattern {{patternId}}) by bundle web-service 1.0.0.
