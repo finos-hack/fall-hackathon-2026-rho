@@ -2,19 +2,13 @@
  * Template bundles from the OCI bundle registry, and how they combine with the local folders in `calm.bundles`.
  */
 import {
+  type BundleRegistrySettings,
   bundleRef,
   listRepositories,
   listTags,
   readBundleConfig,
 } from '@internal/backstage-plugin-calm-node';
 import type { BundleInfo } from './entities';
-
-export interface BundleRegistrySettings {
-  /** Base URL of the registry, e.g. `http://localhost:5050`. */
-  url: string;
-  /** Repository prefix of the bundles, e.g. `calm-bundles`. */
-  repositoryPrefix: string;
-}
 
 /** The registry reads `readRegistryBundles` needs; the default is the client in calm-node. */
 export interface BundleRegistryClient {
@@ -41,55 +35,89 @@ export async function readRegistryBundles(
   registry: BundleRegistrySettings,
   client: BundleRegistryClient = defaultClient,
 ): Promise<{ bundles: BundleInfo[]; warnings: string[] }> {
-  const bundles: BundleInfo[] = [];
   const warnings: string[] = [];
   const prefix = registry.repositoryPrefix.replace(/^\/+|\/+$/g, '');
-  for (const repository of await client.listRepositories(
-    registry.url,
-    prefix,
-  )) {
-    const name = prefix ? repository.slice(prefix.length + 1) : repository;
-    for (const version of await client.listTags(registry.url, repository)) {
-      const ref = bundleRef(registry.url, prefix, name, version);
-      try {
-        const { digest, config } = await client.readBundleConfig(ref);
-        bundles.push({
-          name,
-          version,
-          ref,
-          digest,
-          description:
-            typeof config?.description === 'string'
-              ? config.description
-              : undefined,
-          deploy:
-            typeof config?.deploy === 'string' ? config.deploy : undefined,
-          pattern:
-            config?.pattern && typeof config.pattern === 'object'
-              ? config.pattern
-              : undefined,
-        });
-      } catch (e) {
-        warnings.push(`bundle ${ref} skipped: ${e}`);
-      }
-    }
-  }
+  const repositories = await client.listRepositories(registry.url, prefix);
+  // Every tag is read at once; the list keeps the registry's order.
+  const read = await Promise.all(
+    repositories.map(async repository => {
+      const name = prefix ? repository.slice(prefix.length + 1) : repository;
+      const versions = await client.listTags(registry.url, repository);
+      return Promise.all(
+        versions.map(version => {
+          const ref = bundleRef(registry.url, prefix, name, version);
+          return readOne(client, ref, name, version).catch(e => {
+            warnings.push(`bundle ${ref} skipped: ${e}`);
+            return undefined;
+          });
+        }),
+      );
+    }),
+  );
+  const bundles = read.flat().filter((b): b is BundleInfo => b !== undefined);
   return { bundles, warnings };
 }
 
 /**
- * Local and registry bundles as one list. A registry bundle takes the place of a local folder with the same name
- * and version; `replaced` names those (`<name>@<version>`).
+ * Reads the registry on each call and keeps the bundles of the last read that worked. When the registry cannot be
+ * listed it gives those instead, with `failed` set, so a registry restart does not empty the catalog's bundles.
+ */
+export function lastGoodRegistryReader(
+  registry: BundleRegistrySettings,
+  client: BundleRegistryClient = defaultClient,
+) {
+  let last: BundleInfo[] = [];
+  return async (): Promise<{
+    bundles: BundleInfo[];
+    warnings: string[];
+    failed?: unknown;
+  }> => {
+    try {
+      const read = await readRegistryBundles(registry, client);
+      last = read.bundles;
+      return read;
+    } catch (e) {
+      return { bundles: last, warnings: [], failed: e };
+    }
+  };
+}
+
+async function readOne(
+  client: BundleRegistryClient,
+  ref: string,
+  name: string,
+  version: string,
+): Promise<BundleInfo> {
+  const { digest, config } = await client.readBundleConfig(ref);
+  return {
+    name,
+    version,
+    ref,
+    digest,
+    description:
+      typeof config?.description === 'string' ? config.description : undefined,
+    deploy: typeof config?.deploy === 'string' ? config.deploy : undefined,
+    pattern:
+      config?.pattern && typeof config.pattern === 'object'
+        ? config.pattern
+        : undefined,
+  };
+}
+
+/**
+ * Local and registry bundles as one list. A local folder in `calm.bundles` takes the place of a registry bundle with
+ * the same name and version, as it does in calm:template, so the catalog shows the bundle that a run renders;
+ * `replaced` names those (`<name>@<version>`).
  */
 export function mergeBundles(
   local: BundleInfo[],
   registry: BundleInfo[],
 ): { bundles: BundleInfo[]; replaced: string[] } {
   const key = (b: BundleInfo) => `${b.name}@${b.version}`;
-  const inRegistry = new Set(registry.map(key));
-  const replaced = local.map(key).filter(k => inRegistry.has(k));
+  const inLocal = new Set(local.map(key));
+  const replaced = registry.map(key).filter(k => inLocal.has(k));
   return {
-    bundles: [...local.filter(b => !inRegistry.has(key(b))), ...registry],
+    bundles: [...local, ...registry.filter(b => !inLocal.has(key(b)))],
     replaced,
   };
 }

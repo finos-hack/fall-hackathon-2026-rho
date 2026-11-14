@@ -23,11 +23,8 @@ import {
   buildEntities,
   referencedRequirements,
 } from './entities';
-import {
-  BundleRegistrySettings,
-  mergeBundles,
-  readRegistryBundles,
-} from './bundles';
+import type { BundleRegistrySettings } from '@internal/backstage-plugin-calm-node';
+import { lastGoodRegistryReader, mergeBundles } from './bundles';
 
 /**
  * Reads the control requirements the documents reference from the configured Hub, one per control: the highest
@@ -102,15 +99,16 @@ export interface CalmProviderSettings {
 /**
  * Emits CALM Hub architectures (Component; not those stored for a published service), patterns, controls and template bundles (Resource), and one Template per
  * pattern. One full mutation per refresh; a failed Hub read keeps the entities of the last good refresh. Bundles come
- * from the OCI bundle registry and from local folders; a registry that is down gives a warning and no registry
- * bundles, not a failed refresh.
+ * from the OCI bundle registry and from local folders; a registry that is down gives a warning and the registry
+ * bundles of the last good read, not a failed refresh.
  */
 export class CalmEntityProvider implements EntityProvider {
   private connection?: EntityProviderConnection;
   private readonly client: CalmHubClient;
   private readonly location: string;
-  /** Local bundles already reported as replaced by a registry bundle, so each is logged once. */
+  /** Registry bundles already reported as replaced by a local folder, so each is logged once. */
   private readonly reportedReplaced = new Set<string>();
+  private readonly readRegistry?: ReturnType<typeof lastGoodRegistryReader>;
 
   constructor(
     private readonly settings: CalmProviderSettings,
@@ -119,6 +117,9 @@ export class CalmEntityProvider implements EntityProvider {
   ) {
     this.client = new CalmHubClient(settings.hubUrl);
     this.location = `calm-hub:${this.client.baseUrl}`;
+    this.readRegistry =
+      settings.bundleRegistry &&
+      lastGoodRegistryReader(settings.bundleRegistry);
   }
 
   getProviderName(): string {
@@ -222,29 +223,28 @@ export class CalmEntityProvider implements EntityProvider {
     };
   }
 
-  /** Local folders and registry bundles; a registry bundle wins over a local folder of the same name and version. */
+  /** Local folders and registry bundles; a local folder wins over a registry bundle of the same name and version. */
   private async readBundles(): Promise<BundleInfo[]> {
     const local = await this.readLocalBundles();
-    const registry = this.settings.bundleRegistry;
-    if (!registry) {
+    if (!this.readRegistry) {
       return local;
     }
-    let fromRegistry: BundleInfo[] = [];
-    try {
-      const read = await readRegistryBundles(registry);
-      read.warnings.forEach(w => this.logger.warn(`CALM catalog: ${w}`));
-      fromRegistry = read.bundles;
-    } catch (e) {
+    // Like an unreachable Hub, a registry that cannot be read leaves the bundles of the last good read in place, so
+    // the bundle Resources and the Templates' publish steps do not disappear while it restarts.
+    const read = await this.readRegistry();
+    read.warnings.forEach(w => this.logger.warn(`CALM catalog: ${w}`));
+    if (read.failed) {
       this.logger.warn(
-        `CALM catalog: bundle registry ${registry.url} not read, no registry bundles in this refresh: ${e}`,
+        `CALM catalog: bundle registry ${this.settings.bundleRegistry?.url} not read; keeping the ${read.bundles.length} registry bundles from the last read that worked: ${read.failed}`,
       );
     }
+    const fromRegistry = read.bundles;
     const { bundles, replaced } = mergeBundles(local, fromRegistry);
     const fresh = replaced.filter(k => !this.reportedReplaced.has(k));
     if (fresh.length) {
       fresh.forEach(k => this.reportedReplaced.add(k));
       this.logger.info(
-        `CALM catalog: the registry bundle is used instead of the local folder in calm.bundles for ${fresh.join(
+        `CALM catalog: the local folder in calm.bundles is used instead of the registry bundle for ${fresh.join(
           ', ',
         )}`,
       );

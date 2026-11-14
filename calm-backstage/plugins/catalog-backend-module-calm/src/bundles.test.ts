@@ -2,6 +2,7 @@ import { CALM_ANNOTATIONS as ANN } from '@internal/backstage-plugin-calm-common'
 import {
   BundleRegistryClient,
   mergeBundles,
+  lastGoodRegistryReader,
   readRegistryBundles,
 } from './bundles';
 import { BundleInfo, buildEntities } from './entities';
@@ -87,6 +88,43 @@ describe('readRegistryBundles', () => {
   });
 });
 
+describe('lastGoodRegistryReader', () => {
+  it('keeps the bundles of the last read that worked while the registry cannot be listed', async () => {
+    let down = false;
+    const read = lastGoodRegistryReader(
+      registry,
+      fakeClient({
+        listRepositories: async () => {
+          if (down) {
+            throw new Error('connect ECONNREFUSED');
+          }
+          return ['calm-bundles/web-service'];
+        },
+      }),
+    );
+    const first = await read();
+    expect(first.failed).toBeUndefined();
+    expect(first.bundles.map(b => b.version)).toEqual(['1.0.0', '2.0.0']);
+
+    down = true;
+    const second = await read();
+    expect(String(second.failed)).toMatch(/ECONNREFUSED/);
+    expect(second.bundles).toEqual(first.bundles);
+  });
+
+  it('gives no bundles when the registry has never been read', async () => {
+    const read = lastGoodRegistryReader(
+      registry,
+      fakeClient({
+        listRepositories: async () => {
+          throw new Error('down');
+        },
+      }),
+    );
+    expect((await read()).bundles).toEqual([]);
+  });
+});
+
 describe('mergeBundles', () => {
   const local: BundleInfo[] = [
     { name: 'web-service', version: '2.0.0', path: '/b/2.0.0' },
@@ -97,10 +135,10 @@ describe('mergeBundles', () => {
     { name: 'web-service', version: '2.0.0', ref: 'r:2.0.0', digest: 'd2' },
   ];
 
-  it('lets a registry bundle take the place of a local folder of the same name and version', () => {
+  it('lets a local folder take the place of a registry bundle of the same name and version, as calm:template does', () => {
     const { bundles, replaced } = mergeBundles(local, fromRegistry);
     expect(replaced).toEqual(['web-service@2.0.0']);
-    expect(bundles).toEqual([local[1], ...fromRegistry]);
+    expect(bundles).toEqual([...local, fromRegistry[0]]);
   });
 
   it('keeps the local folders when the registry gave nothing', () => {
