@@ -1,6 +1,5 @@
-import path from 'node:path';
-import { resolveSafeChildPath } from '@backstage/backend-plugin-api';
 import { createTemplateAction } from '@backstage/plugin-scaffolder-node';
+import { publishedFolder } from './publishedFolder';
 import { isDnsLabel } from '@internal/backstage-plugin-calm-common';
 import {
   KubernetesDeploySettings,
@@ -74,11 +73,7 @@ export function createCalmImageBuildAction(options: {
     async handler(ctx) {
       const settings = await requireKubernetesDeploy(options.settings);
       const image = imageReference(ctx.input.name, ctx.input.tag);
-      // Throws for a folder outside calm.publish.localDir.
-      const dir = resolveSafeChildPath(
-        options.localDir,
-        path.relative(options.localDir, path.resolve(ctx.input.dir)),
-      );
+      const dir = publishedFolder(options.localDir, ctx.input.dir);
       ctx.logger.info(
         `KUBECONFIG=${settings.kubeconfig} minikube -p ${settings.minikubeProfile} image build -t ${image} ${dir}`,
       );

@@ -116,21 +116,11 @@ describe('namespace guard', () => {
 
 describe('applyArgs', () => {
   it('applies the overlay', () => {
-    expect(
-      applyArgs('/o/deploy/k8s-overlay', {
-        dryRun: false,
-        namespaceExists: false,
-      }),
-    ).toEqual(['apply', '-k', '/o/deploy/k8s-overlay']);
-  });
-
-  it('dry-runs on the server when the namespace exists, else on the client', () => {
-    expect(
-      applyArgs('/o', { dryRun: true, namespaceExists: true }).at(-1),
-    ).toBe('--dry-run=server');
-    expect(
-      applyArgs('/o', { dryRun: true, namespaceExists: false }).at(-1),
-    ).toBe('--dry-run=client');
+    expect(applyArgs('/o/deploy/k8s-overlay')).toEqual([
+      'apply',
+      '-k',
+      '/o/deploy/k8s-overlay',
+    ]);
   });
 });
 

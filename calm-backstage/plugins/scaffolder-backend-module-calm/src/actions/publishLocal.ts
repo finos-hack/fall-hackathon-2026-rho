@@ -281,14 +281,18 @@ export function createCalmPublishLocalAction(options: {
       // Kubernetes tab is simply empty.
       let kubernetes: { id: string; namespace: string } | undefined;
       if (ctx.input.deployable) {
-        if (isDnsLabel(name)) {
+        if (
+          isDnsLabel(name) &&
+          isDnsLabel(`${options.namespacePrefix}${name}`)
+        ) {
           kubernetes = {
             id: name,
             namespace: deployNamespace(options.namespacePrefix, name),
           };
         } else {
+          // A name of up to 63 characters passes the form, but the namespace adds the prefix.
           ctx.logger.warn(
-            `${name} cannot name Kubernetes objects (not a DNS label), so no Kubernetes annotations are written`,
+            `${name} cannot name Kubernetes objects (not a DNS label, or the namespace ${options.namespacePrefix}${name} is longer than 63 characters), so no Kubernetes annotations are written and the service cannot be deployed`,
           );
         }
       }

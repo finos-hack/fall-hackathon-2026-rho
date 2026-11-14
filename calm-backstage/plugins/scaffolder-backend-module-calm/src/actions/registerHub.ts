@@ -1,5 +1,10 @@
 import fs from 'node:fs/promises';
-import { resolveSafeChildPath } from '@backstage/backend-plugin-api';
+import path from 'node:path';
+import {
+  type AuthService,
+  resolveSafeChildPath,
+} from '@backstage/backend-plugin-api';
+import type { CatalogService } from '@backstage/plugin-catalog-node';
 import { createTemplateAction } from '@backstage/plugin-scaffolder-node';
 import {
   CalmHubError,
@@ -15,6 +20,8 @@ import {
   sameJson,
   serviceEntityOf,
 } from '@internal/backstage-plugin-calm-common';
+import { assertClaimable, fileLocationRef, lookUpClaim } from './catalogClaim';
+import { CATALOG_INFO_FILE } from './publishLocal';
 
 export const DEFAULT_HUB_VERSION = '1.0.0';
 
@@ -90,6 +97,10 @@ export function createCalmRegisterHubAction(options: {
   hub: CalmHubWriteClient;
   /** `calm.publish.hubNamespace`: the Hub namespace the architectures are stored in. */
   namespace: string;
+  /** For the name check before any Hub write: the catalog, and `calm.publish.localDir`. */
+  catalog: Pick<CatalogService, 'getEntityByRef'>;
+  auth: Pick<AuthService, 'getOwnServiceCredentials'>;
+  localDir: string;
 }) {
   const { hub, namespace } = options;
   return createTemplateAction({
@@ -160,6 +171,24 @@ export function createCalmRegisterHubAction(options: {
       }
       // The Hub architecture belongs to this service: the catalog provider then emits no Component of its own for it.
       const entityRef = `component:default/${name}`;
+
+      // This step runs before calm:publish:local, so it makes publish's name checks first: a name the catalog holds
+      // from elsewhere, or a service folder that exists, would make publish fail after the Hub had a new version.
+      const target = resolveSafeChildPath(options.localDir, name);
+      assertClaimable(
+        await lookUpClaim(options, entityRef),
+        fileLocationRef(path.join(target, CATALOG_INFO_FILE)),
+        entityRef,
+      );
+      const folderExists = await fs
+        .stat(target)
+        .then(() => true)
+        .catch(() => false);
+      if (folderExists) {
+        throw new Error(
+          `${target} already exists, so the service ${name} has already been created; choose another service name`,
+        );
+      }
       const doc = markServiceArchitecture(
         withTitle(withoutId(read), name),
         entityRef,

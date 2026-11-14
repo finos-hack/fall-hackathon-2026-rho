@@ -57,7 +57,11 @@ function fakeHub(base: string) {
         text: async () =>
           JSON.stringify({
             values: [
-              { customId: 'billing-api', namespace: 'hackathon', numericId: 16 },
+              {
+                customId: 'billing-api',
+                namespace: 'hackathon',
+                numericId: 16,
+              },
             ],
           }),
         json: async () => ({
@@ -187,11 +191,51 @@ describe('with a workspace', () => {
   });
 
   describe('calm:register:hub', () => {
-    const register = (hub: ReturnType<typeof fakeHub>, c: any) =>
+    const noEntities = { getEntityByRef: jest.fn(async () => undefined) };
+    const auth = { getOwnServiceCredentials: jest.fn(async () => ({})) } as any;
+    const register = (
+      hub: ReturnType<typeof fakeHub>,
+      c: any,
+      catalog: any = noEntities,
+    ) =>
       createCalmRegisterHubAction({
         hub: hub.client,
         namespace: 'hackathon',
+        catalog,
+        auth,
+        localDir: path.join(workspace, 'output'),
       }).handler(c);
+
+    it('refuses a name the catalog holds from elsewhere, before any Hub request', async () => {
+      const hub = fakeHub(base);
+      const catalog = {
+        getEntityByRef: jest.fn(async () => ({
+          metadata: {
+            name: 'billing-api',
+            annotations: {
+              'backstage.io/managed-by-location': 'url:https://example.com/x',
+            },
+          },
+        })),
+      };
+      await expect(
+        register(hub, ctx({ name: 'billing-api' }), catalog),
+      ).rejects.toThrow(
+        'The catalog already has component:default/billing-api (from url:https://example.com/x)',
+      );
+      expect(hub.calls).toEqual([]);
+    });
+
+    it('refuses a service whose folder exists, before any Hub request', async () => {
+      const hub = fakeHub(base);
+      await fs.mkdir(path.join(workspace, 'output', 'billing-api'), {
+        recursive: true,
+      });
+      await expect(register(hub, ctx({ name: 'billing-api' }))).rejects.toThrow(
+        /billing-api already exists, so the service billing-api has already been created/,
+      );
+      expect(hub.calls).toEqual([]);
+    });
 
     it('stores a new architecture as 1.0.0 with its $id and the service mark, and writes both to the file', async () => {
       const hub = fakeHub(base);

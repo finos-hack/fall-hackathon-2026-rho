@@ -21,7 +21,9 @@ import { CalmHubWriteClient } from '@internal/backstage-plugin-calm-common';
 import {
   DEFAULT_NAMESPACE_PREFIX,
   calmBin,
+  readBundleRegistrySettings,
   readKubernetesDeploySettings,
+  readPublishLocalDir,
 } from '@internal/backstage-plugin-calm-node';
 
 export const scaffolderModuleCalm = createBackendModule({
@@ -46,24 +48,14 @@ export const scaffolderModuleCalm = createBackendModule({
           version: b.getString('version'),
           path: path.resolve(b.getString('path')),
         }));
-        const registryConfig = config.getOptionalConfig('calm.bundleRegistry');
-        const registry = registryConfig
-          ? {
-              url: registryConfig.getString('url'),
-              repositoryPrefix:
-                registryConfig.getOptionalString('repositoryPrefix') ??
-                'calm-bundles',
-            }
-          : undefined;
+        const registry = readBundleRegistrySettings(config);
         // Registry bundles are pulled once per digest into the backend's temp folder (the scaffolder's own
         // working directory when one is configured).
         const cacheDir = path.join(
           config.getOptionalString('backend.workingDirectory') ?? os.tmpdir(),
           'calm-bundles',
         );
-        const localDir = path.resolve(
-          config.getOptionalString('calm.publish.localDir') ?? '../../output',
-        );
+        const localDir = readPublishLocalDir(config);
         // The one cluster calm:image:build and calm:deploy:k8s work on; without it both refuse to run.
         const kubernetes = readKubernetesDeploySettings(config);
         logger.info(
@@ -90,7 +82,13 @@ export const scaffolderModuleCalm = createBackendModule({
           createCalmGenerateAction({ hubUrl }),
           createCalmFillAction(),
           createCalmValidateAction({ hubUrl }),
-          createCalmRegisterHubAction({ hub, namespace: hubNamespace }),
+          createCalmRegisterHubAction({
+            hub,
+            namespace: hubNamespace,
+            catalog,
+            auth,
+            localDir,
+          }),
           createCalmTemplateAction({ bundles, registry, cacheDir }),
           createCalmPublishLocalAction({
             catalog,

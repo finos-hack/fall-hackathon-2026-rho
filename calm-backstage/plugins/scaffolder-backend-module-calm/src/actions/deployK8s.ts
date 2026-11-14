@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { resolveSafeChildPath } from '@backstage/backend-plugin-api';
 import { createTemplateAction } from '@backstage/plugin-scaffolder-node';
+import { publishedFolder } from './publishedFolder';
 import {
   CALM_KUBERNETES,
   KUBERNETES_ID_LABEL,
@@ -100,22 +100,9 @@ export function checkExistingNamespace(
   }
 }
 
-/**
- * `kubectl apply` arguments for the overlay. A dry run is a server dry run when the namespace exists; without the
- * namespace the server rejects every namespaced object, so the dry run is a client one.
- */
-export function applyArgs(
-  overlayDir: string,
-  opts: { dryRun: boolean; namespaceExists: boolean },
-): string[] {
-  return [
-    'apply',
-    '-k',
-    overlayDir,
-    ...(opts.dryRun
-      ? [`--dry-run=${opts.namespaceExists ? 'server' : 'client'}`]
-      : []),
-  ];
+/** `kubectl apply` arguments for the overlay. */
+export function applyArgs(overlayDir: string): string[] {
+  return ['apply', '-k', overlayDir];
 }
 
 interface Deployed {
@@ -157,8 +144,7 @@ export function createCalmDeployK8sAction(options: {
   return createTemplateAction({
     id: 'calm:deploy:k8s',
     description:
-      "Deploys a published service folder to the local cluster (calm.deploy.kubernetes): writes the overlay deploy/k8s-overlay over the bundle's kustomize base deploy/k8s, runs kubectl apply -k into the namespace <namespacePrefix><name> and waits for the rollouts. Needs the cluster from `yarn k8s:up`.",
-    supportsDryRun: true,
+      "Deploys a published service folder to the local cluster (calm.deploy.kubernetes): writes the overlay deploy/k8s-overlay over the bundle's kustomize base deploy/k8s, runs kubectl apply -k into the namespace <namespacePrefix><name> and waits for the rollouts. Needs the cluster from `yarn k8s:up`. No dry run: its inputs come from calm:publish:local and calm:image:build, which a dry run skips.",
     schema: {
       input: {
         dir: z =>
@@ -204,11 +190,7 @@ export function createCalmDeployK8sAction(options: {
       const settings = await requireKubernetesDeploy(options.settings);
       const { name, image } = ctx.input;
       const namespace = deployNamespace(settings.namespacePrefix, name);
-      // Throws for a folder outside calm.publish.localDir.
-      const dir = resolveSafeChildPath(
-        options.localDir,
-        path.relative(options.localDir, path.resolve(ctx.input.dir)),
-      );
+      const dir = publishedFolder(options.localDir, ctx.input.dir);
       const base = path.join(dir, BASE_DIR);
       const hasBase = await fs
         .stat(path.join(base, 'kustomization.yaml'))
@@ -249,58 +231,40 @@ export function createCalmDeployK8sAction(options: {
         existing ? JSON.parse(existing) : undefined,
       );
 
-      const args = applyArgs(overlayDir, {
-        dryRun: Boolean(ctx.isDryRun),
-        namespaceExists: Boolean(existing),
-      });
+      const args = applyArgs(overlayDir);
       ctx.logger.info(kubectlCommand(settings, args));
       const startTime = new Date().toISOString();
       await runKubectl(settings, args, run);
 
-      let deployed: Deployed;
-      if (ctx.isDryRun) {
-        // Nothing was created: the names come from the rendered overlay.
-        const rendered = await runKubectl(
-          settings,
-          ['kustomize', overlayDir],
-          quiet,
-        );
-        deployed = summariseObjects(
-          YAML.parseAllDocuments(rendered.stdout).map(d => d.toJS()),
-        );
-      } else {
-        const listed = await runKubectl(
+      const listed = await runKubectl(
+        settings,
+        [
+          '-n',
+          namespace,
+          'get',
+          'deployments,networkpolicies,services',
+          '-o',
+          'json',
+        ],
+        quiet,
+      );
+      const deployed = summariseObjects(JSON.parse(listed.stdout).items ?? []);
+      for (const deployment of deployed.deployments) {
+        await runKubectl(
           settings,
           [
             '-n',
             namespace,
-            'get',
-            'deployments,networkpolicies,services',
-            '-o',
-            'json',
+            'rollout',
+            'status',
+            `deployment/${deployment}`,
+            `--timeout=${ROLLOUT_TIMEOUT}`,
           ],
-          quiet,
+          run,
         );
-        deployed = summariseObjects(JSON.parse(listed.stdout).items ?? []);
-        for (const deployment of deployed.deployments) {
-          await runKubectl(
-            settings,
-            [
-              '-n',
-              namespace,
-              'rollout',
-              'status',
-              `deployment/${deployment}`,
-              `--timeout=${ROLLOUT_TIMEOUT}`,
-            ],
-            run,
-          );
-        }
       }
       ctx.logger.info(
-        `${ctx.isDryRun ? 'Dry run of' : 'Deployed'} ${name} ${
-          ctx.isDryRun ? 'for' : 'to'
-        } ${settings.context} / ${namespace}: ${
+        `Deployed ${name} to ${settings.context} / ${namespace}: ${
           deployed.deployments.length
         } deployments (${deployed.deployments.join(', ')}), ${
           deployed.networkPolicies.length
