@@ -1,0 +1,204 @@
+{
+  "nodes": [
+    {
+      "unique-id": "web-client",
+      "node-type": "webclient",
+      "name": "Web Client",
+      "description": "The browser or mobile client that calls the service."
+    },
+    {
+      "unique-id": "api-gateway",
+      "node-type": "system",
+      "name": "API Gateway",
+      "description": "Routes and authenticates external requests to the service.",
+      "interfaces": [
+        {
+          "unique-id": "api-gateway-ingress",
+          "host": "[[ HOST ]]",
+          "port": -1
+        }
+      ]
+    },
+    {
+      "unique-id": "web-service",
+      "node-type": "service",
+      "name": "Web Service",
+      "description": "The service the developer builds from this pattern.",
+      "metadata": {
+        "owner": "[[ OWNER ]]",
+        "service-name": "[[ SERVICE_NAME ]]"
+      },
+      "interfaces": [
+        {
+          "unique-id": "web-service-api",
+          "port": -1
+        }
+      ]
+    },
+    {
+      "unique-id": "postgres-database",
+      "node-type": "database",
+      "name": "PostgreSQL",
+      "description": "Relational data store for the service.",
+      "interfaces": [
+        {
+          "unique-id": "postgres-port",
+          "port": 5432
+        }
+      ],
+      "controls": {
+        "security": {
+          "description": "Stored data must be encrypted at rest",
+          "requirements": [
+            {
+              "requirement-url": "http://localhost:8090/calm/domains/hackathon-security/controls/encryption-at-rest/requirement/versions/1.0.0",
+              "config-url": "http://localhost:8090/calm/domains/hackathon-security/controls/encryption-at-rest/configurations/aes-256-kms/versions/1.0.0"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "unique-id": "cache",
+      "node-type": "service",
+      "name": "Redis Cache",
+      "description": "In-memory cache in front of the data store.",
+      "interfaces": [
+        {
+          "unique-id": "cache-port",
+          "port": 6379
+        }
+      ]
+    }
+  ],
+  "relationships": [
+    {
+      "unique-id": "web-client-api-gateway",
+      "description": "The client calls the service through the gateway",
+      "protocol": "HTTPS",
+      "relationship-type": {
+        "connects": {
+          "source": {
+            "node": "web-client"
+          },
+          "destination": {
+            "node": "api-gateway"
+          }
+        }
+      },
+      "controls": {
+        "security": {
+          "description": "Connections must be permitted and encrypted in transit",
+          "requirements": [
+            {
+              "requirement-url": "http://localhost:8090/calm/domains/hackathon-security/controls/permitted-connection/requirement/versions/1.0.0",
+              "config-url": "http://localhost:8090/calm/domains/hackathon-security/controls/permitted-connection/configurations/https/versions/1.0.0"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "unique-id": "api-gateway-web-service",
+      "description": "The gateway forwards requests to the service",
+      "protocol": "HTTPS",
+      "relationship-type": {
+        "connects": {
+          "source": {
+            "node": "api-gateway"
+          },
+          "destination": {
+            "node": "web-service"
+          }
+        }
+      },
+      "controls": {
+        "security": {
+          "description": "Connections must be permitted and encrypted in transit",
+          "requirements": [
+            {
+              "requirement-url": "http://localhost:8090/calm/domains/hackathon-security/controls/permitted-connection/requirement/versions/1.0.0",
+              "config-url": "http://localhost:8090/calm/domains/hackathon-security/controls/permitted-connection/configurations/https/versions/1.0.0"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "unique-id": "web-service-postgres",
+      "description": "The service stores its data in PostgreSQL",
+      "protocol": "JDBC",
+      "relationship-type": {
+        "connects": {
+          "source": {
+            "node": "web-service"
+          },
+          "destination": {
+            "node": "postgres-database"
+          }
+        }
+      },
+      "controls": {
+        "security": {
+          "description": "Connections to the data store must be permitted and encrypted",
+          "requirements": [
+            {
+              "requirement-url": "http://localhost:8090/calm/domains/hackathon-security/controls/permitted-connection/requirement/versions/1.0.0",
+              "config-url": "http://localhost:8090/calm/domains/hackathon-security/controls/permitted-connection/configurations/datastore/versions/1.0.0"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "unique-id": "datastore-choice",
+      "description": "Which data store does the service use?",
+      "relationship-type": {
+        "options": [
+          {
+            "description": "PostgreSQL",
+            "nodes": [
+              "postgres-database"
+            ],
+            "relationships": [
+              "web-service-postgres"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "unique-id": "add-ons",
+      "description": "Which add-ons does the service need?",
+      "relationship-type": {
+        "options": [
+          {
+            "description": "Cache (Redis)",
+            "nodes": [
+              "cache"
+            ],
+            "relationships": [
+              "web-service-cache"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "unique-id": "web-service-cache",
+      "description": "The service caches reads in Redis",
+      "protocol": "TCP",
+      "relationship-type": {
+        "connects": {
+          "source": {
+            "node": "web-service"
+          },
+          "destination": {
+            "node": "cache"
+          }
+        }
+      }
+    }
+  ],
+  "$schema": "http://localhost:8090/calm/namespaces/hackathon/patterns/web-service/versions/1.0.0"
+}

@@ -1,0 +1,30 @@
+# {{title}}
+
+{{description}}
+
+Owner: **{{owner}}**
+
+## Components
+
+| Component | Technology | Port |
+|---|---|---|
+| API gateway | `{{gatewayHost}}` | {{gatewayPort}} |
+| Service `{{serviceName}}` | container built from `Dockerfile` | {{servicePort}} |
+| Data store | {{datastore.name}} | {{datastore.port}} |
+{{#if cache}}| Cache | Redis | {{cache.port}} |
+{{/if}}{{#if messageQueue}}| Message queue | RabbitMQ | {{messageQueue.port}} |
+{{/if}}{{#if observability}}| Telemetry | OpenTelemetry collector | {{observability.port}} |
+{{/if}}
+
+## Run locally
+
+```sh
+docker compose -f deploy/docker-compose.yml up --build
+curl http://localhost:{{servicePort}}/health
+```
+
+## Provenance
+
+- Architecture: {{architectureId}}
+- Pattern: {{patternId}}
+- Bundle: web-service 2.0.0

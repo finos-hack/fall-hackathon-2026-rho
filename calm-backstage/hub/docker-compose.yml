@@ -1,0 +1,54 @@
+# CALM Hub for calm-backstage: finos/calm-hub:latest (no-auth) + MongoDB.
+#
+# Based on finos/architecture-as-code calm-hub/deploy/docker-compose.yml (profile jvm, checkout c7ce7fe1a).
+# Differences: compose project name calm-backstage, Hub on host port 8090 (not 8080), MongoDB port not
+# published, base URL set to http://localhost:8090 so $id, $schema and control URLs resolve for the CLI.
+#
+# Prepare the release meta-schemas first (git-ignored): hub/copy-schemas.sh
+# Start: yarn hub:up   Seed: yarn hub:seed   Stop: yarn hub:down
+#
+# WARNING: the no-auth Quarkus profile is for local development only.
+name: calm-backstage
+
+services:
+  mongodb:
+    image: mongo:latest
+    container_name: calm-backstage-mongodb
+    volumes:
+      - ./mongo/init-mongo.js:/docker-entrypoint-initdb.d/init-mongo.js:ro
+      - ./.schemas/release:/calm-schemas/release:ro
+      # init-mongo.js crashes when its controls directory is missing ("TypeError: Cannot read properties of
+      # undefined (reading 'length')"), so mount an empty one. Our controls are created by seed.sh via the API.
+      - ./mongo/controls:/controls:ro
+      - mongo-data:/data/db
+    environment:
+      - CALM_RELEASE_SCHEMA_PATH=/calm-schemas/release
+      - CALM_CONTROLS_BASE_PATH=/controls
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    networks:
+      - calm-net
+
+  calmhub:
+    image: finos/calm-hub:latest
+    container_name: calm-backstage-hub
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    ports:
+      - "8090:8080"
+    environment:
+      - CALM_HUB_BASE_URL=http://localhost:8090
+      - JAVA_OPTS=-Dquarkus.mongodb.connection-string=mongodb://mongodb:27017 -Dquarkus.profile=no-auth -Dcalm.hub.base-url=http://localhost:8090
+    networks:
+      - calm-net
+
+volumes:
+  mongo-data:
+
+networks:
+  calm-net:
+    driver: bridge

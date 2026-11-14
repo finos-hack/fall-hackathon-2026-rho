@@ -1,0 +1,9 @@
+{
+  "$schema": "http://localhost:8090/calm/domains/hackathon-security/controls/encryption-at-rest/requirement/versions/1.0.0",
+  "$id": "http://localhost:8090/calm/domains/hackathon-security/controls/encryption-at-rest/configurations/aes-256-kms/versions/1.0.0",
+  "control-id": "hs-002",
+  "name": "Encryption at Rest",
+  "description": "Data stores must encrypt stored data with an approved algorithm and managed keys.",
+  "algorithm": "AES-256",
+  "key-management": "kms"
+}
