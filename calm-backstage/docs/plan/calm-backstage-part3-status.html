@@ -71,12 +71,12 @@ ul.list b { font-family: var(--font-mono); font-size: 12.5px; margin-right: 8px;
 
   <section class="strip" aria-label="Overall status">
     <div class="strip-top">
-      <div id="overall"><span class="pill p-run">in progress</span></div>
-      <div class="meta" id="count">10 of 11 tasks done</div>
-      <div class="meta" id="stamp">started Nov 14 17:21 &middot; updated Nov 14 18:38</div>
+      <div id="overall"><span class="pill p-done">done, awaiting your review</span></div>
+      <div class="meta" id="count">11 of 11 tasks done</div>
+      <div class="meta" id="stamp">started Nov 14 17:21 &middot; updated Nov 14 19:01</div>
     </div>
-    <div class="bar" role="progressbar" aria-valuemin="0" aria-valuemax="11" aria-valuenow="10"><i id="fill" style="width:91%"></i></div>
-    <div class="meta" id="now">Now: task 11, review, from-scratch run, docs and the retake video</div>
+    <div class="bar" role="progressbar" aria-valuemin="0" aria-valuemax="11" aria-valuenow="11"><i id="fill" style="width:100%"></i></div>
+    <div class="meta" id="now">Now: finished. Branch feat/part3-templates-gitops (17 commits), not merged or pushed</div>
   </section>
 
   <section class="sec">
@@ -94,7 +94,7 @@ ul.list b { font-family: var(--font-mono); font-size: 12.5px; margin-right: 8px;
       <tr id="t8"><td class="n">8</td><td class="name">Template Explorer</td><td><span class="pill p-done">done</span></td><td class="step">-</td><td class="hash">ab77cb9</td><td class="ev">Page at /calm-templates with a sidebar item; screenshots show the bundles grouped, OCI ref, digest, Gitea source link, files with viewer, the k8s-deploy 1.0.0&#x2192;1.1.0 diff and Used by (node-check-api, up to date). 186 tests pass (4 new)</td></tr>
       <tr id="t9"><td class="n">9</td><td class="name">Open the running app</td><td><span class="pill p-done">done</span></td><td class="step">-</td><td class="hash">d872330</td><td class="ev">Live without a token: /api/calm/app/node-check-api redirects to the trailing slash, serves the page and /api/info; kube-system, flux-system and an encoded ../ path answer 404. Card shows the button (screenshot). 189 tests pass (3 new)</td></tr>
       <tr id="t10"><td class="n">10</td><td class="name">Nisshi event streaming</td><td><span class="pill p-done">done</span></td><td class="step">-</td><td class="hash">6acd516</td><td class="ev">PostgreSQL storage in a scratch namespace: event produced at offset 0 and consumed back. Template run stream-check (SQLite storage) completed in 11 s; through Backstage&#x27;s app proxy, POST &quot;Order 2001 placed&quot; came back at offset 0, broker connected</td></tr>
-      <tr id="t11"><td class="n">11</td><td class="name">From scratch, docs and the retake video</td><td><span class="pill p-run">in progress</span></td><td class="step">cluster rebuilt from scratch (98 s, Flux from k8s:up); warming caches with throwaway services; then recording</td><td class="hash">-</td><td class="ev">-</td></tr>
+      <tr id="t11"><td class="n">11</td><td class="name">From scratch, docs and the retake video</td><td><span class="pill p-done">done</span></td><td class="step">-</td><td class="hash">f256c45</td><td class="ev">Video 5:25 (38 MB) with a contents card and 8 chapters (times in docs/demo/README.md); frames checked: Spring 4.0.9 app, Quarkus app, 3 Nisshi events consumed, card after upgrade (1.1.0 + 1.2.1), Used by. Cluster rebuilt from scratch (98 s); warm-up found the 1.2.0 upgrade bug (D13). README, TRACKS, FINDINGS updated</td></tr>
       </tbody>
     </table></div>
   </section>
@@ -105,6 +105,7 @@ ul.list b { font-family: var(--font-mono); font-size: 12.5px; margin-right: 8px;
       <li id="d1"><b>D1</b>Plan assumed the cluster could take more load at 3 GiB; it was at 2.57 of 3 GiB. Recreated the calm-backstage profile with 6 GiB / 4 CPUs (k8s/up.sh); only this profile was touched <span class="pill p-done">applied</span></li>
       <li id="d2"><b>D2</b>Flux without its notification controller retried every event 5 times (~15 s per reconcile). k8s/flux-install.cjs removes --events-addr from the two kept controllers <span class="pill p-done">applied</span></li>
       <li id="d3"><b>D3</b>Playwright&#x27;s ffmpeg has no concat, and there is no system ffmpeg: the retake is one take with a contents card, chapter cards and logged chapter times <span class="pill p-done">applied</span></li>
+      <li id="d13"><b>D13</b>The warm-up upgrade (1.0.0 &#x2192; 1.2.0) failed: Kubernetes refuses switching a live Deployment to Recreate while rollingUpdate settings remain, and server-side apply cannot remove them (rollingUpdate: null tested, no). Flux reported it and the run failed cleanly at its 300 s wait. Fixed as k8s-deploy 1.2.1 (RollingUpdate, maxSurge 0: the old pod stops first), verified over 1.0.0 in 12 s. 1.2.0 stays published with a note to use 1.2.1 <span class="pill p-done">applied</span></li>
       <li id="d12"><b>D12</b>Plan assumed a full from-scratch run (docker compose down -v). Deleting the Compose volumes was refused (by the auto-mode classifier, rightly): the Hub, registry and Gitea are shared with the other checkout on 3100/7107. Not worked around. Instead: the bundles changed in place went back to their published content and the fixes shipped as new versions (k8s-deploy 1.2.0, nisshi-stream-app 1.0.1); the cluster was rebuilt from scratch with yarn k8s:down/up; yarn hub:seed re-run (idempotent). output/ was left in place <span class="pill p-done">applied</span></li>
       <li id="d11"><b>D11</b>Whole-branch review (fresh reviewer) found: the app page was blank in a browser (Backstage&#x27;s CSP blocked the starters&#x27; inline script; curl had hidden it), failed upgrades could not be retried, never-deployed services were offered upgrades, a race in the shared bundle cache, push-bundles committing to Gitea before refusing, and render discarding uncommitted work. All fixed with tests in 07ab829 (194 tests). Two security findings are recorded for the team, not fixed: the unauthenticated app proxy runs app code on the backend&#x27;s origin, and anyone who can push to Gitea on port 3300 can apply anything through Flux (cluster-admin) <span class="pill p-done">applied</span></li>
       <li id="d10"><b>D10</b>Live checks before the reset: Spring and Quarkus through the Template; a code + rules upgrade of Spring (4.0.9&#x2192;4.1.2, 1.0.0&#x2192;1.1.0) in 11 s; Quarkus under 1.1.0 limits with no restarts. The Nisshi rules upgrade exposed a bug: the new broker started on empty SQLite and the app lost its topic. Fixed in the starter (recreates its topic) and the rules (Recreate strategy for backing services); verified by restarting the broker. Fixed in place because the reset republishes everything <span class="pill p-done">applied</span></li>
@@ -122,11 +123,11 @@ ul.list b { font-family: var(--font-mono); font-size: 12.5px; margin-right: 8px;
     <div class="wrap"><table>
       <thead><tr><th>#</th><th>Criterion</th><th>Result</th><th>Actual</th></tr></thead>
       <tbody>
-      <tr id="a1"><td class="n">1</td><td class="name">yarn tsc, yarn test, yarn build:backend pass</td><td><span class="pill p-pending">open</span></td><td class="ev">-</td></tr>
+      <tr id="a1"><td class="n">1</td><td class="name">yarn tsc, yarn test, yarn build:backend pass</td><td><span class="pill p-done">pass</span></td><td class="ev">tsc exit 0; 28 suites, 194 tests passed; build:backend exit 0 (Nov 14 19:01)</td></tr>
       <tr id="a2"><td class="n">2</td><td class="name">From scratch (volumes and cluster deleted, output/ moved aside): every demo chapter works with no hand step</td><td><span class="pill p-block">partly</span></td><td class="ev">Cluster from scratch: yarn k8s:down + k8s:up 98 s, Flux installed by up.sh. Seeds idempotent (hub:seed 2 s, 0 created). Volumes not deleted (shared with the other checkout; see D12), so a run on empty Hub/registry/Gitea was not done. Backstage ran on 3200/7207 with an extra config file, not plain yarn start</td></tr>
-      <tr id="a3"><td class="n">3</td><td class="name">Each starter answers through &quot;Open the running app&quot;; the Nisshi app round-trips a message</td><td><span class="pill p-pending">open</span></td><td class="ev">-</td></tr>
-      <tr id="a4"><td class="n">4</td><td class="name">An upgrade of code and deployment rules gives a merged PR in Gitea, a Flux-applied commit, a pod showing the new versions and a new deployment decorator in CALM Hub</td><td><span class="pill p-pending">open</span></td><td class="ev">-</td></tr>
-      <tr id="a5"><td class="n">5</td><td class="name">The video opens with a contents card and docs/demo/README.md has chapter times</td><td><span class="pill p-pending">open</span></td><td class="ev">-</td></tr>
+      <tr id="a3"><td class="n">3</td><td class="name">Each starter answers through &quot;Open the running app&quot;; the Nisshi app round-trips a message</td><td><span class="pill p-done">pass</span></td><td class="ev">Node, Spring Boot, Red Hat Quarkus and Nisshi pages answer through /api/calm/app/&lt;name&gt;/ in a browser (after the CSP fix); in the video, 3 events produced and consumed back at offsets 0&#x2013;2</td></tr>
+      <tr id="a4"><td class="n">4</td><td class="name">An upgrade of code and deployment rules gives a merged PR in Gitea, a Flux-applied commit, a pod showing the new versions and a new deployment decorator in CALM Hub</td><td><span class="pill p-done">pass</span></td><td class="ev">orders-nov14 in the video: PR merged, Flux Ready at the new commit, app shows Spring Boot 4.1.2 and k8s-deploy@1.2.1; Hub lists the new deployment; upgr-check same in 12 s</td></tr>
+      <tr id="a5"><td class="n">5</td><td class="name">The video opens with a contents card and docs/demo/README.md has chapter times</td><td><span class="pill p-done">pass</span></td><td class="ev">docs/demo/calm-backstage-full-demo.webm, 5:25; contents card 0:00&#x2013;0:11; 8 chapters with mm:ss in docs/demo/README.md</td></tr>
       </tbody>
     </table></div>
   </section>
@@ -136,7 +137,10 @@ ul.list b { font-family: var(--font-mono); font-size: 12.5px; margin-right: 8px;
     <ul class="list">
       <li>Your request ended with &quot;and can we also include.&quot; and was cut off. I built the Red Hat Quarkus and Spring Boot starters plus Nisshi; tell me what the third item was and I will add it.</li>
       <li>Gitea stands in for GitHub (nothing was pushed outside this machine). Pointing at github.com later needs a repository, credentials and your go-ahead.</li>
-      <li>The calm-backstage minikube profile was recreated (6 GiB / 4 CPUs), so the services deployed in part 2 are gone from the cluster; their output/ folders are kept (moved aside before the from-scratch run, not deleted).</li>
+      <li>The calm-backstage minikube profile was recreated twice (6 GiB / 4 CPUs, then from scratch). It is shared with your other checkout (~/finos/fall-hackathon-2026-rho/calm-backstage on 3100/7107): run <code>yarn k8s:up</code> there and restart it to refresh its kubeconfig. output/ is untouched (the move aside was refused with the volume delete).</li>
+      <li>A full from-scratch run on empty Hub/registry/Gitea volumes was not done: deleting them was refused because they are shared with that checkout. Run it when that copy is stopped: <code>docker compose -f hub/docker-compose.yml down -v</code>, then <code>yarn hub:up &amp;&amp; yarn hub:seed</code>, <code>yarn k8s:up</code>, <code>yarn start</code>.</li>
+      <li>Two security findings for the team (FINDINGS, part 3): the unauthenticated app proxy serves app code on the backend&#x27;s origin, and a push to Gitea (port 3300, fixed password) can apply anything through Flux as cluster-admin. Fine for a laptop demo; not for a shared network.</li>
+      <li>The branch feat/part3-templates-gitops (17 commits) is not merged or pushed: review and merge when ready.</li>
     </ul>
   </section>
 
@@ -144,18 +148,18 @@ ul.list b { font-family: var(--font-mono); font-size: 12.5px; margin-right: 8px;
     <h2>Overall plan progress</h2>
     <div class="strip">
       <div class="strip-top">
-        <div class="meta" id="plan-count">2 of 9 phases done</div>
+        <div class="meta" id="plan-count">3 of 9 phases done</div>
         <div class="meta" id="plan-name">CALM Backstage (README.md, TRACKS.md)</div>
       </div>
-      <div class="bar" role="progressbar" aria-valuemin="0" aria-valuemax="9" aria-valuenow="2"><i id="plan-fill" style="width:22%"></i></div>
-      <div class="meta" id="plan-next">Next up: finish part 3, then the tracks for Monday&#x27;s team (TRACKS.md)</div>
+      <div class="bar" role="progressbar" aria-valuemin="0" aria-valuemax="9" aria-valuenow="3"><i id="plan-fill" style="width:33%"></i></div>
+      <div class="meta" id="plan-next">Next up: the tracks for Monday&#x27;s team (TRACKS.md), starting from this branch once merged</div>
     </div>
     <div class="wrap"><table>
       <thead><tr><th>Phase</th><th>Name</th><th>State</th><th>Outcome</th><th>Report</th></tr></thead>
       <tbody>
       <tr id="pl0"><td class="n">0</td><td class="name">Hackathon base (thin slice, steps 1–8)</td><td><span class="pill p-done">done</span></td><td class="ev">8 of 8 steps, 22 tests</td><td class="mono">calm-backstage-status.html</td></tr>
       <tr id="pl1"><td class="n">1</td><td class="name">Part 2: bundle store and deployment to local Kubernetes</td><td><span class="pill p-done">done</span></td><td class="ev">8 of 8 steps, 8 of 8 acceptance criteria, 125 tests</td><td class="mono">calm-backstage-part2-status.html</td></tr>
-      <tr id="pl2"><td class="n">2</td><td class="name">Part 3: Template Explorer, GitOps upgrades, starters, Nisshi</td><td><span class="pill p-run">in progress</span></td><td class="ev">-</td><td class="mono">this page</td></tr>
+      <tr id="pl2"><td class="n">2</td><td class="name">Part 3: Template Explorer, GitOps upgrades, starters, Nisshi</td><td><span class="pill p-done">done</span></td><td class="ev">11 of 11 tasks, 4 of 5 acceptance criteria pass (from-scratch partly), 194 tests, 5:25 retake video</td><td class="mono">this page</td></tr>
       <tr id="pl3"><td class="n">3</td><td class="name">Track A: Catalog</td><td><span class="pill p-pending">not started</span></td><td class="ev">-</td><td class="mono">-</td></tr>
       <tr id="pl4"><td class="n">4</td><td class="name">Track B: Entity page</td><td><span class="pill p-pending">not started</span></td><td class="ev">-</td><td class="mono">-</td></tr>
       <tr id="pl5"><td class="n">5</td><td class="name">Track C: Pattern options</td><td><span class="pill p-pending">not started</span></td><td class="ev">-</td><td class="mono">-</td></tr>
