@@ -8,6 +8,9 @@ export default class WebServiceTransformer {
         const data = calmJson.originalJson ?? calmJson;
         const nodes = data.nodes ?? [];
         const byId = id => nodes.find(n => n['unique-id'] === id);
+        // The compose service and Docker image name: lower case, words joined by - (the service-name placeholder is free text).
+        const imageName = name =>
+            String(name).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'web-service';
         const port = node => node?.interfaces?.find(i => 'port' in i)?.port;
 
         const service = byId('web-service');
@@ -20,11 +23,13 @@ export default class WebServiceTransformer {
                 ? { kind: 'mongodb', name: 'MongoDB', image: 'mongo:7', port: port(mongodb), isMongodb: true }
                 : undefined;
 
+        const serviceName = service?.metadata?.['service-name'] ?? 'web-service';
         return {
             document: {
                 title: data.title ?? service?.name,
                 description: data.description ?? service?.description,
-                serviceName: service?.metadata?.['service-name'] ?? 'web-service',
+                serviceName,
+                imageName: imageName(serviceName),
                 owner: service?.metadata?.owner ?? 'unknown',
                 servicePort: port(service),
                 gatewayHost: gateway?.interfaces?.[0]?.host,
