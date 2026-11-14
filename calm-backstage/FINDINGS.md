@@ -55,6 +55,29 @@ Each is a candidate for a published, supported API.
   the namespaces in `calm.namespaces`.
 - **Versions are immutable** (`409 Version 1.0.0 already exists`). With the named MongoDB volume, changes to seed
   files need `docker compose -f hub/docker-compose.yml down -v` before re-seeding.
+- **The name-based write API refuses a generated architecture as it is** (found when `calm:register:hub` first
+  posted one: `400: 'title' is required in the document body`). A document needs a non-blank `title`, and
+  `calm generate` gives none, so the action adds the service name as `title` and a `description`. From the Hub source
+  (`MappingControllerResource`, `CalmDocumentParser`, monorepo `c7ce7fe1a`; not all tried against the 0.7.7 image):
+  the name must start with a letter (`^[a-zA-Z][a-zA-Z0-9]*(-[a-zA-Z0-9]+)*$`), so the Template's name field now
+  asks for that; the body's `$id` must equal the canonical URL of the version in the path; and the first version of
+  a new resource must be `1.0.0`. Request: say in the OpenAPI what a posted document must hold.
+- **A document is not returned byte for byte:** `$id` is taken out on write and added at the end on read. Everything
+  else came back equal, so "the same document" is a comparison of JSON values, not of text.
+- **Decorators** (`/api/calm/namespaces/{ns}/decorators`, only on the numeric API): `POST` answers
+  `201 {"id": n}`. They are **written in kebab case and read in camel case**: the Hub stores `unique-id`,
+  `target-type` and `applies-to` and returns `uniqueId`, `targetType`, `appliesTo` and `schema` (for `$schema`);
+  `data` comes back as posted, and the body has no id. `normaliseDecorator` reads both shapes. Request: return what
+  was posted.
+- **The decorator `target` filter matches a whole entry and refuses URLs.** `?target=` must match
+  `^[A-Za-z0-9_/.-]+$` (a `:` gives 400) and is compared with each entry of `target` exactly, so a prefix finds
+  nothing. A deployment decorator therefore names its architecture version by the path
+  `/calm/namespaces/<ns>/architectures/<name>/versions/<v>`, not by its `$id`. `…/decorators/values` returns the
+  decorators without their ids, so the card lists the ids and reads each one.
+- **Nothing in the Hub says who put an architecture there.** A service's architecture is marked in its own
+  `metadata` (`"calm-backstage": { "entity": "component:default/<name>" }`), so the catalog provider can leave it to
+  the service's entity and `calm:register:hub` can refuse to add versions to someone else's architecture.
+  `calm validate` passes with the marker, in object and in list `metadata`.
 
 ## Backstage
 
