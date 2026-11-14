@@ -1,4 +1,9 @@
-import { createFrontendPlugin } from '@backstage/frontend-plugin-api';
+import {
+  createFrontendPlugin,
+  createRouteRef,
+  PageBlueprint,
+} from '@backstage/frontend-plugin-api';
+import ExploreIcon from '@material-ui/icons/LayersOutlined';
 import type { Entity } from '@backstage/catalog-model';
 import { EntityCardBlueprint } from '@backstage/plugin-catalog-react/alpha';
 import { FormFieldBlueprint } from '@backstage/plugin-scaffolder-react/alpha';
@@ -55,9 +60,30 @@ export const calmPatternCard = EntityCardBlueprint.make({
   },
 });
 
+export const templateExplorerRouteRef = createRouteRef();
+
+/** The Template Explorer page (and its sidebar item): bundles, their files, their Git source and who uses them. */
+export const templateExplorerPage = PageBlueprint.make({
+  params: {
+    path: '/calm-templates',
+    routeRef: templateExplorerRouteRef,
+    title: 'Template Explorer',
+    icon: <ExploreIcon />,
+    noHeader: true,
+    loader: () =>
+      import('./components/TemplateExplorerPage').then(m => (
+        <m.TemplateExplorerPage />
+      )),
+  },
+});
+
 export const calmPlugin = createFrontendPlugin({
   pluginId: 'calm',
+  title: 'Template Explorer',
+  icon: <ExploreIcon />,
+  routes: { templateExplorer: templateExplorerRouteRef },
   extensions: [
+    templateExplorerPage,
     calmPlaceholdersFormField,
     calmArchitectureCard,
     calmPatternCard,

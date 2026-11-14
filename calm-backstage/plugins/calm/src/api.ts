@@ -40,6 +40,36 @@ export interface ArchitectureResponse {
   };
 }
 
+/** One version of a bundle in calm-backend `GET /bundles`. */
+export interface ExplorerBundleVersion {
+  version: string;
+  ref: string;
+  digest: string;
+  size?: number;
+  created?: string;
+  source?: string;
+  revision?: string;
+  description?: string;
+  runtime?: string;
+  patterns: { namespace?: string; patternId: string }[];
+}
+
+/** Response of calm-backend `GET /bundles`. */
+export interface BundlesResponse {
+  bundles: {
+    name: string;
+    kind: 'starter' | 'deployment' | 'full';
+    versions: ExplorerBundleVersion[];
+  }[];
+}
+
+/** Response of calm-backend `GET /bundles/:name/diff`. */
+export interface BundleDiffResponse {
+  from: string;
+  to: string;
+  files: { path: string; status: 'added' | 'removed' | 'changed'; patch: string }[];
+}
+
 /** Response of calm-backend `GET /upgrades`. */
 export interface UpgradesResponse {
   inGit: boolean;
@@ -77,7 +107,10 @@ interface State<T> {
 }
 
 /** GET a calm-backend route with the user's token. `path` undefined means nothing to load. */
-export function useCalmBackend<T>(path: string | undefined): State<T> {
+export function useCalmBackend<T>(
+  path: string | undefined,
+  opts: { text?: boolean } = {},
+): State<T> {
   const discovery = useApi(discoveryApiRef);
   const { fetch } = useApi(fetchApiRef);
   const [state, setState] = useState<State<T>>({ loading: !!path });
@@ -103,7 +136,7 @@ export function useCalmBackend<T>(path: string | undefined): State<T> {
           `calm-backend answered ${res.status}${detail ? `: ${detail}` : ''}`,
         );
       }
-      return (await res.json()) as T;
+      return (opts.text ? await res.text() : await res.json()) as T;
     })().then(
       value => !cancelled && setState({ loading: false, value }),
       error => !cancelled && setState({ loading: false, error }),
@@ -111,7 +144,7 @@ export function useCalmBackend<T>(path: string | undefined): State<T> {
     return () => {
       cancelled = true;
     };
-  }, [discovery, fetch, path]);
+  }, [discovery, fetch, path, opts.text]);
 
   return state;
 }

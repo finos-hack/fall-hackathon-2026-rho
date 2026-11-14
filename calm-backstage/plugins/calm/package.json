@@ -33,6 +33,7 @@
     "@backstage/plugin-scaffolder-react": "^2.1.1",
     "@internal/backstage-plugin-calm-common": "workspace:^",
     "@material-ui/core": "^4.12.2",
+    "@material-ui/icons": "^4.9.1",
     "@material-ui/lab": "4.0.0-alpha.61",
     "mermaid": "^11.16.1"
   },

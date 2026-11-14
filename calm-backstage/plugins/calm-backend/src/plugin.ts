@@ -1,3 +1,5 @@
+import os from 'node:os';
+import path from 'node:path';
 import {
   coreServices,
   createBackendPlugin,
@@ -36,6 +38,11 @@ export const calmPlugin = createBackendPlugin({
             // The cluster calm:deploy:k8s deploys to; the architecture card shows what a service has there.
             kubernetes: readKubernetesDeploySettings(config),
             registry: readBundleRegistrySettings(config),
+            // The scaffolder's bundle cache: one pull per digest.
+            bundleCacheDir: path.join(
+              config.getOptionalString('backend.workingDirectory') ?? os.tmpdir(),
+              'calm-bundles',
+            ),
           }),
         );
       },

@@ -31,11 +31,13 @@
     "@backstage/plugin-catalog-node": "^2.2.6",
     "@internal/backstage-plugin-calm-common": "workspace:^",
     "@internal/backstage-plugin-calm-node": "workspace:^",
+    "diff": "^5.0.0",
     "express": "^4.22.1",
     "express-promise-router": "^4.1.0"
   },
   "devDependencies": {
     "@backstage/cli": "^0.36.7",
+    "@types/diff": "^5.2.1",
     "@types/express": "^4.17.21"
   },
   "files": [

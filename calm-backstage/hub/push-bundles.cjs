@@ -147,6 +147,7 @@ function mirror(dir) {
 async function publish(dirs, root, revision) {
   let pushed = 0;
   let skipped = 0;
+  const refused = [];
   for (const dir of dirs) {
     const meta = JSON.parse(fs.readFileSync(path.join(dir, CONFIG_FILE), 'utf8'));
     if (typeof meta.name !== 'string' || typeof meta.version !== 'string') {
@@ -164,7 +165,15 @@ async function publish(dirs, root, revision) {
         : {}),
     };
     const ref = bundleRef(REGISTRY, PREFIX, meta.name, meta.version);
-    const r = await pushBundle({ dir, ref, annotations, immutable: true });
+    let r;
+    try {
+      r = await pushBundle({ dir, ref, annotations, immutable: true });
+    } catch (e) {
+      // A changed published version: report it and go on with the others.
+      refused.push(`${meta.name}@${meta.version}`);
+      console.error(`refused  ${ref}: ${e.message ?? e}`);
+      continue;
+    }
     if (r.skipped) {
       skipped++;
       console.log(`same     ${r.ref}  ${r.digest}`);
@@ -174,6 +183,11 @@ async function publish(dirs, root, revision) {
     }
   }
   console.log(`bundles: ${pushed} published, ${skipped} already there (${REGISTRY})`);
+  if (refused.length) {
+    throw new Error(
+      `${refused.join(', ')} changed after being published; give each change a new version (a published version never changes)`,
+    );
+  }
 }
 
 async function main() {

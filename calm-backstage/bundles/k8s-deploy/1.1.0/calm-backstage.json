@@ -2,15 +2,9 @@
   "name": "k8s-deploy",
   "version": "1.1.0",
   "kind": "deployment",
-  "description": "Deployment rules for any starter, version 1.1.0: as 1.0.0 (Deployment and Service per in-cluster node, gateway config, the starter contract\u2019s environment, NetworkPolicies from connects relationships) plus resource limits, liveness probes, no service-account tokens in pods, app.kubernetes.io labels, and Nisshi 0.8.2.",
+  "description": "Deployment rules for any starter, version 1.1.0: as 1.0.0 (a Deployment and Service per in-cluster node, the gateway's nginx config, the starter contract's environment, NetworkPolicies from the architecture's connects relationships) plus resource limits, liveness probes, no service-account tokens in pods, app.kubernetes.io labels, and Nisshi 0.8.2.",
   "patterns": [
-    {
-      "namespace": "hackathon",
-      "patternId": "web-service"
-    },
-    {
-      "namespace": "hackathon",
-      "patternId": "event-streaming"
-    }
+    { "namespace": "hackathon", "patternId": "web-service" },
+    { "namespace": "hackathon", "patternId": "event-streaming" }
   ]
 }
