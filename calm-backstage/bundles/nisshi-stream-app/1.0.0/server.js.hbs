@@ -25,33 +25,24 @@ try {
   console.error('CALM_CONNECTIONS is not JSON; no connections are checked');
 }
 
-// kafkajs logs every failed fetch while the broker restarts; the app logs what matters itself.
-const kafka = new Kafka({ clientId: SERVICE, brokers: BROKERS, logLevel: logLevel.NOTHING, retry: { retries: 3 } });
+const kafka = new Kafka({ clientId: SERVICE, brokers: BROKERS, logLevel: logLevel.WARN, retry: { retries: 3 } });
 const producer = kafka.producer({ createPartitioner: Partitioners.DefaultPartitioner });
 const consumer = kafka.consumer({ groupId: `${SERVICE}-ui` });
 const received = [];
 let broker = { state: 'connecting', detail: `connecting to ${BROKERS.join(', ')}` };
 let produced = 0;
 
-/** Creates the topic when the broker does not have it (a new broker on empty storage has no topics). */
-async function ensureTopic() {
-  const admin = kafka.admin();
-  await admin.connect();
-  try {
-    if (!(await admin.listTopics()).includes(TOPIC)) {
-      await admin.createTopics({ topics: [{ topic: TOPIC, numPartitions: 1 }] });
-      console.log(`created the topic ${TOPIC}`);
-    }
-  } finally {
-    await admin.disconnect();
-  }
-}
-
 /** Creates the topic, connects the producer and the consumer; retried every 3 s until the broker answers. */
 async function connect() {
   for (;;) {
     try {
-      await ensureTopic();
+      const admin = kafka.admin();
+      await admin.connect();
+      const topics = await admin.listTopics();
+      if (!topics.includes(TOPIC)) {
+        await admin.createTopics({ topics: [{ topic: TOPIC, numPartitions: 1 }] });
+      }
+      await admin.disconnect();
       await producer.connect();
       await consumer.connect();
       await consumer.subscribe({ topic: TOPIC, fromBeginning: true });
@@ -165,12 +156,6 @@ const server = http.createServer(async (req, res) => {
 
 server.listen(PORT, '0.0.0.0', () => console.log(`${SERVICE} listening on ${PORT}`));
 connect();
-// A broker that restarts on empty storage (SQLite on its own volume, memory) comes back without the topic.
-setInterval(() => {
-  if (broker.state === 'connected') {
-    ensureTopic().catch(e => console.error(`topic check failed: ${e.message}`));
-  }
-}, 5000);
 for (const signal of ['SIGTERM', 'SIGINT']) {
   process.on(signal, async () => {
     await Promise.allSettled([consumer.disconnect(), producer.disconnect()]);

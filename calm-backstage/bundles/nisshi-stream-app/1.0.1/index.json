@@ -1,0 +1,12 @@
+{
+  "name": "Starter nisshi-stream-app",
+  "transformer": "nisshi-stream-app-transformer",
+  "templates": [
+    { "template": "README.md.hbs", "from": "document", "output": "README.md", "output-type": "single", "front-matter": { "inject": false } },
+    { "template": "Dockerfile.hbs", "from": "document", "output": "Dockerfile", "output-type": "single" },
+    { "template": "app-package.json.hbs", "from": "document", "output": "package.json", "output-type": "single" },
+    { "template": "package-lock.json.hbs", "from": "document", "output": "package-lock.json", "output-type": "single" },
+    { "template": "server.js.hbs", "from": "document", "output": "src/server.js", "output-type": "single" },
+    { "template": "index.html.hbs", "from": "document", "output": "src/index.html", "output-type": "single" }
+  ]
+}

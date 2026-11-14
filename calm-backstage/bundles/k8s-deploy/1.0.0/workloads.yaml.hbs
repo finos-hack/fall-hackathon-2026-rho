@@ -15,11 +15,6 @@ metadata:
 {{/if}}
 spec:
   replicas: 1
-{{#if stateful}}
-  # Its data is in the pod (no volume claim): never two at once during a rollout.
-  strategy:
-    type: Recreate
-{{/if}}
   selector:
     matchLabels:
       calm.finos.org/node: {{id}}
