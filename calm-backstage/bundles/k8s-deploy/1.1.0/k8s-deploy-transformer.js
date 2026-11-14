@@ -100,7 +100,7 @@ export default class K8sDeployTransformer {
             } else if (BACKING[id]) {
                 const backing = BACKING[id];
                 workloads.push({ ...base, ...backing, env: [...(backing.env ?? [])],
-                    servicePort: archPort(node) ?? backing.containerPort });
+                    servicePort: archPort(node) ?? backing.containerPort, stateful: true });
             }
         }
         const workload = id => workloads.find(w => w.id === id);
