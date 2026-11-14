@@ -8,6 +8,8 @@ export const CALM_ANNOTATIONS = {
   /** Architecture id (the name in the architecture's `$id`), e.g. `orders-service`. */
   architecture: 'calm.finos.org/architecture',
   architectureVersion: 'calm.finos.org/architecture-version',
+  /** Hub namespace of the architecture, when it is not the pattern's (`namespace`). */
+  architectureNamespace: 'calm.finos.org/architecture-namespace',
   /** Control requirement URL. */
   control: 'calm.finos.org/control',
   /** Template bundle name, e.g. `web-service`. */
