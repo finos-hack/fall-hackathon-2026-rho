@@ -22,7 +22,8 @@
     "prettier:check": "prettier --check .",
     "new": "backstage-cli new",
     "hub:up": "hub/copy-schemas.sh && docker compose -f hub/docker-compose.yml up -d",
-    "hub:seed": "hub/seed.sh",
+    "hub:seed": "hub/seed.sh && node hub/push-bundles.cjs",
+    "bundles:push": "node hub/push-bundles.cjs",
     "hub:down": "docker compose -f hub/docker-compose.yml down"
   },
   "backstage": {

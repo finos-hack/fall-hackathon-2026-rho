@@ -1,6 +1,6 @@
 {
   "name": "@internal/backstage-plugin-calm-node",
-  "description": "Node helpers shared by the CALM backend plugins: runs the published @finos/calm-cli (calm generate, validate, template).",
+  "description": "Node helpers shared by the CALM backend plugins: runs the published @finos/calm-cli (calm generate, validate, template) and pushes and pulls template bundles as OCI artifacts.",
   "version": "0.1.0",
   "license": "UNLICENSED",
   "private": true,
@@ -25,7 +25,8 @@
   },
   "dependencies": {
     "@backstage/backend-plugin-api": "^1.11.0",
-    "@finos/calm-cli": "1.71.0"
+    "@finos/calm-cli": "1.71.0",
+    "tar": "^7.5.7"
   },
   "devDependencies": {
     "@backstage/cli": "^0.36.7"
