@@ -1,6 +1,9 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { resolveSafeChildPath } from '@backstage/backend-plugin-api';
+import {
+  type AuthService,
+  resolveSafeChildPath,
+} from '@backstage/backend-plugin-api';
 import type { Entity } from '@backstage/catalog-model';
 import { stringifyEntityRef } from '@backstage/catalog-model';
 import type { CatalogService } from '@backstage/plugin-catalog-node';
@@ -13,6 +16,7 @@ import {
 } from '@internal/backstage-plugin-calm-common';
 import { listFiles } from '@internal/backstage-plugin-calm-node';
 import YAML from 'yaml';
+import { assertClaimable, fileLocationRef, lookUpClaim } from './catalogClaim';
 
 /** Owner when the Template gives none: the group the CALM provider's own entities belong to. */
 export const DEFAULT_OWNER = 'group:default/guests';
@@ -77,6 +81,7 @@ export function serviceEntity(opts: {
  */
 export function createCalmPublishLocalAction(options: {
   catalog: CatalogService;
+  auth: Pick<AuthService, 'getOwnServiceCredentials'>;
   localDir: string;
 }) {
   return createTemplateAction({
@@ -183,19 +188,11 @@ export function createCalmPublishLocalAction(options: {
       // Refuse a name the catalog already holds from elsewhere (a Hub architecture, another service) before writing
       // anything: calm:register:local could not claim it, and the folder would be left behind.
       const entityRef = stringifyEntityRef({ kind: 'Component', name });
-      const existing = await options.catalog.getEntityByRef(entityRef, {
-        credentials: await ctx.getInitiatorCredentials(),
-      });
-      const existingLocation =
-        existing?.metadata.annotations?.['backstage.io/managed-by-location'];
-      const ownLocation = `file:${path.join(target, CATALOG_INFO_FILE)}`;
-      if (existing && existingLocation !== ownLocation) {
-        throw new Error(
-          `The catalog already has ${entityRef} (from ${
-            existingLocation ?? 'an unknown location'
-          }); choose another service name`,
-        );
-      }
+      assertClaimable(
+        await lookUpClaim(options, entityRef),
+        fileLocationRef(path.join(target, CATALOG_INFO_FILE)),
+        entityRef,
+      );
       const exists = await fs
         .stat(target)
         .then(() => true)

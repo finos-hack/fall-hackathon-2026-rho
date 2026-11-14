@@ -23,8 +23,9 @@ export const scaffolderModuleCalm = createBackendModule({
         config: coreServices.rootConfig,
         logger: coreServices.logger,
         catalog: catalogServiceRef,
+        auth: coreServices.auth,
       },
-      async init({ scaffolder, config, logger, catalog }) {
+      async init({ scaffolder, config, logger, catalog, auth }) {
         const hubUrl = config.getString('calm.hubUrl');
         // Paths in calm config are relative to the backend's working directory (packages/backend).
         const bundles = (
@@ -44,8 +45,8 @@ export const scaffolderModuleCalm = createBackendModule({
           createCalmFillAction(),
           createCalmValidateAction({ hubUrl }),
           createCalmTemplateAction({ bundles }),
-          createCalmPublishLocalAction({ catalog, localDir }),
-          createCalmRegisterLocalAction({ catalog, localDir }),
+          createCalmPublishLocalAction({ catalog, auth, localDir }),
+          createCalmRegisterLocalAction({ catalog, auth, localDir }),
         );
       },
     });
