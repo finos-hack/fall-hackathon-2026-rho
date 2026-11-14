@@ -21,6 +21,11 @@ export const CALM_KUBERNETES = {
   relationshipAnnotation: 'calm.finos.org/relationship',
   /** Annotation on a NetworkPolicy: the relationship's protocol. */
   protocolAnnotation: 'calm.finos.org/protocol',
+  /**
+   * Annotation on a Deployment (k8s-deploy 1.2.2 and later): the `unique-id` of the node it was rendered from, when
+   * that id is not a valid Kubernetes name and the Deployment has a converted name.
+   */
+  uniqueIdAnnotation: 'calm.finos.org/unique-id',
 } as const;
 
 const DNS_LABEL = /^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/;

@@ -60,8 +60,9 @@ const BACKING = {
 // Kubernetes names for CALM unique-ids (since 1.2.2). A unique-id may hold upper case, `_` and other characters a
 // Kubernetes name may not. An id that is already a valid name is used as it is, so nothing rendered by 1.2.1 is
 // renamed. Any other id is lower-cased, each run of other characters becomes one `-` and `x-` goes in front when it
-// would not start with a letter; that name gets a short hash of the id when another id has it too, or when it is cut
-// to `max` characters. The original id stays in an annotation.
+// would not start with a letter; that name gets a short hash of the id when another id has it too, when it is cut to
+// `max` characters, or when it is still not `valid` (a word YAML reads as a boolean or null). The original id stays in
+// an annotation.
 const SUBDOMAIN = /^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$/;
 const hash = s => {
     let h = 0x811c9dc5; // FNV-1a, 32 bits
@@ -70,7 +71,7 @@ const hash = s => {
     }
     return h.toString(36);
 };
-// Returns id => name for `ids`. `valid` says whether an id can be used as it is.
+// Returns id => name for `ids`. `valid` says whether an id (or a converted one) can be used as it is.
 const kubernetesNames = (ids, { max, valid }) => {
     const unique = [...new Set(ids.map(String))];
     const names = new Map(unique.filter(valid).map(id => [id, id]));
@@ -85,7 +86,7 @@ const kubernetesNames = (ids, { max, valid }) => {
     const hashed = [];
     for (const id of changed) {
         const c = clean(id);
-        if (c.length <= max && !taken.has(c) && count.get(c) === 1) {
+        if (c.length <= max && valid(c) && !taken.has(c) && count.get(c) === 1) {
             names.set(id, c);
             taken.add(c);
         } else {
@@ -105,10 +106,15 @@ const kubernetesNames = (ids, { max, valid }) => {
 };
 // A NetworkPolicy name is a DNS subdomain of at most 253 characters; `-ingress` takes 8 of them.
 const POLICY_PREFIX_MAX = 253 - '-ingress'.length;
+// Words YAML 1.1 reads as a boolean or null: a name or label value that is one of them must not be written bare.
+const YAML_WORD = /^(y|yes|n|no|true|false|on|off|null)$/i;
 // A node's name is its Deployment, Service, container and DNS name and a label value: an RFC 1035 label (a Service
 // name must start with a letter) of at most 63 characters.
 const NODE_NAME_MAX = 63;
 const DNS_1035_LABEL = /^[a-z]([-a-z0-9]*[a-z0-9])?$/;
+const isNodeName = id => id.length <= NODE_NAME_MAX && DNS_1035_LABEL.test(id) && !YAML_WORD.test(id);
+// A label value: at most 63 characters, alphanumeric at both ends, `-`, `_` and `.` between.
+const isLabelValue = v => v.length <= 63 && /^(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])?$/.test(v) && !YAML_WORD.test(v);
 
 const twice = q => q.replace(/^(\d+)(.*)$/, (_, n, unit) => `${Number(n) * 2}${unit}`);
 
@@ -161,10 +167,7 @@ export default class K8sDeployTransformer {
         }
         const workload = id => workloads.find(w => w.id === id);
         // `id` stays the node's unique-id; `k8sName` is what the objects, labels, selectors and DNS use.
-        const nodeName = kubernetesNames(
-            workloads.map(w => w.id),
-            { max: NODE_NAME_MAX, valid: id => id.length <= NODE_NAME_MAX && DNS_1035_LABEL.test(id) },
-        );
+        const nodeName = kubernetesNames(workloads.map(w => w.id), { max: NODE_NAME_MAX, valid: isNodeName });
         for (const w of workloads) {
             w.memoryLimit = w.memoryLimit ?? twice(w.memory);
             w.cpuLimit = w.cpuLimit ?? '500m';
@@ -265,6 +268,8 @@ export default class K8sDeployTransformer {
             document: {
                 title: data.title ?? serviceName,
                 serviceName,
+                // The app.kubernetes.io/part-of label: the service name, converted when it is not a label value.
+                partOf: kubernetesNames([serviceName], { max: 63, valid: isLabelValue })(serviceName),
                 owner,
                 servicePort,
                 hardening: HARDENING,

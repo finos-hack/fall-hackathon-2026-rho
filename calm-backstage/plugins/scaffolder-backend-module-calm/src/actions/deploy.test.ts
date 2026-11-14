@@ -131,6 +131,13 @@ describe('summariseObjects', () => {
       summariseObjects([
         { kind: 'Deployment', metadata: { name: 'web-service' } },
         { kind: 'Deployment', metadata: { name: 'api-gateway' } },
+        {
+          kind: 'Deployment',
+          metadata: {
+            name: 'orders-api',
+            annotations: { 'calm.finos.org/unique-id': 'Orders_API' },
+          },
+        },
         { kind: 'NetworkPolicy', metadata: { name: 'default-deny' } },
         {
           kind: 'Service',
@@ -140,7 +147,8 @@ describe('summariseObjects', () => {
         { kind: 'ConfigMap', metadata: { name: 'gateway-config' } },
       ]),
     ).toEqual({
-      deployments: ['api-gateway', 'web-service'],
+      deployments: ['api-gateway', 'orders-api', 'web-service'],
+      nodes: ['Orders_API', 'api-gateway', 'web-service'],
       networkPolicies: ['default-deny'],
       services: ['api-gateway:80'],
     });

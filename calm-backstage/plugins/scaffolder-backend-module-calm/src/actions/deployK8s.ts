@@ -196,11 +196,16 @@ export async function listAndWaitForRollouts(
 
 export interface Deployed {
   deployments: string[];
+  /** The node each Deployment was rendered from: its `calm.finos.org/unique-id` annotation, else its name. */
+  nodes: string[];
   networkPolicies: string[];
   services: string[];
 }
 
-/** Names of the Deployments and NetworkPolicies, and `<name>:<port>` of the Services, in a list of objects. */
+/**
+ * Names of the Deployments and NetworkPolicies, the nodes the Deployments were rendered from, and `<name>:<port>` of
+ * the Services, in a list of objects.
+ */
 export function summariseObjects(items: any[]): Deployed {
   const names = (kind: string) =>
     items
@@ -209,6 +214,15 @@ export function summariseObjects(items: any[]): Deployed {
       .sort();
   return {
     deployments: names('Deployment'),
+    nodes: items
+      .filter(i => i?.kind === 'Deployment')
+      .map(i =>
+        String(
+          i.metadata?.annotations?.[CALM_KUBERNETES.uniqueIdAnnotation] ??
+            i.metadata?.name,
+        ),
+      )
+      .sort(),
     networkPolicies: names('NetworkPolicy'),
     services: items
       .filter(i => i?.kind === 'Service')
@@ -258,6 +272,12 @@ export function createCalmDeployK8sAction(options: {
       output: {
         namespace: z => z.string(),
         deployments: z => z.array(z.string()).describe('Deployment names'),
+        nodes: z =>
+          z
+            .array(z.string())
+            .describe(
+              'The node unique-id each Deployment was rendered from (its calm.finos.org/unique-id annotation, else its name)',
+            ),
         networkPolicies: z =>
           z.array(z.string()).describe('NetworkPolicy names'),
         services: z =>
@@ -322,6 +342,7 @@ export function createCalmDeployK8sAction(options: {
       );
       ctx.output('namespace', namespace);
       ctx.output('deployments', deployed.deployments);
+      ctx.output('nodes', deployed.nodes);
       ctx.output('networkPolicies', deployed.networkPolicies);
       ctx.output('services', deployed.services);
       ctx.output('kubectl', kubectlCommand(settings, ['-n', namespace]));

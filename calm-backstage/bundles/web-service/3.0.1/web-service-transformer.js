@@ -40,8 +40,9 @@ const BACKING = {
 // Kubernetes names for CALM unique-ids (since 3.0.1). A unique-id may hold upper case, `_` and other characters a
 // Kubernetes name may not. An id that is already a valid name is used as it is, so nothing rendered by 3.0.0 is
 // renamed. Any other id is lower-cased, each run of other characters becomes one `-` and `x-` goes in front when it
-// would not start with a letter; that name gets a short hash of the id when another id has it too, or when it is cut
-// to `max` characters. The original id stays in an annotation.
+// would not start with a letter; that name gets a short hash of the id when another id has it too, when it is cut to
+// `max` characters, or when it is still not `valid` (a word YAML reads as a boolean or null). The original id stays in
+// an annotation.
 const SUBDOMAIN = /^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$/;
 const hash = s => {
     let h = 0x811c9dc5; // FNV-1a, 32 bits
@@ -50,7 +51,7 @@ const hash = s => {
     }
     return h.toString(36);
 };
-// Returns id => name for `ids`. `valid` says whether an id can be used as it is.
+// Returns id => name for `ids`. `valid` says whether an id (or a converted one) can be used as it is.
 const kubernetesNames = (ids, { max, valid }) => {
     const unique = [...new Set(ids.map(String))];
     const names = new Map(unique.filter(valid).map(id => [id, id]));
@@ -65,7 +66,7 @@ const kubernetesNames = (ids, { max, valid }) => {
     const hashed = [];
     for (const id of changed) {
         const c = clean(id);
-        if (c.length <= max && !taken.has(c) && count.get(c) === 1) {
+        if (c.length <= max && valid(c) && !taken.has(c) && count.get(c) === 1) {
             names.set(id, c);
             taken.add(c);
         } else {

@@ -140,6 +140,7 @@ export function createCalmDeployGitopsAction(options: {
       output: {
         namespace: z => z.string(),
         deployments: z => z.array(z.string()),
+        nodes: z => z.array(z.string()),
         networkPolicies: z => z.array(z.string()),
         services: z => z.array(z.string()),
         kubectl: z => z.string(),
@@ -263,6 +264,7 @@ export function createCalmDeployGitopsAction(options: {
       );
       ctx.output('namespace', namespace);
       ctx.output('deployments', deployed.deployments);
+      ctx.output('nodes', deployed.nodes);
       ctx.output('networkPolicies', deployed.networkPolicies);
       ctx.output('services', deployed.services);
       ctx.output('kubectl', kubectlCommand(settings, ['-n', namespace]));

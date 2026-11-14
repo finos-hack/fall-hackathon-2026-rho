@@ -11,7 +11,10 @@ import {
   deploymentDecorator,
 } from '@internal/backstage-plugin-calm-common';
 
-/** The node `unique-id`s among the workloads: a workload is named after the node it was rendered from. */
+/**
+ * The node `unique-id`s among the workloads: the node each Deployment was rendered from (calm:deploy:k8s or
+ * calm:deploy:gitops output `nodes`), which is its name unless the id is not a valid Kubernetes name.
+ */
 export function deployedNodes(
   workloads: string[],
   architecture: unknown,
@@ -65,7 +68,7 @@ export function createCalmDecorateDeploymentAction(options: {
           z
             .array(z.string())
             .describe(
-              'Deployment names (calm:deploy:k8s output deployments); those that are node ids become applies-to',
+              'The nodes the Deployments were rendered from (calm:deploy:k8s output nodes); those that are node ids of the architecture become applies-to',
             ),
         architecturePath: z =>
           z

@@ -14,7 +14,7 @@ metadata:
     calm.finos.org/deploy-rules: {{../rules.name}}-{{../rules.version}}
 {{#if ../hardening}}
     app.kubernetes.io/name: {{k8sName}}
-    app.kubernetes.io/part-of: {{../serviceName}}
+    app.kubernetes.io/part-of: {{../partOf}}
     app.kubernetes.io/managed-by: flux
 {{/if}}
 spec:
@@ -43,7 +43,7 @@ spec:
         calm.finos.org/deploy-rules: {{../rules.name}}-{{../rules.version}}
 {{#if ../hardening}}
         app.kubernetes.io/name: {{k8sName}}
-        app.kubernetes.io/part-of: {{../serviceName}}
+        app.kubernetes.io/part-of: {{../partOf}}
 {{/if}}
     spec:
       enableServiceLinks: false

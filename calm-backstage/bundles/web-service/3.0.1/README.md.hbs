@@ -51,9 +51,10 @@ Every pod is denied all traffic except DNS and these relationships. A policy's n
 {{/each}}
 {{#if renamedPolicies.length}}
 
-These unique-ids are not valid Kubernetes names, so their policies are named after a converted id: lower case, other
-characters as `-`, and a short hash when two ids would get the same name or the id is too long. The policies keep the
-unique-id in the `calm.finos.org/relationship` annotation.
+Except for these relationships: their unique-ids are not valid Kubernetes names, so their policies are named after a
+converted id (lower case, other characters as `-`, `x-` in front when it would not start with a letter, and a short
+hash when two ids would get the same name or the id is too long). The policies keep the unique-id in the
+`calm.finos.org/relationship` annotation.
 
 | Relationship | Policies named |
 |---|---|

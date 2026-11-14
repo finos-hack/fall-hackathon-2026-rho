@@ -37,7 +37,8 @@ It is told:
 
 These nodes' unique-ids are not valid Kubernetes names, so they run under a converted name: lower case, other
 characters as `-`, `x-` in front when it would not start with a letter, and a short hash when two ids would get the
-same name or the id is too long. Their objects keep the unique-id in the `calm.finos.org/unique-id` annotation.
+same name, the id is too long or it is a word YAML reads as a boolean or null. Their objects keep the unique-id in the
+`calm.finos.org/unique-id` annotation.
 
 | Node unique-id | Name |
 |---|---|
