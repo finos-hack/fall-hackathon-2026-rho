@@ -255,6 +255,19 @@ calm:
       minikubeProfile: calm-backstage
       # A service <name> is deployed to the namespace <namespacePrefix><name>
       namespacePrefix: calm-
+  # GitOps: each new service is a repository <gitUrl>/<servicesOrg>/<name> (output/<name> is its working copy), and Flux
+  # in the cluster deploys its deploy/k8s-overlay. Bundle sources are in <gitUrl>/<templatesRepo>. Without this block
+  # the Template deploys with kubectl apply (calm:deploy:k8s), as in part 2.
+  # Local development only: the Gitea from hub/docker-compose.yml, with the user hub/gitea-seed.sh creates.
+  gitops:
+    gitUrl: http://localhost:3300
+    # The same server as Flux in the minikube cluster reaches it
+    clusterGitUrl: http://host.minikube.internal:3300
+    servicesOrg: calm-services
+    templatesRepo: calm-templates/bundles
+    branch: main
+    username: calm
+    password: calm-local-dev
 
 kubernetes:
   # see https://backstage.io/docs/features/kubernetes/configuration for kubernetes configuration options

@@ -1,0 +1,160 @@
+<title>CALM Backstage Part 3 Status</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root {
+  --bg: #f5f6f8; --surface: #ffffff; --ink: #14181f; --muted: #5a6472; --line: #dde1e7; --accent: #2b4cc9;
+  --pending: #6b7480; --pending-bg: #e9ecf0;
+  --run: #8a5200; --run-bg: #ffe9c2;
+  --done: #11663a; --done-bg: #d3f1df;
+  --fail: #a3201c; --fail-bg: #fbdad7;
+  --block: #5b2f9e; --block-bg: #e8dcf7;
+  --font-display: "Bricolage Grotesque", "Helvetica Neue", Arial, sans-serif;
+  --font-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #0f1218; --surface: #171b23; --ink: #e8ebf0; --muted: #9aa4b2; --line: #2a303b; --accent: #8fa6ff;
+  --pending: #a3acb8; --pending-bg: #262c36;
+  --run: #ffc56b; --run-bg: #3d2a08;
+  --done: #7ddca1; --done-bg: #123b25;
+  --fail: #ff9a94; --fail-bg: #4a1714;
+  --block: #cdb0ff; --block-bg: #2e1d4d;
+  color-scheme: dark; } }
+:root[data-theme="dark"] {
+  --bg: #0f1218; --surface: #171b23; --ink: #e8ebf0; --muted: #9aa4b2; --line: #2a303b; --accent: #8fa6ff;
+  --pending: #a3acb8; --pending-bg: #262c36;
+  --run: #ffc56b; --run-bg: #3d2a08;
+  --done: #7ddca1; --done-bg: #123b25;
+  --fail: #ff9a94; --fail-bg: #4a1714;
+  --block: #cdb0ff; --block-bg: #2e1d4d;
+  color-scheme: dark; }
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--ink); font-family: var(--font-body); font-size: 15px; line-height: 1.5;
+  padding-block: 28px 56px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+main { max-width: 1040px; margin: 0 auto; display: flex; flex-direction: column; gap: 32px; }
+h1, h2 { font-family: var(--font-display); text-wrap: balance; margin: 0; letter-spacing: -0.01em; }
+h1 { font-size: clamp(26px, 5vw, 38px); line-height: 1.1; }
+h2 { font-size: 20px; }
+.sub { color: var(--muted); margin: 6px 0 0; max-width: 65ch; }
+.strip { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 18px 20px; display: flex; flex-direction: column; gap: 14px; }
+.strip-top { display: flex; flex-wrap: wrap; gap: 8px 24px; align-items: center; justify-content: space-between; }
+.meta { font-family: var(--font-mono); font-size: 12.5px; color: var(--muted); }
+.bar { height: 10px; background: var(--pending-bg); border-radius: 5px; overflow: hidden; }
+.bar > i { display: block; height: 100%; width: 0%; background: var(--accent); border-radius: 5px; }
+.pill { display: inline-block; font-size: 12px; font-weight: 600; padding: 2px 9px; border-radius: 999px; white-space: nowrap; letter-spacing: 0.02em; }
+.p-pending { color: var(--pending); background: var(--pending-bg); }
+.p-run { color: var(--run); background: var(--run-bg); }
+.p-done { color: var(--done); background: var(--done-bg); }
+.p-fail { color: var(--fail); background: var(--fail-bg); }
+.p-block { color: var(--block); background: var(--block-bg); }
+.wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; min-width: 640px; }
+th { text-align: left; font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); font-weight: 600; padding: 10px 14px; border-bottom: 1px solid var(--line); }
+td { padding: 11px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
+tr:last-child td { border-bottom: 0; }
+td.n { font-family: var(--font-mono); color: var(--muted); width: 36px; }
+td.name { font-weight: 500; min-width: 200px; }
+td.hash, td.mono { font-family: var(--font-mono); font-size: 12.5px; }
+td.step, td.ev { color: var(--muted); font-size: 14px; }
+.sec { display: flex; flex-direction: column; gap: 12px; }
+ul.list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+ul.list li { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 10px 14px; }
+ul.list b { font-family: var(--font-mono); font-size: 12.5px; margin-right: 8px; color: var(--accent); }
+@media (max-width: 560px) { td, th { padding: 9px 10px; } body { font-size: 14.5px; } }
+</style>
+<main>
+  <header>
+    <h1>CALM Backstage part 3: templates, GitOps upgrades, starters, Nisshi</h1>
+    <p class="sub">A Template Explorer, upgrades of code and deployment rules through Git and Flux, Spring Boot, Red Hat Quarkus and Nisshi starters that open as working apps, and a retake demo. Plan: docs/superpowers/plans/2026-11-14-part3-templates-gitops.md; design: docs/superpowers/specs/2026-11-14-part3-templates-gitops-design.md.</p>
+  </header>
+
+  <section class="strip" aria-label="Overall status">
+    <div class="strip-top">
+      <div id="overall"><span class="pill p-run">in progress</span></div>
+      <div class="meta" id="count">0 of 11 tasks done</div>
+      <div class="meta" id="stamp">started Nov 14 17:21 &middot; updated Nov 14 17:23</div>
+    </div>
+    <div class="bar" role="progressbar" aria-valuemin="0" aria-valuemax="11" aria-valuenow="0"><i id="fill" style="width:0%"></i></div>
+    <div class="meta" id="now">Now: task 1, Git server and Flux (design and plan done; builder check answered: build upgrades on the branch before merging, old bundle digests kept)</div>
+  </section>
+
+  <section class="sec">
+    <h2>Tasks</h2>
+    <div class="wrap"><table>
+      <thead><tr><th>#</th><th>Task</th><th>State</th><th>Current step</th><th>Commit</th><th>Evidence</th></tr></thead>
+      <tbody>
+      <tr id="t1"><td class="n">1</td><td class="name">Git server and Flux come up from the yarn scripts</td><td><span class="pill p-run">in progress</span></td><td class="step">Gitea seed script, Flux in k8s:up, calm.gitops config</td><td class="hash">-</td><td class="ev">-</td></tr>
+      <tr id="t2"><td class="n">2</td><td class="name">Git and Gitea clients</td><td><span class="pill p-pending">pending</span></td><td class="step">-</td><td class="hash">-</td><td class="ev">-</td></tr>
+      <tr id="t3"><td class="n">3</td><td class="name">Deploy through Git and Flux</td><td><span class="pill p-pending">pending</span></td><td class="step">-</td><td class="hash">-</td><td class="ev">-</td></tr>
+      <tr id="t4"><td class="n">4</td><td class="name">Starters and deployment rules</td><td><span class="pill p-pending">pending</span></td><td class="step">-</td><td class="hash">-</td><td class="ev">-</td></tr>
+      <tr id="t5"><td class="n">5</td><td class="name">Publish bundles from Git</td><td><span class="pill p-pending">pending</span></td><td class="step">-</td><td class="hash">-</td><td class="ev">-</td></tr>
+      <tr id="t6"><td class="n">6</td><td class="name">Upgrade code and deployment rules</td><td><span class="pill p-pending">pending</span></td><td class="step">-</td><td class="hash">-</td><td class="ev">-</td></tr>
+      <tr id="t7"><td class="n">7</td><td class="name">Spring Boot and Red Hat Quarkus starters</td><td><span class="pill p-pending">pending</span></td><td class="step">-</td><td class="hash">-</td><td class="ev">-</td></tr>
+      <tr id="t8"><td class="n">8</td><td class="name">Template Explorer</td><td><span class="pill p-pending">pending</span></td><td class="step">-</td><td class="hash">-</td><td class="ev">-</td></tr>
+      <tr id="t9"><td class="n">9</td><td class="name">Open the running app</td><td><span class="pill p-pending">pending</span></td><td class="step">-</td><td class="hash">-</td><td class="ev">-</td></tr>
+      <tr id="t10"><td class="n">10</td><td class="name">Nisshi event streaming</td><td><span class="pill p-pending">pending</span></td><td class="step">-</td><td class="hash">-</td><td class="ev">-</td></tr>
+      <tr id="t11"><td class="n">11</td><td class="name">From scratch, docs and the retake video</td><td><span class="pill p-pending">pending</span></td><td class="step">-</td><td class="hash">-</td><td class="ev">-</td></tr>
+      </tbody>
+    </table></div>
+  </section>
+
+  <section class="sec">
+    <h2>Deviations from the plan</h2>
+    <ul class="list" id="devs">
+      <li id="d1"><b>D1</b>Plan assumed the cluster could take more load at 3 GiB; it was at 2.57 of 3 GiB. Recreated the calm-backstage profile with 6 GiB / 4 CPUs (k8s/up.sh); only this profile was touched <span class="pill p-done">applied</span></li>
+      <li id="d2"><b>D2</b>Flux without its notification controller retried every event 5 times (~15 s per reconcile). k8s/flux-install.cjs removes --events-addr from the two kept controllers <span class="pill p-done">applied</span></li>
+      <li id="d3"><b>D3</b>Playwright&#x27;s ffmpeg has no concat, and there is no system ffmpeg: the retake is one take with a contents card, chapter cards and logged chapter times <span class="pill p-done">applied</span></li>
+      <li id="d4"><b>D4</b>No real GitHub (project boundary: no GitHub push without you). A local Gitea on port 3300 stands in; every Git URL is configuration <span class="pill p-done">applied</span></li>
+    </ul>
+  </section>
+
+  <section class="sec">
+    <h2>Acceptance</h2>
+    <div class="wrap"><table>
+      <thead><tr><th>#</th><th>Criterion</th><th>Result</th><th>Actual</th></tr></thead>
+      <tbody>
+      <tr id="a1"><td class="n">1</td><td class="name">yarn tsc, yarn test, yarn build:backend pass</td><td><span class="pill p-pending">open</span></td><td class="ev">-</td></tr>
+      <tr id="a2"><td class="n">2</td><td class="name">From scratch (volumes and cluster deleted, output/ moved aside): every demo chapter works with no hand step</td><td><span class="pill p-pending">open</span></td><td class="ev">-</td></tr>
+      <tr id="a3"><td class="n">3</td><td class="name">Each starter answers through &quot;Open the running app&quot;; the Nisshi app round-trips a message</td><td><span class="pill p-pending">open</span></td><td class="ev">-</td></tr>
+      <tr id="a4"><td class="n">4</td><td class="name">An upgrade of code and deployment rules gives a merged PR in Gitea, a Flux-applied commit, a pod showing the new versions and a new deployment decorator in CALM Hub</td><td><span class="pill p-pending">open</span></td><td class="ev">-</td></tr>
+      <tr id="a5"><td class="n">5</td><td class="name">The video opens with a contents card and docs/demo/README.md has chapter times</td><td><span class="pill p-pending">open</span></td><td class="ev">-</td></tr>
+      </tbody>
+    </table></div>
+  </section>
+
+  <section class="sec">
+    <h2>Open items for Jim</h2>
+    <ul class="list">
+      <li>Your request ended with &quot;and can we also include.&quot; and was cut off. I built the Red Hat Quarkus and Spring Boot starters plus Nisshi; tell me what the third item was and I will add it.</li>
+      <li>Gitea stands in for GitHub (nothing was pushed outside this machine). Pointing at github.com later needs a repository, credentials and your go-ahead.</li>
+      <li>The calm-backstage minikube profile was recreated (6 GiB / 4 CPUs), so the services deployed in part 2 are gone from the cluster; their output/ folders are kept (moved aside before the from-scratch run, not deleted).</li>
+    </ul>
+  </section>
+
+  <section class="sec" id="bigger">
+    <h2>Overall plan progress</h2>
+    <div class="strip">
+      <div class="strip-top">
+        <div class="meta" id="plan-count">2 of 9 phases done</div>
+        <div class="meta" id="plan-name">CALM Backstage (README.md, TRACKS.md)</div>
+      </div>
+      <div class="bar" role="progressbar" aria-valuemin="0" aria-valuemax="9" aria-valuenow="2"><i id="plan-fill" style="width:22%"></i></div>
+      <div class="meta" id="plan-next">Next up: finish part 3, then the tracks for Monday&#x27;s team (TRACKS.md)</div>
+    </div>
+    <div class="wrap"><table>
+      <thead><tr><th>Phase</th><th>Name</th><th>State</th><th>Outcome</th><th>Report</th></tr></thead>
+      <tbody>
+      <tr id="pl0"><td class="n">0</td><td class="name">Hackathon base (thin slice, steps 1–8)</td><td><span class="pill p-done">done</span></td><td class="ev">8 of 8 steps, 22 tests</td><td class="mono">calm-backstage-status.html</td></tr>
+      <tr id="pl1"><td class="n">1</td><td class="name">Part 2: bundle store and deployment to local Kubernetes</td><td><span class="pill p-done">done</span></td><td class="ev">8 of 8 steps, 8 of 8 acceptance criteria, 125 tests</td><td class="mono">calm-backstage-part2-status.html</td></tr>
+      <tr id="pl2"><td class="n">2</td><td class="name">Part 3: Template Explorer, GitOps upgrades, starters, Nisshi</td><td><span class="pill p-run">in progress</span></td><td class="ev">-</td><td class="mono">this page</td></tr>
+      <tr id="pl3"><td class="n">3</td><td class="name">Track A: Catalog</td><td><span class="pill p-pending">not started</span></td><td class="ev">-</td><td class="mono">-</td></tr>
+      <tr id="pl4"><td class="n">4</td><td class="name">Track B: Entity page</td><td><span class="pill p-pending">not started</span></td><td class="ev">-</td><td class="mono">-</td></tr>
+      <tr id="pl5"><td class="n">5</td><td class="name">Track C: Pattern options</td><td><span class="pill p-pending">not started</span></td><td class="ev">-</td><td class="mono">-</td></tr>
+      <tr id="pl6"><td class="n">6</td><td class="name">Track D: Template bundles (rest)</td><td><span class="pill p-pending">not started</span></td><td class="ev">-</td><td class="mono">-</td></tr>
+      <tr id="pl7"><td class="n">7</td><td class="name">Track E: Publish (rest)</td><td><span class="pill p-pending">not started</span></td><td class="ev">-</td><td class="mono">-</td></tr>
+      <tr id="pl8"><td class="n">8</td><td class="name">Track F: Provisioning</td><td><span class="pill p-pending">not started</span></td><td class="ev">-</td><td class="mono">-</td></tr>
+      </tbody>
+    </table></div>
+  </section>
+</main>

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Starts the local Kubernetes cluster for calm-backstage and tells Backstage how to read it.
 #
-# - minikube profile "calm-backstage" (docker driver, Calico so NetworkPolicies are enforced).
+# - minikube profile "calm-backstage" (docker driver, Calico so NetworkPolicies are enforced, 6 GiB and 4 CPUs
+#   for the Java starters' builds), with Flux's source and kustomize controllers.
 # - Its kubeconfig goes to <repo>/.kube/config (git-ignored). Your own ~/.kube/config, its current context and any
 #   other minikube profiles are not touched.
 # - A read-only service account lets the Backstage Kubernetes plugin list workloads. Its token, the API server URL
@@ -29,11 +30,18 @@ fi
 kc() { kubectl --kubeconfig "$KUBECONFIG" --context "$PROFILE" "$@"; }
 
 mkdir -p "$ROOT_DIR/.kube"
-minikube start -p "$PROFILE" --driver=docker --cni=calico --memory=3072 --cpus=2
+minikube start -p "$PROFILE" --driver=docker --cni=calico --memory=6144 --cpus=4
 
 echo "k8s:up: waiting for Calico"
 kc -n kube-system rollout status daemonset/calico-node --timeout=300s
 kc -n kube-system rollout status deployment/calico-kube-controllers --timeout=300s
+
+# Flux (source and kustomize controllers only, pinned in k8s/flux-install.cjs): deploys each service from its
+# repository in the local Gitea (http://host.minikube.internal:3300 from inside the cluster).
+echo "k8s:up: installing Flux"
+node "$ROOT_DIR/k8s/flux-install.cjs" | kc apply --server-side --force-conflicts -f - >/dev/null
+kc -n flux-system rollout status deployment/source-controller --timeout=300s
+kc -n flux-system rollout status deployment/kustomize-controller --timeout=300s
 
 kc apply -f "$ROOT_DIR/k8s/backstage-reader.yaml"
 

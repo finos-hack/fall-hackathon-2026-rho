@@ -60,9 +60,45 @@ services:
     networks:
       - calm-net
 
+  # Git server standing in for GitHub: calm-templates (bundle sources) and calm-services/<name> (one repo per created
+  # service, which Flux deploys from). Host port 3300 for the browser and Backstage; pods in the local cluster reach
+  # it as http://host.minikube.internal:3300. Local development only: the admin user and its password are created by
+  # hub/gitea-seed.sh and are in app-config.yaml.
+  gitea:
+    image: gitea/gitea:1.27.3
+    container_name: calm-backstage-gitea
+    ports:
+      - "3300:3000"
+    environment:
+      - USER_UID=1000
+      - USER_GID=1000
+      - GITEA__database__DB_TYPE=sqlite3
+      - GITEA__security__INSTALL_LOCK=true
+      - GITEA__server__ROOT_URL=http://localhost:3300/
+      - GITEA__server__DOMAIN=localhost
+      - GITEA__server__HTTP_PORT=3000
+      - GITEA__server__DISABLE_SSH=true
+      - GITEA__service__DISABLE_REGISTRATION=true
+      - GITEA__service__REQUIRE_SIGNIN_VIEW=false
+      - GITEA__repository__DEFAULT_BRANCH=main
+      - GITEA__repository__ENABLE_PUSH_CREATE_ORG=true
+      - GITEA__repository__DEFAULT_PUSH_CREATE_PRIVATE=false
+      - GITEA__actions__ENABLED=false
+      - GITEA__log__LEVEL=Warn
+    volumes:
+      - gitea-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:3000/api/healthz"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    networks:
+      - calm-net
+
 volumes:
   mongo-data:
   registry-data:
+  gitea-data:
 
 networks:
   calm-net:
