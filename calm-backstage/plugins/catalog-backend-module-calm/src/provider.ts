@@ -100,7 +100,7 @@ export interface CalmProviderSettings {
 }
 
 /**
- * Emits CALM Hub architectures (Component), patterns, controls and template bundles (Resource), and one Template per
+ * Emits CALM Hub architectures (Component; not those stored for a published service), patterns, controls and template bundles (Resource), and one Template per
  * pattern. One full mutation per refresh; a failed Hub read keeps the entities of the last good refresh. Bundles come
  * from the OCI bundle registry and from local folders; a registry that is down gives a warning and no registry
  * bundles, not a failed refresh.
@@ -146,7 +146,8 @@ export class CalmEntityProvider implements EntityProvider {
       return;
     }
     const snapshot = await this.read();
-    const { entities, warnings } = buildEntities(snapshot);
+    const { entities, warnings, serviceArchitectures } =
+      buildEntities(snapshot);
     warnings.forEach(w => this.logger.warn(`CALM catalog: ${w}`));
     await this.connection.applyMutation({
       type: 'full',
@@ -159,9 +160,11 @@ export class CalmEntityProvider implements EntityProvider {
         return { entity, locationKey: this.location };
       }),
     });
+    const left = serviceArchitectures.length
+      ? `; ${serviceArchitectures.length} architectures belong to published services and get no entity of their own`
+      : '';
     this.logger.info(
-      `CALM catalog: ${snapshot.patterns.length} patterns, ${snapshot.architectures.length} architectures, ` +
-        `${snapshot.controls.length} controls, ${snapshot.bundles.length} bundles, ${entities.length} entities`,
+      `CALM catalog: ${snapshot.patterns.length} patterns, ${snapshot.architectures.length} architectures, ${snapshot.controls.length} controls, ${snapshot.bundles.length} bundles, ${entities.length} entities${left}`,
     );
   }
 
