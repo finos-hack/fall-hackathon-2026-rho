@@ -156,3 +156,19 @@ describe('bundle entities', () => {
     );
   });
 });
+
+describe('deployable bundles', () => {
+  it('reads deploy from the bundle config', async () => {
+    const read = await readRegistryBundles(
+      registry,
+      fakeClient({
+        listTags: async () => ['3.0.0'],
+        readBundleConfig: async () => ({
+          digest: 'sha256:ccc',
+          config: { deploy: 'kubernetes', pattern },
+        }),
+      }),
+    );
+    expect(read.bundles[0].deploy).toBe('kubernetes');
+  });
+});

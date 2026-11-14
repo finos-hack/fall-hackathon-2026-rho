@@ -1,5 +1,6 @@
 import type { PatternDecision } from '@internal/backstage-plugin-calm-common';
 import {
+  BundleInfo,
   HubDocument,
   buildEntities,
   decisionParameter,
@@ -145,5 +146,87 @@ describe('buildEntities', () => {
     const deps = resource?.spec?.dependsOn as string[];
     expect(deps).toHaveLength(1);
     expect(deps[0]).toContain('kept');
+  });
+});
+
+const pattern = {
+  namespace: 'hackathon',
+  id: 'web-service',
+  version: '1.0.0',
+  doc: { title: 'Web Service' },
+};
+const fits = { namespace: 'hackathon', patternId: 'web-service' };
+const bundle = (version: string, deploy?: string): BundleInfo => ({
+  name: 'web-service',
+  version,
+  deploy,
+  pattern: fits,
+});
+const hubUrl = 'http://localhost:8090';
+
+function template(bundles: BundleInfo[]) {
+  const spec = templateEntity(pattern, bundles, hubUrl).spec as any;
+  const steps: any[] = spec.steps;
+  return {
+    spec,
+    stepIds: steps.map(s => s.id),
+    step: (id: string) => steps.find(s => s.id === id),
+    choices: spec.parameters[1].properties,
+  };
+}
+
+describe('templateEntity: build and deploy', () => {
+  it('adds the deploy box and the build and deploy steps when a fitting bundle is deployable', () => {
+    const t = template([
+      bundle('2.0.0'),
+      bundle('3.0.0', 'kubernetes'),
+      bundle('3.1.0', 'kubernetes'),
+    ]);
+    expect(t.choices.deploy).toMatchObject({ type: 'boolean', default: true });
+    expect(t.stepIds).toEqual([
+      'generate',
+      'fill',
+      'validate',
+      'template',
+      'publish',
+      'build',
+      'deploy',
+      'register',
+    ]);
+    // True only with the box ticked and one of the deployable bundles chosen.
+    const condition =
+      '${{ parameters.deploy and (parameters.bundle in ["web-service@3.0.0","web-service@3.1.0"]) }}';
+    expect(t.step('build').if).toBe(condition);
+    expect(t.step('deploy').if).toBe(condition);
+    expect(t.step('publish').input.deployable).toBe(
+      '${{ (parameters.bundle in ["web-service@3.0.0","web-service@3.1.0"]) }}',
+    );
+    expect(t.step('build').input).toEqual({
+      dir: '${{ steps.publish.output.path }}',
+      name: '${{ parameters.name }}',
+      tag: '${{ context.task.id }}',
+    });
+    expect(t.step('deploy').input.image).toBe(
+      '${{ steps.build.output.image }}',
+    );
+    expect(t.spec.output.text.map((x: any) => x.title)).toEqual([
+      'Published locally',
+      'Local Kubernetes cluster',
+    ]);
+  });
+
+  it('leaves them out when no fitting bundle is deployable', () => {
+    const t = template([bundle('1.0.0'), bundle('2.0.0', 'compose')]);
+    expect(t.choices.deploy).toBeUndefined();
+    expect(t.stepIds).toEqual([
+      'generate',
+      'fill',
+      'validate',
+      'template',
+      'publish',
+      'register',
+    ]);
+    expect(t.step('publish').input.deployable).toBeUndefined();
+    expect(t.spec.output.text).toHaveLength(1);
   });
 });

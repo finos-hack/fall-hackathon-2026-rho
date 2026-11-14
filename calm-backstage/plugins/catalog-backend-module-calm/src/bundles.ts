@@ -62,6 +62,8 @@ export async function readRegistryBundles(
             typeof config?.description === 'string'
               ? config.description
               : undefined,
+          deploy:
+            typeof config?.deploy === 'string' ? config.deploy : undefined,
           pattern:
             config?.pattern && typeof config.pattern === 'object'
               ? config.pattern

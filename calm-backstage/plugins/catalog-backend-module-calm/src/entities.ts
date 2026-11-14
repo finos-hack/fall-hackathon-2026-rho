@@ -50,6 +50,8 @@ export interface BundleInfo {
   /** Digest of the registry bundle's manifest (`sha256:…`). */
   digest?: string;
   description?: string;
+  /** Where the rendered service can be deployed (`deploy` in calm-backstage.json): `kubernetes`, or nothing. */
+  deploy?: string;
   pattern?: {
     namespace?: string;
     patternId?: string;
@@ -221,10 +223,13 @@ export function bundlesFor(
     .sort((a, b) => compareVersions(a.version, b.version));
 }
 
+/** The `deploy` value of a bundle whose rendered service the Template can build and deploy to Kubernetes. */
+export const DEPLOY_KUBERNETES = 'kubernetes';
+
 /**
  * The parameter name for a decision: its relationship id under a `choice-` prefix. The Template's own parameters
- * (`name`, `bundle`, `placeholders`) never start with `choice-`, and distinct relationship ids give distinct names, so
- * no decision can overwrite a fixed field or another decision.
+ * (`name`, `bundle`, `deploy`, `placeholders`) never start with `choice-`, and distinct relationship ids give distinct
+ * names, so no decision can overwrite a fixed field or another decision.
  */
 export function decisionParameter(d: PatternDecision): string {
   return `choice-${d.relationshipId}`;
@@ -245,6 +250,21 @@ function decisionProperty(d: PatternDecision): object {
     'ui:widget': 'checkboxes',
   };
 }
+
+/**
+ * The output text about the deployment. The build and deploy steps are skipped for a bundle that renders nothing to
+ * deploy and when the box is not ticked; a skipped step has no output, so each line is one expression that tests it.
+ */
+const DEPLOYED_TEXT = {
+  title: 'Local Kubernetes cluster',
+  content: [
+    '${{ ("Deployed to the namespace `" + steps.deploy.output.namespace + "` as the image `" + steps.build.output.image + "`: " + (steps.deploy.output.deployments | length) + " deployments (" + (steps.deploy.output.deployments | join(", ")) + ") and " + (steps.deploy.output.networkPolicies | length) + " network policies.") if steps.deploy.output.namespace else "Not deployed: the build and deploy steps run only when the box is ticked and the bundle renders Kubernetes manifests." }}',
+    '',
+    '${{ ("Pods: `" + steps.deploy.output.kubectl + " get pods`") if steps.deploy.output.namespace else "" }}',
+    '',
+    '${{ ("Reach a service (" + (steps.deploy.output.services | join(", ")) + "): `" + steps.deploy.output.kubectl + " port-forward svc/<service> 8080:<port>`") if steps.deploy.output.namespace else "" }}',
+  ].join('\n'),
+};
 
 export function templateEntity(
   p: HubDocument,
@@ -272,6 +292,22 @@ export function templateEntity(
       enum: bundleValues,
       default: bundleValues[bundleValues.length - 1],
       'ui:widget': 'radio',
+    };
+  }
+  // The bundles that render Kubernetes manifests, as the `bundle` parameter names them. Whether the chosen bundle
+  // is one of them is only known at run time, so the steps that need it test this list.
+  const deployable = fitting
+    .filter(b => b.deploy === DEPLOY_KUBERNETES)
+    .map(b => `${b.name}@${b.version}`);
+  const isDeployable = `(parameters.bundle in ${JSON.stringify(deployable)})`;
+  if (deployable.length) {
+    choiceProperties.deploy = {
+      title: 'Deploy to the local Kubernetes cluster',
+      description: `Builds the service's image and deploys it with its network policies (cluster from \`yarn k8s:up\`). Only for ${deployable.join(
+        ', ',
+      )}; other bundles render nothing to deploy.`,
+      type: 'boolean',
+      default: true,
     };
   }
   const required = [
@@ -370,7 +406,9 @@ export function templateEntity(
             patternUrl: url,
           },
         },
-        ...(bundleValues.length ? publishSteps(p) : []),
+        ...(bundleValues.length
+          ? publishSteps(p, deployable.length ? isDeployable : undefined)
+          : []),
       ],
       output: bundleValues.length
         ? {
@@ -392,6 +430,7 @@ export function templateEntity(
                   'Architecture: **${{ steps.generate.output.nodeCount }} nodes**, **${{ steps.generate.output.relationshipCount }} relationships**, ${{ steps.fill.output.filledCount }} placeholders filled. `calm validate`: ${{ steps.validate.output.errorCount }} errors, ${{ steps.validate.output.warningCount }} warnings.',
                 ].join('\n'),
               },
+              ...(deployable.length ? [DEPLOYED_TEXT] : []),
             ],
           }
         : {
@@ -407,8 +446,12 @@ export function templateEntity(
   };
 }
 
-/** Render with the chosen bundle (pulled from the bundle registry, or a local folder), publish to the local output folder and register the new service. */
-function publishSteps(p: HubDocument): object[] {
+/**
+ * Render with the chosen bundle (pulled from the bundle registry, or a local folder), publish to the local output
+ * folder, then, for a bundle that renders Kubernetes manifests (`isDeployable`, an expression over the parameters)
+ * and with the `deploy` box ticked, build the image and deploy it; last, register the new service.
+ */
+function publishSteps(p: HubDocument, isDeployable?: string): object[] {
   return [
     {
       id: 'template',
@@ -435,8 +478,37 @@ function publishSteps(p: HubDocument): object[] {
         // Set when calm:template pulled the bundle from the registry; empty for a local folder.
         bundleRef: '${{ steps.template.output.bundleRef }}',
         bundleDigest: '${{ steps.template.output.bundleDigest }}',
+        // Adds the Kubernetes annotations to catalog-info.yaml, whether or not the service is then deployed.
+        ...(isDeployable ? { deployable: `\${{ ${isDeployable} }}` } : {}),
       },
     },
+    ...(isDeployable
+      ? [
+          {
+            id: 'build',
+            name: 'Build the image in the local cluster (minikube image build)',
+            if: `\${{ parameters.deploy and ${isDeployable} }}`,
+            action: 'calm:image:build',
+            input: {
+              dir: '${{ steps.publish.output.path }}',
+              name: '${{ parameters.name }}',
+              // Unique per run, so a rerun rolls out the new image.
+              tag: '${{ context.task.id }}',
+            },
+          },
+          {
+            id: 'deploy',
+            name: 'Deploy to the local Kubernetes cluster (kubectl apply)',
+            if: `\${{ parameters.deploy and ${isDeployable} }}`,
+            action: 'calm:deploy:k8s',
+            input: {
+              dir: '${{ steps.publish.output.path }}',
+              name: '${{ parameters.name }}',
+              image: '${{ steps.build.output.image }}',
+            },
+          },
+        ]
+      : []),
     {
       id: 'register',
       name: 'Register the new service in the catalog',

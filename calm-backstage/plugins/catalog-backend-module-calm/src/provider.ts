@@ -262,6 +262,7 @@ export class CalmEntityProvider implements EntityProvider {
           version: b.version,
           path: dir,
           description: meta.description,
+          deploy: typeof meta.deploy === 'string' ? meta.deploy : undefined,
           pattern: meta.pattern,
         });
       } catch (e) {
