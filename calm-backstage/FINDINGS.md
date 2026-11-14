@@ -159,6 +159,13 @@ build of Quarkus 3.33.4 and 3.40.1 (BOM `com.redhat.quarkus.platform:quarkus-bom
 - **A published version never changes, so a fix is a new version.** `k8s-deploy` 1.2.0 and `nisshi-stream-app`
   1.0.1 exist because 1.0.0/1.1.0 were already published when a bug was found, and 1.2.1 because 1.2.0 had one too;
   `push-bundles` refuses changed content before anything reaches Gitea.
+- **A CALM unique-id is not a Kubernetes name.** It may hold upper case, `_` and other characters; a NetworkPolicy
+  named `web_service_to_DB-egress` fails `kubectl apply` after the image is built and the Hub version written.
+  `web-service` 3.0.1 and `k8s-deploy` 1.2.2 use an id that is already a valid name as it is (so they rename nothing
+  the versions before them rendered) and convert any other: lower case, other characters as `-`, a short hash when
+  two ids would get the same name or the name is cut. Node names are RFC 1035 labels (a Service name must start with
+  a letter, at most 63 characters) and every selector, Service, gateway upstream and host in the environment uses the
+  same name; the original id stays in an annotation. Older versions are published and keep the bug.
 - **Deployment rules must apply over their own older versions, not only to a new namespace.** 1.2.0 set
   `strategy: Recreate` on backing services. A new deployment took it; an upgrade from 1.0.0 did not: Kubernetes
   refuses Recreate while the Deployment holds `rollingUpdate` settings, and server-side apply (Flux) cannot remove

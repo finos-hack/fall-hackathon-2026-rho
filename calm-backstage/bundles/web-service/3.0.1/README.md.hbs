@@ -1,0 +1,85 @@
+# {{title}}
+
+{{description}}
+
+Owner: **{{owner}}**
+
+## What was rendered
+
+| File | What it is |
+|---|---|
+| `src/server.js` | The service `{{serviceName}}`: Node `http` and `net`, no dependencies, listens on {{servicePort}} |
+| `Dockerfile` | Builds the service image (`node:22-alpine`, runs as a non-root user) |
+| `deploy/k8s/workloads.yaml` | A Deployment and a Service for each node that runs in the cluster |
+| `deploy/k8s/gateway-config.yaml` | The gateway's nginx config: forwards every request to `{{appNode}}:{{servicePort}}` |
+| `deploy/k8s/network-policy.yaml` | Default deny, DNS, and one or two policies for each `connects` relationship |
+| `deploy/k8s/kustomization.yaml` | The kustomize base over the three files above |
+
+The service answers `GET /` (what it was rendered from), `GET /health` and `GET /connections` (a TCP connection
+attempt to each node the architecture says it connects to).
+
+## Nodes in the cluster
+
+The name is the node's `unique-id`. It is the Deployment, the Service and the DNS name, and every pod has the label
+`calm.finos.org/node: <name>`.
+
+| Name | Node | Technology | Image | Service port | Pod port |
+|---|---|---|---|---|---|
+{{#each workloads}}
+| `{{id}}` | {{name}} | {{{technology}}} | `{{image}}` | {{servicePort}} | {{containerPort}} |
+{{/each}}
+
+The gateway's external address in the architecture is `{{gatewayHost}}:{{gatewayPort}}`. Inside the cluster it is
+`{{gatewayNode}}:{{gatewayServicePort}}`.
+{{#each workloads}}
+{{#if env.length}}
+
+`{{id}}` starts with a development value for{{#each env}} `{{name}}`{{/each}} in `deploy/k8s/workloads.yaml`. Change
+it before any real use.
+{{/if}}
+{{/each}}
+
+## Connections
+
+Every pod is denied all traffic except DNS and these relationships. A policy's name is the relationship's
+`unique-id` plus `-egress` (on the source's pods) or `-ingress` (on the destination's pods).
+
+| Relationship | Source | Destination | Protocol | Pod port | Network policy |
+|---|---|---|---|---|---|
+{{#each connects}}
+| `{{id}}` | `{{source}}` | `{{destination}}` | {{protocol}} | {{port}} | {{rendered}} |
+{{/each}}
+{{#if renamedPolicies.length}}
+
+These unique-ids are not valid Kubernetes names, so their policies are named after a converted id: lower case, other
+characters as `-`, and a short hash when two ids would get the same name or the id is too long. The policies keep the
+unique-id in the `calm.finos.org/relationship` annotation.
+
+| Relationship | Policies named |
+|---|---|
+{{#each renamedPolicies}}
+| `{{relationship}}` | `{{prefix}}-…` |
+{{/each}}
+{{/if}}
+
+## Build and deploy by hand
+
+The manifests name the service image `calm-service:dev`. Build it under that name inside the cluster's container
+runtime, then apply the base to a namespace. Point `kubectl` at that same cluster first (`--kubeconfig` and
+`--context`):
+
+```sh
+minikube -p calm-backstage image build -t calm-service:dev .
+kubectl create namespace {{serviceName}}
+kubectl apply -k deploy/k8s -n {{serviceName}}
+kubectl -n {{serviceName}} rollout status deployment/{{appNode}}
+kubectl -n {{serviceName}} exec deploy/{{gatewayNode}} -- wget -qO- http://127.0.0.1:{{gatewayContainerPort}}/connections
+```
+
+To use another image name or tag, add a kustomize overlay with `images: [{ name: calm-service, newName: ..., newTag: ... }]`.
+
+## Provenance
+
+- Architecture: {{architectureId}}
+- Pattern: {{patternId}}
+- Bundle: web-service {{bundleVersion}}
