@@ -4,6 +4,7 @@ import {
   createBackendPlugin,
 } from '@backstage/backend-plugin-api';
 import { catalogServiceRef } from '@backstage/plugin-catalog-node';
+import { readKubernetesDeploySettings } from '@internal/backstage-plugin-calm-node';
 import { createRouter } from './router';
 
 export const calmPlugin = createBackendPlugin({
@@ -25,7 +26,15 @@ export const calmPlugin = createBackendPlugin({
         );
         // Default auth policy: every route needs a user or service token.
         httpRouter.use(
-          await createRouter({ hubUrl, logger, catalog, httpAuth, localDir }),
+          await createRouter({
+            hubUrl,
+            logger,
+            catalog,
+            httpAuth,
+            localDir,
+            // The cluster calm:deploy:k8s deploys to; the architecture card shows what a service has there.
+            kubernetes: readKubernetesDeploySettings(config),
+          }),
         );
       },
     });

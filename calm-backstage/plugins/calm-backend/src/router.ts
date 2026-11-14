@@ -30,9 +30,11 @@ import {
 } from '@internal/backstage-plugin-calm-common';
 import {
   CalmCliError,
+  KubernetesDeploySettings,
   generateArchitecture,
   normaliseChoices,
 } from '@internal/backstage-plugin-calm-node';
+import { DeploymentInfo, readDeployment } from './deployment';
 
 /**
  * Body of `POST /placeholders`.
@@ -58,6 +60,11 @@ export interface ArchitectureResponse {
   architecture: unknown;
   /** Where the document came from: CALM Hub, or the published service's file (relative to the publish folder). */
   source: { type: 'hub'; url: string } | { type: 'file'; path: string };
+  /**
+   * For a published service with the Kubernetes annotations: what it has running in the cluster of
+   * `calm.deploy.kubernetes`. Absent when it is not deployed or the cluster could not be read.
+   */
+  deployment?: DeploymentInfo;
 }
 
 /** Response of `GET /pattern?entityRef=`. */
@@ -94,6 +101,8 @@ export async function createRouter(options: {
   httpAuth: HttpAuthService;
   /** Absolute path of `calm.publish.localDir`: published architecture files are read only from inside it. */
   localDir: string;
+  /** `calm.deploy.kubernetes`: the cluster a published service's deployment is read from. */
+  kubernetes?: KubernetesDeploySettings;
 }): Promise<express.Router> {
   const { logger, catalog, httpAuth, localDir } = options;
   const hub = new CalmHubClient(options.hubUrl);
@@ -203,9 +212,15 @@ export async function createRouter(options: {
           `Cannot read the architecture file ${safe}: ${(e as Error).message}`,
         );
       }
+      const deployment = await readDeployment(
+        entity,
+        options.kubernetes,
+        logger.child({ task: 'deployment' }),
+      );
       const body: ArchitectureResponse = {
         architecture,
         source: { type: 'file', path: path.relative(localDir, safe) },
+        ...(deployment ? { deployment } : {}),
       };
       res.json(body);
       return;

@@ -10,6 +10,17 @@ import type { PatternDecision } from '@internal/backstage-plugin-calm-common';
 export interface ArchitectureResponse {
   architecture: any;
   source: { type: 'hub'; url: string } | { type: 'file'; path: string };
+  /** A published service's deployment in the local cluster; absent when it is not deployed or was not read. */
+  deployment?: {
+    cluster: string;
+    namespace: string;
+    networkPolicies: {
+      name: string;
+      relationship?: string;
+      protocol?: string;
+    }[];
+    workloads: { name: string; ready: boolean }[];
+  };
 }
 
 /** Response of calm-backend `GET /pattern`. */

@@ -1,6 +1,6 @@
 {
   "name": "@internal/backstage-plugin-calm-backend",
-  "description": "CALM backend plugin: POST /placeholders runs calm generate (published @finos/calm-cli) and returns the placeholder list; GET /architecture and GET /pattern feed the entity cards.",
+  "description": "CALM backend plugin: POST /placeholders runs calm generate (published @finos/calm-cli) and returns the placeholder list; GET /architecture (with a published service's deployment in the local cluster) and GET /pattern feed the entity cards.",
   "version": "0.1.0",
   "license": "UNLICENSED",
   "private": true,

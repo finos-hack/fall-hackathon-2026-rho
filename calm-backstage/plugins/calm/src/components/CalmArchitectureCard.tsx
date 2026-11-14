@@ -32,9 +32,100 @@ function controlsOf(architecture: unknown) {
   return [...byRef.values()];
 }
 
+type Deployment = NonNullable<ArchitectureResponse['deployment']>;
+
+/** The network policies rendered from `connects` relationships, one entry per relationship, and the rest. */
+function policiesByRelationship(deployment: Deployment, architecture: any) {
+  const relationships: any[] = Array.isArray(architecture?.relationships)
+    ? architecture.relationships
+    : [];
+  const byRelationship = new Map<
+    string,
+    { relationship: string; protocol?: string; policies: string[] }
+  >();
+  const other: string[] = [];
+  for (const p of deployment.networkPolicies) {
+    if (!p.relationship) {
+      other.push(p.name);
+      continue;
+    }
+    const entry = byRelationship.get(p.relationship) ?? {
+      relationship: p.relationship,
+      protocol: p.protocol,
+      policies: [],
+    };
+    entry.policies.push(p.name);
+    byRelationship.set(p.relationship, entry);
+  }
+  return {
+    fromArchitecture: deployment.networkPolicies.length - other.length,
+    other,
+    relationships: [...byRelationship.values()].map(r => ({
+      ...r,
+      // The controls the architecture puts on this relationship (e.g. permitted-connection).
+      controls: controlsOf(
+        relationships.find(x => x?.['unique-id'] === r.relationship)?.controls,
+      ),
+    })),
+  };
+}
+
+/** Where a published service runs, and the network policies its architecture's relationships became. */
+function DeploymentSection(props: {
+  deployment: Deployment;
+  architecture: unknown;
+}) {
+  const { deployment } = props;
+  const policies = policiesByRelationship(deployment, props.architecture);
+  const ready = deployment.workloads.filter(w => w.ready).length;
+  return (
+    <Box mb={2} data-testid="calm-deployment">
+      <Typography variant="overline" display="block">
+        Deployment
+      </Typography>
+      <Typography variant="body2">
+        Deployed to{' '}
+        <strong>
+          {deployment.cluster} / {deployment.namespace}
+        </strong>
+        : {ready} of {deployment.workloads.length} workloads ready (
+        {deployment.workloads
+          .map(w => `${w.name}${w.ready ? '' : ' (not ready)'}`)
+          .join(', ')}
+        ).
+      </Typography>
+      <Typography variant="body2">
+        Network policies from the architecture: {policies.fromArchitecture} (
+        {policies.relationships.length} relationships).
+      </Typography>
+      <Box component="ul" mt={0.5} mb={0.5} pl={3}>
+        {policies.relationships.map(r => (
+          <Typography key={r.relationship} component="li" variant="body2">
+            <code>{r.relationship}</code>
+            {r.protocol ? ` (${r.protocol})` : ''}: {r.policies.join(', ')}
+            {r.controls.length ? ' · control ' : ' · no control on it'}
+            {r.controls.map((c, i) => (
+              <span key={c.ref}>
+                {i > 0 && ', '}
+                <EntityRefLink entityRef={c.ref} title={c.control} />
+              </span>
+            ))}
+          </Typography>
+        ))}
+      </Box>
+      {policies.other.length > 0 && (
+        <Typography variant="body2" color="textSecondary">
+          Also in the namespace: {policies.other.join(', ')}.
+        </Typography>
+      )}
+    </Box>
+  );
+}
+
 /**
  * The CALM architecture of an entity (a Hub architecture, or a service published from a pattern): pattern and version,
- * the controls it references, node and relationship counts, and a Mermaid diagram.
+ * the controls it references, node and relationship counts, a Mermaid diagram and, for a service deployed to the
+ * local cluster, where it runs and its network policies.
  */
 export function CalmArchitectureCard() {
   const { entity } = useEntity();
@@ -127,6 +218,12 @@ export function CalmArchitectureCard() {
               </Box>
             )}
           </Box>
+          {value.deployment && (
+            <DeploymentSection
+              deployment={value.deployment}
+              architecture={value.architecture}
+            />
+          )}
           <MermaidDiagram
             source={diagram.source}
             title={`Architecture diagram of ${entity.metadata.name}`}
