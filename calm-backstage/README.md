@@ -35,10 +35,17 @@ The ports keep clear of other local Backstage and Hub instances on 3000, 7007, 8
 4. **Create** (`/create` → *Web Service (CALM pattern)*):
    - **Service**: a name.
    - **Choices**: the data store (one of PostgreSQL or MongoDB), the add-ons (any of Redis, RabbitMQ,
-     OpenTelemetry) and the template bundle (`web-service@1.0.0` or `@2.0.0`).
+     OpenTelemetry), the template bundle (`web-service@1.0.0`, `@2.0.0` or `@3.0.0`) and, for a bundle that renders
+     Kubernetes manifests (`@3.0.0`), whether to deploy to the local cluster.
    - **Details**: the values `calm generate` leaves open for those choices (host, ports, owner, service name).
    - The run generates the architecture, fills the values, runs `calm validate`, renders the bundle, writes the
      result to `output/<name>/` and registers it in the catalog. The new service page shows its own diagram.
+5. **Deploy** (needs `yarn k8s:up`, then a restart of Backstage): with `web-service@3.0.0` and the deploy box ticked,
+   the run also builds the service's image inside the cluster and applies its manifests to the namespace
+   `calm-<name>`. The service page then shows where it runs and the network policies made from the architecture's
+   relationships, and its **Kubernetes** tab lists the pods.
+
+![Service page of a deployed service](docs/demo/k8s-service-page.png)
 
 `docs/demo/calm-backstage-demo.webm` (78 s) walks through all of this, ending with a new service created from the
 pattern. To record it again with the Hub and Backstage running: `node docs/demo/record-demo.cjs <new-service-name>`.
@@ -51,10 +58,10 @@ the compose services. `output/` is git-ignored, and services in it come back int
 | Package | Role |
 |---|---|
 | `plugins/calm-common` | Types, annotation and entity names, pattern options reader, placeholder scanner and filler, read-only Hub client, CALM → Mermaid transform |
-| `plugins/calm-node` | Runs the published `@finos/calm-cli` 1.71.0 (`generate`, `validate`, `template`) with the backend's own Node; pushes and pulls template bundles as OCI artifacts (`oci.ts`) |
+| `plugins/calm-node` | Runs the published `@finos/calm-cli` 1.71.0 (`generate`, `validate`, `template`) with the backend's own Node; pushes and pulls template bundles as OCI artifacts (`oci.ts`); runs `kubectl` and `minikube` against the one cluster in `calm.deploy.kubernetes` (`kubernetes.ts`) |
 | `plugins/catalog-backend-module-calm` | Entity provider: reads the Hub namespaces in `calm.namespaces` and emits architectures, patterns, controls, bundles and one Template per pattern |
-| `plugins/scaffolder-backend-module-calm` | Actions `calm:generate`, `calm:fill`, `calm:validate`, `calm:template`, `calm:publish:local`, `calm:register:local` |
-| `plugins/calm-backend` | Routes `POST /api/calm/placeholders`, `GET /api/calm/architecture`, `GET /api/calm/pattern` |
+| `plugins/scaffolder-backend-module-calm` | Actions `calm:generate`, `calm:fill`, `calm:validate`, `calm:template`, `calm:publish:local`, `calm:image:build`, `calm:deploy:k8s`, `calm:register:local` |
+| `plugins/calm-backend` | Routes `POST /api/calm/placeholders`, `GET /api/calm/architecture` (with a deployed service's workloads and network policies), `GET /api/calm/pattern` |
 | `plugins/calm` | Frontend: architecture and pattern entity cards, the `CalmPlaceholders` form field |
 | `hub/` | CALM Hub (`finos/calm-hub:latest`, `no-auth`), MongoDB and an OCI registry (`registry:2`, port 5050) in Docker; `seed.sh` and `push-bundles.cjs` (both idempotent) |
 | `seed/` | Our pattern with a `oneOf` and an `anyOf` decision, two architectures, controls in domain `hackathon-security` |
@@ -65,7 +72,9 @@ an API (options reader, Hub client, Mermaid transform, placeholders) live in `ca
 as requests to the CALM project.
 
 Settings are under `calm:` in `app-config.yaml` (`hubUrl`, `namespaces`, `bundleRegistry`, `publish.localDir`; `bundles`
-names local bundle folders while authoring).
+names local bundle folders while authoring; `deploy.kubernetes` names the kubeconfig, context and minikube profile of
+the local cluster). The deploy actions use only that kubeconfig and context, never your default ones, and refuse to
+run when the file is missing.
 
 ## Checks
 
