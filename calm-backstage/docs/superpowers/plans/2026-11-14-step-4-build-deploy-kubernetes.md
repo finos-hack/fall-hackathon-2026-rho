@@ -108,7 +108,7 @@ one end-to-end run. Risk to remove: a Template run in Backstage ends with a runn
 
 Measured 2026-11-14, 11:35 to 11:55 UTC, against the lead's running Backstage (3100/7107, not restarted by this step)
 and the minikube profile `calm-backstage`. `kc` stands for
-`kubectl --kubeconfig /Users/jpgough/finos/calm-backstage/.kube/config --context calm-backstage`.
+`kubectl --kubeconfig <repo>/.kube/config --context calm-backstage`.
 
 ### What was built
 
@@ -135,7 +135,7 @@ and the minikube profile `calm-backstage`. `kc` stands for
 | `git diff --stat yarn.lock .yarnrc.yml` | empty |
 
 Backend log after the reload, which shows that the dev server read the new `app-config.yaml` keys without a restart:
-`calm:image:build and calm:deploy:k8s use kubeconfig /Users/jpgough/finos/calm-backstage/.kube/config, context
+`calm:image:build and calm:deploy:k8s use kubeconfig <repo>/.kube/config, context
 calm-backstage, minikube profile calm-backstage, namespaces calm-<name>`.
 
 ### Template expressions

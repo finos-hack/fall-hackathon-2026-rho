@@ -86,7 +86,7 @@ namespace, the image name and tag, and the Backstage label through an overlay.
 
 ## Boundaries
 
-- **Every** `kubectl` call has `--kubeconfig /Users/jpgough/finos/calm-backstage/.kube/config --context
+- **Every** `kubectl` call has `--kubeconfig <repo>/.kube/config --context
   calm-backstage`; **every** `minikube` call has `-p calm-backstage` and `KUBECONFIG` set to that file. Never run a
   bare `kubectl` or `minikube`: the user's default context is another cluster. Do not run `minikube start`, `stop`,
   `delete` or `profile`. Touch only namespace `calm-step2-probe`.
@@ -99,8 +99,8 @@ namespace, the image name and tag, and the Backstage label through an overlay.
 ## Results
 
 Measured 2026-11-14 (image build started 11:17:05, apply 11:17:19, connection checks 11:18:56). `kc` below stands for
-`kubectl --kubeconfig /Users/jpgough/finos/calm-backstage/.kube/config --context calm-backstage`, and `mk` for
-`KUBECONFIG=/Users/jpgough/finos/calm-backstage/.kube/config minikube -p calm-backstage`. `<scratch>` is the step's
+`kubectl --kubeconfig <repo>/.kube/config --context calm-backstage`, and `mk` for
+`KUBECONFIG=<repo>/.kube/config minikube -p calm-backstage`. `<scratch>` is the step's
 scratch folder.
 
 ### Bundle
