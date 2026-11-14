@@ -1,7 +1,8 @@
 # Tracks for Monday 2026-11-16
 
-The base works end to end: CALM Hub → catalog → entity pages → create a service from a pattern with options → render
-with a template bundle → publish to `output/` → register. Each track below can start from it without waiting for
+The base works end to end: CALM Hub → catalog → entity pages → create a service from a pattern with options → store
+its architecture in CALM Hub → render with a template bundle from the OCI registry → publish to `output/` → build
+and deploy to a local Kubernetes cluster → record the deployment in CALM Hub → register. Each track below can start from it without waiting for
 the others. Pick one, branch from `main`, keep to its folders where you can, and add tests for what you change.
 
 How it fits together (details in `README.md` and `docs/superpowers/specs/2026-11-13-calm-backstage-design.md`):
@@ -55,8 +56,11 @@ Scope: `anyOf` UX, option descriptions, a review step, nested patterns.
 
 Scope: where bundles live (Git, npm, CALM Hub), versions, "bundle update available", transformers.
 
-- Bundles are folders named in `app-config.yaml` `calm.bundles`, each with `calm-backstage.json` saying which
-  pattern it fits. Bundle fit ignores the pattern version.
+- Done: bundles are OCI artifacts in a local registry (`localhost:5050/calm-bundles/<name>:<version>`, pushed with
+  `yarn bundles:push`); the catalog lists them and `calm:template` pulls them by digest. `calm-backstage.json` says
+  which pattern a bundle fits and whether it can be deployed. Bundle fit ignores the pattern version.
+- Left: a registry with TLS and authentication (the client has neither), signed bundles, and bundles from Git or
+  npm.
 - Published services record `calm.finos.org/bundle` and `/bundle-version`, which is enough to show "bundle update
   available" when a newer bundle fits the same pattern.
 - `calm template` has no `-c` option (control look-ups warn), and dotted output folder names misbehave.
@@ -65,10 +69,14 @@ Scope: where bundles live (Git, npm, CALM Hub), versions, "bundle update availab
 
 Scope: GitHub publish, dry run, register the architecture in the Hub.
 
-- Today `calm:publish:local` writes `output/<name>/` and `calm:register:local` adds a file location.
+- Done: the generated architecture is stored in CALM Hub (`calm:register:hub`), the service is built and deployed
+  to the local minikube (`calm:image:build`, `calm:deploy:k8s`) with NetworkPolicies from its `connects`
+  relationships, and the deployment is recorded as a decorator (`calm:decorate:deployment`).
+- Left: a failed deployment is not recorded (the Template always passes `completed`); redeploying an existing
+  service and the dry runs are covered by unit tests only; the gateway forwards plain HTTP although the
+  architecture says HTTPS.
+- `calm:publish:local` still writes `output/<name>/` and `calm:register:local` adds a file location.
 - Swap in `publish:github` + `catalog:register` (url location) for a real repository; no GitHub credentials are set up.
-- The generated architecture has no `$id` and is not in the Hub. Registering it (namespace `hackathon`, name-based
-  API, see FINDINGS) would let the architecture card read it from the Hub like the seeded ones.
 - `calm:generate`, `calm:fill`, `calm:validate` support dry runs; the template editor's dry run can use them.
 
 ## F. Provisioning

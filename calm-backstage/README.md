@@ -14,8 +14,12 @@ You need Docker, Node 26 and the repository's own Yarn (`.yarn/releases`, picked
 ```sh
 yarn install
 yarn hub:up && yarn hub:seed    # CALM Hub on http://localhost:8090 (seeded from seed/), bundle registry on 5050
+yarn k8s:up                     # optional: local Kubernetes (minikube profile calm-backstage) for deployments
 yarn start                      # Backstage on http://localhost:3100 (backend on 7107)
 ```
+
+`yarn k8s:up` needs `minikube` and `kubectl`. It keeps its kubeconfig in `.kube/` inside the repository, so your own
+kubeconfig, its current context and other minikube profiles are not touched. `yarn k8s:down` deletes the cluster.
 
 Open http://localhost:3100 and choose **Enter** to sign in as a guest. `yarn hub:down` stops the Hub and keeps its
 data. To reset the Hub completely (needed after editing files in `seed/`, because Hub versions cannot change):
@@ -26,7 +30,7 @@ The ports keep clear of other local Backstage and Hub instances on 3000, 7007, 8
 ## What to try
 
 1. **Catalog** (`/catalog`): the seeded architectures `orders-service` and `catalog-service` (Components, type
-   `calm-architecture`), the pattern `pattern-web-service`, the controls, and the two template bundles (Resources).
+   `calm-architecture`), the pattern `pattern-web-service`, the controls, and the three template bundles (Resources).
    The catalog graph shows architecture → pattern → controls.
 2. **Architecture page** (`orders-service`): the CALM architecture card shows the pattern, the controls and a
    Mermaid diagram.
@@ -50,8 +54,14 @@ The ports keep clear of other local Backstage and Hub instances on 3000, 7007, 8
 
 ![Service page of a deployed service, with its deployment recorded in CALM Hub](docs/demo/hub-recorded-service.png)
 
-`docs/demo/calm-backstage-demo.webm` (78 s) walks through all of this, ending with a new service created from the
-pattern. To record it again with the Hub and Backstage running: `node docs/demo/record-demo.cjs <new-service-name>`.
+Two recordings walk through this:
+
+- `docs/demo/calm-backstage-deploy-demo.webm` (116 s): the whole flow, ending with a service deployed to the local
+  cluster, its network policies on the card and its pods on the Kubernetes tab.
+- `docs/demo/calm-backstage-demo.webm` (78 s): the first part only, without the registry and the deployment.
+
+To record the first one again with the Hub, the cluster and Backstage running:
+`node docs/demo/record-demo.cjs <new-service-name>`.
 
 Bundle 2.0.0 renders a `Dockerfile` and a `deploy/` folder that 1.0.0 does not; the data store and add-ons change
 the compose services. `output/` is git-ignored, and services in it come back into the catalog after a restart.
