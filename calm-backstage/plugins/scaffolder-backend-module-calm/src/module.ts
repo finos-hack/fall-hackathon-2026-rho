@@ -14,6 +14,7 @@ import { createCalmPublishLocalAction } from './actions/publishLocal';
 import { createCalmRegisterLocalAction } from './actions/registerLocal';
 import { createCalmImageBuildAction } from './actions/imageBuild';
 import { createCalmDeployK8sAction } from './actions/deployK8s';
+import { createCalmClusterCheckAction } from './actions/clusterCheck';
 import { createCalmRegisterHubAction } from './actions/registerHub';
 import { createCalmDecorateDeploymentAction } from './actions/decorateDeployment';
 import { CalmHubWriteClient } from '@internal/backstage-plugin-calm-common';
@@ -98,6 +99,7 @@ export const scaffolderModuleCalm = createBackendModule({
             namespacePrefix:
               kubernetes?.namespacePrefix ?? DEFAULT_NAMESPACE_PREFIX,
           }),
+          createCalmClusterCheckAction({ settings: kubernetes }),
           createCalmImageBuildAction({ settings: kubernetes, localDir }),
           createCalmDeployK8sAction({ settings: kubernetes, localDir }),
           createCalmDecorateDeploymentAction({

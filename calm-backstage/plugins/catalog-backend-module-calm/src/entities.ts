@@ -397,6 +397,17 @@ export function templateEntity(
         },
       ],
       steps: [
+        // First, so a run that will deploy stops before it stores anything in CALM Hub or publishes files.
+        ...(deployable.length
+          ? [
+              {
+                id: 'check-cluster',
+                name: 'Check the local Kubernetes cluster answers',
+                action: 'calm:cluster:check',
+                if: `\${{ parameters.deploy and ${isDeployable} }}`,
+              },
+            ]
+          : []),
         {
           id: 'generate',
           name: 'Generate the architecture (calm generate)',

@@ -184,6 +184,7 @@ describe('templateEntity: build and deploy', () => {
     ]);
     expect(t.choices.deploy).toMatchObject({ type: 'boolean', default: true });
     expect(t.stepIds).toEqual([
+      'check-cluster',
       'generate',
       'fill',
       'validate',
