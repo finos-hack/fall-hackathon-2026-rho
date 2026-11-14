@@ -44,7 +44,7 @@ export const scaffolderModuleCalm = createBackendModule({
           createCalmFillAction(),
           createCalmValidateAction({ hubUrl }),
           createCalmTemplateAction({ bundles }),
-          createCalmPublishLocalAction({ localDir }),
+          createCalmPublishLocalAction({ catalog, localDir }),
           createCalmRegisterLocalAction({ catalog, localDir }),
         );
       },
