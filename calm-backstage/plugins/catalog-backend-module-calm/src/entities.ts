@@ -61,17 +61,24 @@ export interface CalmSnapshot {
 const resourceRef = (name: string) => `resource:default/${name}`;
 const unique = <T>(xs: T[]) => [...new Set(xs)];
 
-function controlRefs(doc: unknown): string[] {
+/** The control Resources a document depends on, limited to the controls the snapshot emits (a skipped one is left out). */
+function controlRefs(doc: unknown, emitted: Set<string>): string[] {
   return unique(
     requirementUrls(doc)
       .map(parseRequirementUrl)
       .filter((r): r is NonNullable<typeof r> => r !== undefined)
-      .map(r => resourceRef(controlEntityName(r.domain, r.control))),
+      .map(r => controlEntityName(r.domain, r.control))
+      .filter(name => emitted.has(name))
+      .map(resourceRef),
   );
 }
 
-function patternEntity(p: HubDocument, hubUrl: string): Entity {
-  const deps = controlRefs(p.doc);
+function patternEntity(
+  p: HubDocument,
+  hubUrl: string,
+  emittedControls: Set<string>,
+): Entity {
+  const deps = controlRefs(p.doc, emittedControls);
   return {
     apiVersion: 'backstage.io/v1alpha1',
     kind: 'Resource',
@@ -203,14 +210,13 @@ export function bundlesFor(
     .sort((a, b) => compareVersions(a.version, b.version));
 }
 
-/** The Template's own parameters (Service step `name`, Choices step `bundle`, Details step `placeholders`). */
-const RESERVED_PARAMETERS = new Set(['name', 'bundle', 'placeholders']);
-
-/** The parameter name for a decision: its relationship id, unless that clashes with a fixed field. */
+/**
+ * The parameter name for a decision: its relationship id under a `choice-` prefix. The Template's own parameters
+ * (`name`, `bundle`, `placeholders`) never start with `choice-`, and distinct relationship ids give distinct names, so
+ * no decision can overwrite a fixed field or another decision.
+ */
 export function decisionParameter(d: PatternDecision): string {
-  return RESERVED_PARAMETERS.has(d.relationshipId)
-    ? `choice-${d.relationshipId}`
-    : d.relationshipId;
+  return `choice-${d.relationshipId}`;
 }
 
 function decisionProperty(d: PatternDecision): object {
@@ -243,9 +249,9 @@ export function templateEntity(
   }));
 
   const choiceProperties: Record<string, object> = {};
-  for (const d of decisions) {
-    choiceProperties[decisionParameter(d)] = decisionProperty(d);
-  }
+  decisions.forEach((d, i) => {
+    choiceProperties[map[i].parameter] = decisionProperty(d);
+  });
   const bundleValues = fitting.map(b => `${b.name}@${b.version}`);
   if (bundleValues.length) {
     choiceProperties.bundle = {
@@ -258,7 +264,7 @@ export function templateEntity(
     };
   }
   const required = [
-    ...decisions.filter(d => d.kind === 'oneOf').map(decisionParameter),
+    ...map.filter(m => m.kind === 'oneOf').map(m => m.parameter),
     ...(bundleValues.length ? ['bundle'] : []),
   ];
 
@@ -471,8 +477,11 @@ export function buildEntities(s: CalmSnapshot): {
     out.set(key, e);
   };
 
+  const emittedControls = new Set(
+    s.controls.map(c => controlEntityName(c.domain, c.control)),
+  );
   for (const p of s.patterns) {
-    add(patternEntity(p, s.hubUrl));
+    add(patternEntity(p, s.hubUrl, emittedControls));
     add(templateEntity(p, s.bundles, s.hubUrl));
   }
   for (const a of s.architectures) {
@@ -487,22 +496,26 @@ export function buildEntities(s: CalmSnapshot): {
   return { entities: [...out.values()], warnings };
 }
 
-/** The control requirement URLs a set of documents references, de-duplicated by domain and control. */
-export function referencedRequirements(
-  docs: unknown[],
-): { url: string; domain: string; control: string; version: string }[] {
-  const byKey = new Map<
-    string,
-    { url: string; domain: string; control: string; version: string }
-  >();
+export interface RequirementRef {
+  url: string;
+  domain: string;
+  control: string;
+  version: string;
+}
+
+/**
+ * The control requirements a set of documents references: every distinct domain, control and version, so a version
+ * the Hub no longer holds can fall back to another referenced one (see `readControls`).
+ */
+export function referencedRequirements(docs: unknown[]): RequirementRef[] {
+  const byKey = new Map<string, RequirementRef>();
   for (const url of unique(docs.flatMap(d => requirementUrls(d)))) {
     const r = parseRequirementUrl(url);
     if (!r) {
       continue;
     }
-    const key = `${r.domain}/${r.control}`;
-    const prev = byKey.get(key);
-    if (!prev || compareVersions(r.version, prev.version) > 0) {
+    const key = `${r.domain}/${r.control}@${r.version}`;
+    if (!byKey.has(key)) {
       byKey.set(key, { url, ...r });
     }
   }
