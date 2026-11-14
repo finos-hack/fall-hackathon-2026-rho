@@ -19,7 +19,21 @@ import {
 import YAML from 'yaml';
 import { CATALOG_INFO_FILE } from './publishLocal';
 
-/** Adds the Git repository, the Flux Kustomization and the `calm-gitops` tag to a catalog-info.yaml text. */
+/** Adds the Flux Kustomization and the `calm-gitops` tag (a service deployed from Git) to a catalog-info.yaml text. */
+export function withGitopsAnnotations(catalogInfo: string, name: string): string {
+  const entity = YAML.parse(catalogInfo);
+  entity.metadata.annotations = {
+    ...(entity.metadata.annotations ?? {}),
+    [ANN.gitops]: gitopsAnnotationValue(name),
+  };
+  const tags: string[] = entity.metadata.tags ?? [];
+  entity.metadata.tags = tags.includes(CALM_GITOPS_TAG)
+    ? tags
+    : [...tags, CALM_GITOPS_TAG];
+  return YAML.stringify(entity);
+}
+
+/** Adds the Git repository (annotation and link) to a catalog-info.yaml text. */
 export function withGitAnnotations(
   catalogInfo: string,
   o: { name: string; repoUrl: string },
@@ -28,12 +42,7 @@ export function withGitAnnotations(
   entity.metadata.annotations = {
     ...(entity.metadata.annotations ?? {}),
     [ANN.gitRepo]: o.repoUrl,
-    [ANN.gitops]: gitopsAnnotationValue(o.name),
   };
-  const tags: string[] = entity.metadata.tags ?? [];
-  entity.metadata.tags = tags.includes(CALM_GITOPS_TAG)
-    ? tags
-    : [...tags, CALM_GITOPS_TAG];
   const links: { url: string; title: string }[] = entity.metadata.links ?? [];
   if (!links.some(l => l.url === o.repoUrl)) {
     entity.metadata.links = [

@@ -6,6 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import * as tar from 'tar';
 import {
+  checkBundle,
   BUNDLE_ARTIFACT_TYPE,
   BUNDLE_CONFIG_MEDIA_TYPE,
   OCI_LAYER_MEDIA_TYPE,
@@ -335,6 +336,15 @@ describe('bundles in a registry', () => {
     await expect(pushBundle({ dir: bundleDir, ref, immutable: true })).rejects.toThrow(
       /already published with different content; publish a new version/,
     );
+  });
+
+  it('checkBundle says new, same or changed', async () => {
+    const ref = `${host}/calm-bundles/web-service:2.0.0`;
+    expect(await checkBundle({ dir: bundleDir, ref })).toBe('new');
+    await pushBundle({ dir: bundleDir, ref });
+    expect(await checkBundle({ dir: bundleDir, ref })).toBe('same');
+    await fs.writeFile(path.join(bundleDir, 'index.json'), '{"changed":true}');
+    expect(await checkBundle({ dir: bundleDir, ref })).toBe('changed');
   });
 
   it('with immutable, pushes a tag that is not there yet', async () => {

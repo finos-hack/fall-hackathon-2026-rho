@@ -20,6 +20,12 @@ import {
 import type { KubernetesDeploySettings } from '@internal/backstage-plugin-calm-node';
 
 export const GATEWAY_SERVICE = 'http:api-gateway:80';
+/**
+ * The page a starter serves is its own: it may run its inline script and call its own API (relative URLs). This
+ * replaces the backend's default policy (no inline scripts, upgrade-insecure-requests) for proxied responses only.
+ */
+export const APP_CSP =
+  "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'self'";
 const HOP_BY_HOP = new Set([
   'connection',
   'keep-alive',
@@ -60,7 +66,12 @@ export function appTarget(
   ) {
     return undefined;
   }
-  const namespace = deployNamespace(prefix, name);
+  let namespace: string;
+  try {
+    namespace = deployNamespace(prefix, name);
+  } catch {
+    return undefined;
+  }
   return {
     namespace,
     path: `/api/v1/namespaces/${namespace}/services/${GATEWAY_SERVICE}/proxy${pathPart}${
@@ -214,6 +225,8 @@ export function createAppProxy(settings: KubernetesDeploySettings | undefined) {
           res.setHeader(k, v as string | string[]);
         }
       }
+      res.setHeader('Content-Security-Policy', APP_CSP);
+      up.stream.on('error', () => res.destroy());
       up.stream.pipe(res);
     } catch (e) {
       api = undefined;

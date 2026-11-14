@@ -4,7 +4,7 @@ import path from 'node:path';
 import YAML from 'yaml';
 import { git, gitCommitAll, gitInit, gitPush } from '@internal/backstage-plugin-calm-node';
 import { createCalmDeployGitopsAction, waitForKustomization } from './deployGitops';
-import { createCalmGitPublishAction, withGitAnnotations } from './gitPublish';
+import { createCalmGitPublishAction, withGitAnnotations, withGitopsAnnotations } from './gitPublish';
 
 let root: string;
 let localDir: string;
@@ -73,17 +73,24 @@ async function service(name: string) {
 }
 
 describe('withGitAnnotations', () => {
-  it('adds the repository, the Kustomization, the calm-gitops tag and a link, once', () => {
+  it('adds the Kustomization and the calm-gitops tag once deployed, and the repository with a link, once', () => {
     const once = withGitAnnotations(
       YAML.stringify({ metadata: { name: 'orders', tags: ['calm'] } }),
       { name: 'orders', repoUrl: 'http://localhost:3300/calm-services/orders' },
     );
     const twice = YAML.parse(
-      withGitAnnotations(once, {
-        name: 'orders',
-        repoUrl: 'http://localhost:3300/calm-services/orders',
-      }),
+      withGitopsAnnotations(
+        withGitopsAnnotations(
+          withGitAnnotations(once, {
+            name: 'orders',
+            repoUrl: 'http://localhost:3300/calm-services/orders',
+          }),
+          'orders',
+        ),
+        'orders',
+      ),
     );
+    expect(YAML.parse(once).metadata.annotations['calm.finos.org/gitops']).toBeUndefined();
     expect(twice.metadata.annotations).toEqual({
       'calm.finos.org/git-repo': 'http://localhost:3300/calm-services/orders',
       'calm.finos.org/gitops': 'flux-system/calm-orders',
@@ -104,7 +111,9 @@ describe('calm:git:publish', () => {
     expect(await git(remote, ['rev-parse', 'main'])).toBe(out.commit);
     expect(out.shortCommit).toBe(out.commit.slice(0, 12));
     const pushed = await git(remote, ['show', 'main:catalog-info.yaml']);
-    expect(pushed).toContain('calm.finos.org/gitops: flux-system/calm-orders');
+    expect(pushed).toContain('calm.finos.org/git-repo:');
+    // Not deployed yet: the service is not offered for upgrades until calm:deploy:gitops has run.
+    expect(pushed).not.toContain('calm.finos.org/gitops');
     expect(await git(dir, ['remote', 'get-url', 'origin'])).toBe(
       `file://${remoteBase}/calm-services/orders.git`,
     );
@@ -187,6 +196,9 @@ describe('calm:deploy:gitops', () => {
       await git(remote, ['show', 'main:deploy/k8s-overlay/kustomization.yaml']),
     );
     expect(overlay.images).toEqual([{ name: 'calm-service', newName: 'orders', newTag: 'abc123' }]);
+    expect(await git(remote, ['show', 'main:catalog-info.yaml'])).toContain(
+      'calm.finos.org/gitops: flux-system/calm-orders',
+    );
     expect(out).toMatchObject({
       namespace: 'calm-orders',
       deployments: ['web-service'],

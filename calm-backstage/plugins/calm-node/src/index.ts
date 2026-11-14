@@ -54,6 +54,7 @@ export {
   OCI_MANIFEST_MEDIA_TYPE,
   OciError,
   bundleRef,
+  checkBundle,
   extractBundle,
   listRepositories,
   listTags,

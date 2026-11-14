@@ -34,6 +34,8 @@ import {
   requireBase,
   writeOverlay,
 } from './deployK8s';
+import { CATALOG_INFO_FILE } from './publishLocal';
+import { withGitopsAnnotations } from './gitPublish';
 
 const DEFAULT_TIMEOUT_MS = 300_000;
 const DEFAULT_POLL_MS = 2_000;
@@ -175,16 +177,22 @@ export function createCalmDeployGitopsAction(options: {
 
       const startTime = new Date().toISOString();
       const git = { logger: ctx.logger, signal: ctx.signal };
-      await writeOverlay(
-        dir,
-        { name, namespace, image },
-        GITOPS_OVERLAY_HEADER,
-      );
       const branch = await gitCurrentBranch(dir, git);
       if (branch !== gitops.branch) {
         throw new Error(
           `${dir} is on the branch ${branch}, not ${gitops.branch}: Flux deploys ${gitops.branch}`,
         );
+      }
+      await writeOverlay(
+        dir,
+        { name, namespace, image },
+        GITOPS_OVERLAY_HEADER,
+      );
+      // From now on the service is deployed from Git: the catalog and the upgrade Template find it by this.
+      const catalogInfo = path.join(dir, CATALOG_INFO_FILE);
+      const info = await fs.readFile(catalogInfo, 'utf-8').catch(() => undefined);
+      if (info !== undefined) {
+        await fs.writeFile(catalogInfo, withGitopsAnnotations(info, name));
       }
       const made = await gitCommitAll(dir, `Deploy ${image}`, git);
       const commit = made ?? (await gitHead(dir, git));

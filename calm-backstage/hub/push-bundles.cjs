@@ -26,7 +26,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
-const { bundleRef, pushBundle } = require('../plugins/calm-node/src/oci.ts');
+const { bundleRef, checkBundle, pushBundle } = require('../plugins/calm-node/src/oci.ts');
 
 const REGISTRY = process.env.CALM_BUNDLE_REGISTRY || 'http://localhost:5050';
 const PREFIX = process.env.CALM_BUNDLE_PREFIX || 'calm-bundles';
@@ -169,7 +169,10 @@ async function publish(dirs, root, revision) {
     try {
       r = await pushBundle({ dir, ref, annotations, immutable: true });
     } catch (e) {
-      // A changed published version: report it and go on with the others.
+      // A changed published version: report it and go on with the others. Anything else is a real failure.
+      if (!/already published with different content/.test(String(e.message ?? e))) {
+        throw e;
+      }
       refused.push(`${meta.name}@${meta.version}`);
       console.error(`refused  ${ref}: ${e.message ?? e}`);
       continue;
@@ -207,6 +210,21 @@ async function main() {
     console.warn(`bundles: Gitea not reachable at ${GITEA}; publishing from bundles/ without source annotations`);
     await publish(bundleDirs(path.join(ROOT, 'bundles')), path.join(ROOT, 'bundles'), undefined);
     return;
+  }
+  if (!fromGit) {
+    // Refuse before anything reaches Gitea: its main must never hold a version that differs from the registry's.
+    const changed = [];
+    for (const dir of bundleDirs(path.join(ROOT, 'bundles'))) {
+      const meta = JSON.parse(fs.readFileSync(path.join(dir, CONFIG_FILE), 'utf8'));
+      if ((await checkBundle({ dir, ref: bundleRef(REGISTRY, PREFIX, meta.name, meta.version) })) === 'changed') {
+        changed.push(`${meta.name}@${meta.version}`);
+      }
+    }
+    if (changed.length) {
+      throw new Error(
+        `${changed.join(', ')} changed after being published; give each change a new version (a published version never changes). Nothing was committed to Gitea or published.`,
+      );
+    }
   }
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'calm-bundles-'));
   try {

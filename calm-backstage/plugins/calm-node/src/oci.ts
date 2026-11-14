@@ -530,6 +530,31 @@ export async function readBundleConfig(
   }
 }
 
+/**
+ * Whether a bundle folder can be published to `ref`: `new` (the tag is not there), `same` (the registry has this
+ * content) or `changed` (the registry has other content under this version, which must not change).
+ */
+export async function checkBundle(opts: {
+  dir: string;
+  ref: string;
+}): Promise<'new' | 'same' | 'changed'> {
+  const existing = await readManifest(parseRef(opts.ref)).catch(e => {
+    if (e instanceof OciError && e.status === 404) {
+      return undefined;
+    }
+    throw e;
+  });
+  if (!existing) {
+    return 'new';
+  }
+  const layer = existing.manifest.layers.find(
+    l => l.mediaType === OCI_LAYER_MEDIA_TYPE,
+  );
+  return layer?.digest === sha256Digest(await packBundle(opts.dir))
+    ? 'same'
+    : 'changed';
+}
+
 /** The manifest of a bundle in the registry (annotations, layers) and its digest. */
 export async function readBundleManifest(
   ref: string,

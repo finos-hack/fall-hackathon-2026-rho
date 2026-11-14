@@ -46,6 +46,8 @@ export function createCalmUpgradeMergeAction(options: {
   localDir: string;
   /** For tests. */
   gitea?: GiteaClient;
+  mergeAttempts?: number;
+  mergeRetryMs?: number;
 }) {
   return createTemplateAction({
     id: 'calm:upgrade:merge',
@@ -88,19 +90,34 @@ export function createCalmUpgradeMergeAction(options: {
       await gitCommitAll(dir, `Deploy ${image}`, git);
       const diffStat = await gitDiffStat(dir, gitops.branch, git);
       const repo = serviceRepository(gitops, name);
-      await gitPush(dir, repo.pushUrl, branch, gitops.auth, git);
+      // The upgrade branch is this action's own: a run that failed after pushing it left an older one there.
+      await gitPush(dir, repo.pushUrl, branch, gitops.auth, { ...git, force: true });
 
       const gitea = options.gitea ?? new GiteaClient(gitops.gitUrl, gitops.auth);
       const summary = ctx.input.summary ?? 'Upgrade';
       const title = `Upgrade ${name}: ${summary.split('\n').join('; ')}`;
-      const pr = await gitea.createPullRequest(gitops.servicesOrg, name, {
-        head: branch,
-        base: gitops.branch,
-        title,
-        body: pullRequestBody({ summary, diffStat, image }),
-      });
-      ctx.logger.info(`Opened pull request ${pr.url}`);
-      await gitea.mergePullRequest(gitops.servicesOrg, name, pr.number, title);
+      const pr =
+        (await gitea.findOpenPullRequest(gitops.servicesOrg, name, branch, gitops.branch)) ??
+        (await gitea.createPullRequest(gitops.servicesOrg, name, {
+          head: branch,
+          base: gitops.branch,
+          title,
+          body: pullRequestBody({ summary, diffStat, image }),
+        }));
+      ctx.logger.info(`Pull request ${pr.url}`);
+      // Gitea checks whether a new pull request can be merged in the background, and refuses until it knows.
+      for (let attempt = 1; ; attempt++) {
+        try {
+          await gitea.mergePullRequest(gitops.servicesOrg, name, pr.number, title);
+          break;
+        } catch (e) {
+          if (attempt >= (options.mergeAttempts ?? 6) || !/returned 405/.test(String(e))) {
+            throw e;
+          }
+          ctx.logger.info(`Gitea cannot merge #${pr.number} yet; trying again`);
+          await new Promise(r => setTimeout(r, options.mergeRetryMs ?? 2000));
+        }
+      }
       ctx.logger.info(`Merged pull request #${pr.number}`);
 
       await gitCheckoutBranch(dir, gitops.branch, false, git);

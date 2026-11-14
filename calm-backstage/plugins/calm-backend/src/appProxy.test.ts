@@ -19,6 +19,8 @@ describe('appTarget', () => {
 
   it('rejects a name that is not a DNS label, and an empty prefix', () => {
     expect(appTarget('Orders_API', '/', 'calm-')).toBeUndefined();
+    // A DNS label, but the namespace calm-<name> would be longer than 63 characters.
+    expect(appTarget('a'.repeat(62), '/', 'calm-')).toBeUndefined();
     expect(appTarget('kube-system', '/', '')).toBeUndefined();
   });
 });

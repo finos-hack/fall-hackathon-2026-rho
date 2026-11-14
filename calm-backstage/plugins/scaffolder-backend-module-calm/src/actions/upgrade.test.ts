@@ -182,19 +182,25 @@ describe('calm:upgrade:merge', () => {
     await renderAction([meta('node-service', '1.0.0', 'starter'), meta('k8s-deploy', '1.0.0', 'deployment'), meta('k8s-deploy', '1.1.0', 'deployment')]).handler(r);
     const calls: any[] = [];
     // Stands in for Gitea: "merging" fast-forwards the remote's main to the branch.
+    let refusals = 1;
     const gitea = {
+      findOpenPullRequest: async () => undefined,
       createPullRequest: async (owner: string, repo: string, pr: any) => {
         calls.push(['create', owner, repo, pr]);
         return { number: 7, url: 'http://gitea/calm-services/orders/pulls/7' };
       },
       mergePullRequest: async (_o: string, _r: string, n: number) => {
+        // Gitea refuses until it has checked that the pull request can be merged.
+        if (refusals-- > 0) {
+          throw new Error('Gitea POST /merge returned 405: Please try again later');
+        }
         calls.push(['merge', n]);
         const sha = await git(remote, ['rev-parse', r.outputs.branch]);
         await git(remote, ['update-ref', 'refs/heads/main', sha]);
       },
     } as any;
     const m = ctx({ dir, name: 'orders', branch: r.outputs.branch, image: 'orders:abc', summary: r.outputs.summary });
-    await createCalmUpgradeMergeAction({ gitops: gitops(), localDir, gitea }).handler(m);
+    await createCalmUpgradeMergeAction({ gitops: gitops(), localDir, gitea, mergeRetryMs: 1 }).handler(m);
     expect(calls[0][3]).toMatchObject({ head: 'upgrade/deploy-k8s-deploy-1.1.0', base: 'main' });
     expect(calls[0][3].title).toBe('Upgrade orders: Deployment rules: k8s-deploy 1.0.0 → 1.1.0');
     expect(calls[0][3].body).toContain('deploy/k8s/workloads.yaml');
@@ -206,6 +212,54 @@ describe('calm:upgrade:merge', () => {
     // The overlay on main is what calm:deploy:gitops writes for the same image: it will make no further commit.
     await writeOverlay(dir, { name: 'orders', namespace: 'calm-orders', image: 'orders:abc' }, GITOPS_OVERLAY_HEADER);
     expect(await git(dir, ['status', '--porcelain'])).toBe('');
+  });
+});
+
+describe('calm:upgrade:render refusals', () => {
+  it('refuses uncommitted work on main instead of discarding it', async () => {
+    const { dir } = await service();
+    await fs.writeFile(path.join(dir, 'src', 'mine.js'), 'unsaved edit\n');
+    await expect(
+      renderAction([meta('node-service', '1.0.0', 'starter'), meta('k8s-deploy', '1.0.0', 'deployment'), meta('k8s-deploy', '1.1.0', 'deployment')]).handler(
+        ctx({ entityRef: 'component:default/orders' }),
+      ),
+    ).rejects.toThrow(/uncommitted changes on main/);
+    expect(await fs.readFile(path.join(dir, 'src', 'mine.js'), 'utf-8')).toBe('unsaved edit\n');
+  });
+
+  it('refuses a service that was never deployed', async () => {
+    const { dir, remote } = await service();
+    await fs.rm(path.join(dir, 'deploy', 'k8s-overlay'), { recursive: true });
+    await gitCommitAll(dir, 'no overlay');
+    await gitPush(dir, `file://${remote}`, 'main');
+    await expect(
+      renderAction([meta('node-service', '1.0.0', 'starter'), meta('k8s-deploy', '1.0.0', 'deployment'), meta('k8s-deploy', '1.1.0', 'deployment')]).handler(
+        ctx({ entityRef: 'component:default/orders' }),
+      ),
+    ).rejects.toThrow(/never been deployed/);
+  });
+
+  it('a second run after a failed merge replaces the upgrade branch on the remote', async () => {
+    const { dir, remote } = await service();
+    const bundles = [meta('node-service', '1.0.0', 'starter'), meta('k8s-deploy', '1.0.0', 'deployment'), meta('k8s-deploy', '1.1.0', 'deployment')];
+    const failing = { findOpenPullRequest: async () => undefined, createPullRequest: async () => { throw new Error('Gitea down'); } } as any;
+    const r1 = ctx({ entityRef: 'component:default/orders' });
+    await renderAction(bundles).handler(r1);
+    await expect(
+      createCalmUpgradeMergeAction({ gitops: gitops(), localDir, gitea: failing }).handler(
+        ctx({ dir, name: 'orders', branch: r1.outputs.branch, image: 'orders:abc', summary: 's' }),
+      ),
+    ).rejects.toThrow(/Gitea down/);
+    // The working copy is left on the upgrade branch; a new run starts again from main and pushes a new branch.
+    const r2 = ctx({ entityRef: 'component:default/orders' });
+    await renderAction(bundles).handler(r2);
+    const ok = { findOpenPullRequest: async () => ({ number: 3, url: 'u' }), mergePullRequest: async () => {
+      await git(remote, ['update-ref', 'refs/heads/main', await git(remote, ['rev-parse', r2.outputs.branch])]);
+    } } as any;
+    const m = ctx({ dir, name: 'orders', branch: r2.outputs.branch, image: 'orders:abc', summary: 's' });
+    await createCalmUpgradeMergeAction({ gitops: gitops(), localDir, gitea: ok }).handler(m);
+    expect(m.outputs.prUrl).toBe('u');
+    expect(await fs.readFile(path.join(dir, 'deploy/k8s/workloads.yaml'), 'utf-8')).toBe('# k8s-deploy@1.1.0\n');
   });
 });
 

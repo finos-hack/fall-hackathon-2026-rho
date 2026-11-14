@@ -81,6 +81,24 @@ export class GiteaClient {
     return { number: r.json.number, url: r.json.html_url };
   }
 
+  /** The open pull request from `head` into `base`, if there is one. */
+  async findOpenPullRequest(
+    owner: string,
+    repo: string,
+    head: string,
+    base: string,
+  ): Promise<{ number: number; url: string } | undefined> {
+    const path = `/repos/${enc(owner)}/${enc(repo)}/pulls?state=open&limit=50`;
+    const r = await this.call('GET', path);
+    if (r.status >= 300) {
+      GiteaClient.fail(`GET ${path}`, r);
+    }
+    const pr = (Array.isArray(r.json) ? r.json : []).find(
+      (p: any) => p?.head?.ref === head && p?.base?.ref === base,
+    );
+    return pr ? { number: pr.number, url: pr.html_url } : undefined;
+  }
+
   async mergePullRequest(
     owner: string,
     repo: string,

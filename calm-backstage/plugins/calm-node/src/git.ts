@@ -67,6 +67,7 @@ export async function git(
   const env: Record<string, string> = {
     GIT_TERMINAL_PROMPT: '0',
     GIT_CONFIG_NOSYSTEM: '1',
+    GIT_CONFIG_GLOBAL: '/dev/null',
     GIT_AUTHOR_NAME: GIT_AUTHOR.name,
     GIT_AUTHOR_EMAIL: GIT_AUTHOR.email,
     GIT_COMMITTER_NAME: GIT_AUTHOR.name,
@@ -181,10 +182,13 @@ export async function gitPush(
   remoteUrl: string,
   branch: string,
   auth?: GitAuth,
-  opts: GitOptions = {},
+  opts: GitOptions & {
+    /** Replace the remote branch (only for branches this plugin owns, such as `upgrade/*`). */
+    force?: boolean;
+  } = {},
 ): Promise<void> {
   try {
-    await git(dir, ['push', '-q', remoteUrl, `${branch}:${branch}`], {
+    await git(dir, ['push', '-q', ...(opts.force ? ['--force'] : []), remoteUrl, `${branch}:${branch}`], {
       ...opts,
       auth,
     });

@@ -22,6 +22,7 @@ import {
   gitDeleteBranch,
   gitPull,
   gitReset,
+  git as gitRun,
   renderBundle,
   serviceRepository,
 } from '@internal/backstage-plugin-calm-node';
@@ -211,7 +212,7 @@ export function createCalmUpgradeRenderAction(options: {
         hubNamespace,
         architecture: a[ANN.architecture] ?? '',
         architectureVersion: a[ANN.architectureVersion] ?? '',
-        currentImage: (await readOverlayImage(dir)) ?? '',
+        currentImage: '',
       };
       for (const [k, v] of Object.entries(base)) {
         ctx.output(k as any, v);
@@ -236,14 +237,28 @@ export function createCalmUpgradeRenderAction(options: {
         return;
       }
 
-      // A clean main, up to date with the repository.
-      await gitReset(dir, git);
+      // A clean main, up to date with the repository. Uncommitted work on main is the developer's: refuse rather
+      // than discard it. A half-done upgrade branch from a failed run is discarded.
       const branchNow = await gitCurrentBranch(dir, git);
+      const dirty = Boolean(await gitRun(dir, ['status', '--porcelain'], git));
+      if (dirty && !branchNow.startsWith('upgrade/')) {
+        throw new Error(
+          `${dir} has uncommitted changes on ${branchNow}; commit or remove them before upgrading`,
+        );
+      }
+      await gitReset(dir, git);
       if (branchNow !== options.gitops.branch) {
         await gitCheckoutBranch(dir, options.gitops.branch, false, git);
       }
       const repo = serviceRepository(options.gitops, name);
       await gitPull(dir, repo.pushUrl, options.gitops.branch, options.gitops.auth, git);
+      const currentImage = await readOverlayImage(dir);
+      if (!currentImage) {
+        throw new Error(
+          `${name} has never been deployed (no image in deploy/k8s-overlay); deploy it before upgrading`,
+        );
+      }
+      ctx.output('currentImage', currentImage);
       const branch = upgradeBranch(wanted);
       await gitDeleteBranch(dir, branch, git);
       await gitCheckoutBranch(dir, branch, true, git);
