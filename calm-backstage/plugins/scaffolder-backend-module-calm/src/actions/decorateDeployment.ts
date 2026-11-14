@@ -36,8 +36,7 @@ export function createCalmDecorateDeploymentAction(options: {
   return createTemplateAction({
     id: 'calm:decorate:deployment',
     description:
-      "Records a deployment in CALM Hub: posts one deployment decorator (draft deployment standard) that targets the architecture version and applies to the deployed nodes, with the status, the start and end time, the cluster and namespace in the notes and the service's Backstage page as deployment-details. A dry run posts nothing.",
-    supportsDryRun: true,
+      "Records a deployment in CALM Hub: posts one deployment decorator (draft deployment standard) that targets the architecture version and applies to the deployed nodes, with the status, the start and end time, the cluster and namespace in the notes and the service's Backstage page as deployment-details. No dry run: its inputs come from calm:deploy:k8s, which a dry run skips.",
     schema: {
       input: {
         hubNamespace: z =>
@@ -167,13 +166,6 @@ export function createCalmDecorateDeploymentAction(options: {
       });
       ctx.output('uniqueId', uniqueId);
       ctx.output('target', target);
-      if (ctx.isDryRun) {
-        ctx.logger.info(
-          `Dry run: would post the decorator ${JSON.stringify(decorator)}`,
-        );
-        return;
-      }
-
       const id = await hub.createDecorator(hubNamespace, decorator);
       // Read it back the way the architecture card does: by the target filter, then by id.
       const found = await hub.listDecorators(hubNamespace, {

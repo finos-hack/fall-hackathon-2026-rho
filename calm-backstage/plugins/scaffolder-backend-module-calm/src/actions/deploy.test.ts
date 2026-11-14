@@ -11,6 +11,7 @@ import {
   parseImage,
   summariseObjects,
 } from './deployK8s';
+import { createCalmClusterCheckAction } from './clusterCheck';
 import { createCalmImageBuildAction, imageReference } from './imageBuild';
 import { serviceEntity } from './publishLocal';
 
@@ -226,6 +227,13 @@ describe('the actions without a cluster', () => {
           localDir,
         }).handler(ctx({ ...build, tag: 'latest' })),
       ).rejects.toThrow(/latest is refused/);
+      // A name the form allows (63 characters) whose namespace is too long, refused by the step the Template runs
+      // first, before anything is written.
+      await expect(
+        createCalmClusterCheckAction({ settings: settings('calm-') }).handler(
+          ctx({ name: `a${'b'.repeat(61)}c` }),
+        ),
+      ).rejects.toThrow(/is not a valid Kubernetes namespace name/);
     } finally {
       process.env.PATH = path0;
       await fs.rm(tmp, { recursive: true, force: true });

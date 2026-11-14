@@ -202,6 +202,10 @@ describe('templateEntity: build and deploy', () => {
     expect(t.step('build').if).toBe(condition);
     expect(t.step('deploy').if).toBe(condition);
     expect(t.step('decorate').if).toBe(condition);
+    expect(t.step('check-cluster')).toMatchObject({
+      if: condition,
+      input: { name: '${{ parameters.name }}' },
+    });
     expect(t.step('publish').input.deployable).toBe(
       '${{ (parameters.bundle in ["web-service@3.0.0","web-service@3.1.0"]) }}',
     );

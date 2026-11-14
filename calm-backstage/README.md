@@ -67,9 +67,11 @@ To record the first one again with the Hub, the cluster and Backstage running:
 Bundle 2.0.0 renders a `Dockerfile` and a `deploy/` folder that 1.0.0 does not; the data store and add-ons change
 the compose services. `output/` is git-ignored, and services in it come back into the catalog after a restart.
 
-What a run stores in CALM Hub stays there: Hub versions cannot change, so a second run for the same name reuses the
-version when the architecture is the same and stores the next patch version when it is not. The Hub architecture of
-a service carries `metadata["calm-backstage"].entity`; the catalog shows such an architecture only as the service.
+What a run stores in CALM Hub stays there: Hub versions cannot change or be deleted. A second run for a name that
+already has a service folder in `output/`, or that the catalog holds from elsewhere, is refused before anything is
+written to the Hub. Once the folder is removed, a run for the same name reuses the Hub version when the architecture
+is the same and stores the next patch version when it is not. The Hub architecture of a service carries
+`metadata["calm-backstage"].entity`; the catalog shows such an architecture only as the service.
 
 ## How it works
 

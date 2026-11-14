@@ -441,15 +441,8 @@ describe('with a workspace', () => {
       );
     });
 
-    it('posts nothing in a dry run, for a status outside the standard, or when no workload is a node', async () => {
+    it('posts nothing for a status outside the standard, or when no workload is a node', async () => {
       const hub = fakeHub(base);
-      const dry = ctx(input, { isDryRun: true });
-      await decorate(hub, dry);
-      expect(dry.outputs).toEqual({
-        uniqueId: 'billing-api-task-1',
-        target:
-          '/calm/namespaces/hackathon/architectures/billing-api/versions/1.0.0',
-      });
       await expect(
         decorate(hub, ctx({ ...input, status: 'done' })),
       ).rejects.toThrow(/must be one of/);

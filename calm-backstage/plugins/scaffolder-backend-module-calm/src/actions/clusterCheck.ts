@@ -1,4 +1,5 @@
 import { createTemplateAction } from '@backstage/plugin-scaffolder-node';
+import { deployNamespace } from '@internal/backstage-plugin-calm-common';
 import {
   KubernetesDeploySettings,
   requireKubernetesDeploy,
@@ -20,8 +21,17 @@ export function createCalmClusterCheckAction(options: {
   return createTemplateAction({
     id: 'calm:cluster:check',
     description:
-      'Checks that the local cluster in calm.deploy.kubernetes answers (kubectl get namespaces with a short timeout), so a run that will deploy fails before it writes anything.',
+      'Checks that the service name gives a valid namespace and that the local cluster in calm.deploy.kubernetes answers (kubectl get namespaces with a short timeout), so a run that will deploy fails before it writes anything.',
     schema: {
+      input: {
+        name: z =>
+          z
+            .string()
+            .optional()
+            .describe(
+              'Service name: checked to give a valid namespace <namespacePrefix><name>',
+            ),
+      },
       output: {
         context: z => z.string().describe('The kubectl context checked'),
       },
@@ -32,6 +42,10 @@ export function createCalmClusterCheckAction(options: {
         settings = await requireKubernetesDeploy(options.settings);
       } catch (e) {
         throw new Error(`${(e as Error).message} ${NO_CLUSTER_HINT}`);
+      }
+      if (ctx.input.name !== undefined) {
+        // The form allows 63 characters, but the namespace adds the prefix: refuse here, before the Hub write.
+        deployNamespace(settings.namespacePrefix, ctx.input.name);
       }
       try {
         await runKubectl(

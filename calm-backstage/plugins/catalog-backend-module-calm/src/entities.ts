@@ -405,6 +405,7 @@ export function templateEntity(
                 name: 'Check the local Kubernetes cluster answers',
                 action: 'calm:cluster:check',
                 if: `\${{ parameters.deploy and ${isDeployable} }}`,
+                input: { name: '${{ parameters.name }}' },
               },
             ]
           : []),

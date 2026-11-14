@@ -79,8 +79,8 @@ Scope: GitHub publish, dry run, register the architecture in the Hub.
   - `calm:register:hub` runs before the render, so a run that fails later (render, publish, build or deploy) leaves
     its architecture version in the Hub, which cannot delete versions. It checks the catalog and the output folder
     first, so a clashing name writes nothing.
-  - `calm:deploy:k8s` and `calm:image:build` have no dry run: in a dry run the scaffolder skips the publish step
-    they read from.
+  - `calm:image:build`, `calm:deploy:k8s` and `calm:decorate:deployment` have no dry run: in a dry run the
+    scaffolder skips the publish step they depend on.
   - The gateway forwards plain HTTP although the architecture says HTTPS.
 - `calm:publish:local` still writes `output/<name>/` and `calm:register:local` adds a file location.
 - Swap in `publish:github` + `catalog:register` (url location) for a real repository; no GitHub credentials are set up.
