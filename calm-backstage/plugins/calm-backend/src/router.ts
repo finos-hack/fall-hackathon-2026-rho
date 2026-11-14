@@ -337,6 +337,7 @@ export async function createRouter(options: {
   });
 
   /** The registry bundle `name@version`, pulled into the cache; NotFound when the registry does not list it. */
+  const pulls = new Map<string, Promise<string>>();
   async function pulledBundle(name: string, version: string): Promise<string> {
     const b = (await registryBundles()).find(
       x => x.name === name && x.version === version,
@@ -358,7 +359,6 @@ export async function createRouter(options: {
     }
     return pull;
   }
-  const pulls = new Map<string, Promise<string>>();
 
   // Template Explorer: the bundles in the registry, what is inside each, and what changed between versions.
   router.get('/bundles', async (_req, res) => {

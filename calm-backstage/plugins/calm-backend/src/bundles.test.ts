@@ -69,6 +69,7 @@ describe('groupBundles', () => {
   it('drops a source annotation that is not an http(s) URL', () => {
     const [g] = groupBundles([
       reg('x', '1.0.0', 'starter', {
+        // eslint-disable-next-line no-script-url
         'org.opencontainers.image.source': 'javascript:alert(1)',
       }),
     ]);

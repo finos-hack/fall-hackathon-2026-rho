@@ -121,6 +121,13 @@ export interface BundleFileDiff {
   patch: string;
 }
 
+const diffStatus = (before: boolean, after: boolean) => {
+  if (!before) {
+    return 'added';
+  }
+  return after ? 'changed' : 'removed';
+};
+
 /** What changed from the bundle in `fromDir` (version `from`) to the one in `toDir` (version `to`), file by file. */
 export async function bundleDiff(
   fromDir: string,
@@ -140,7 +147,7 @@ export async function bundleDiff(
     }
     out.push({
       path: p,
-      status: !a.has(p) ? 'added' : !b.has(p) ? 'removed' : 'changed',
+      status: diffStatus(a.has(p), b.has(p)),
       patch: createTwoFilesPatch(
         `${from}/${p}`,
         `${to}/${p}`,

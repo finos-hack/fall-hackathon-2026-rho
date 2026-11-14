@@ -95,18 +95,18 @@ const meta = (name: string, version: string, kind: string) =>
 
 /** Each bundle version renders files whose content names it; node-service 1.1.0 drops src/old.js. */
 const renderInto = async (bundle: string, _arch: string, outDir: string) => {
-  const files: Record<string, string> = bundle.startsWith('k8s-deploy')
-    ? {
-        'deploy/k8s/workloads.yaml': `# ${bundle}\n`,
-        'deploy/k8s/kustomization.yaml': 'resources: [workloads.yaml]\n',
-      }
-    : bundle === 'node-service@1.0.0'
-    ? {
-        'src/server.js': `// ${bundle}\n`,
-        'src/old.js': 'old\n',
-        Dockerfile: 'FROM node\n',
-      }
-    : { 'src/server.js': `// ${bundle}\n`, Dockerfile: 'FROM node\n' };
+  let files: Record<string, string> = {
+    'src/server.js': `// ${bundle}\n`,
+    Dockerfile: 'FROM node\n',
+  };
+  if (bundle.startsWith('k8s-deploy')) {
+    files = {
+      'deploy/k8s/workloads.yaml': `# ${bundle}\n`,
+      'deploy/k8s/kustomization.yaml': 'resources: [workloads.yaml]\n',
+    };
+  } else if (bundle === 'node-service@1.0.0') {
+    files = { ...files, 'src/old.js': 'old\n' };
+  }
   for (const [f, t] of Object.entries(files)) {
     await fs.mkdir(path.dirname(path.join(outDir, f)), { recursive: true });
     await fs.writeFile(path.join(outDir, f), t);

@@ -88,8 +88,12 @@ export interface ApiServer {
   token?: string;
 }
 
-const fileOrData = async (file?: string, data?: string) =>
-  data ? Buffer.from(data, 'base64') : file ? fs.readFile(file) : undefined;
+const fileOrData = async (file?: string, data?: string) => {
+  if (data) {
+    return Buffer.from(data, 'base64');
+  }
+  return file ? fs.readFile(file) : undefined;
+};
 
 /** The API server and credentials of the kubeconfig's context (files or inline data, client certificate or token). */
 export async function readApiServer(

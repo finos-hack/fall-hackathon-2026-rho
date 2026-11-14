@@ -52,6 +52,7 @@ describe('gitops status', () => {
     const info = gitopsInfo(
       { namespace: 'flux-system', name: 'calm-orders' },
       {},
+      // eslint-disable-next-line no-script-url
       'javascript:alert(1)',
     );
     expect(info.repoUrl).toBeUndefined();

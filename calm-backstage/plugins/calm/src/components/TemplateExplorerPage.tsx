@@ -176,6 +176,25 @@ function FilesTab(props: { name: string; version: string }) {
   );
 }
 
+/** The class of a unified-diff line: added, removed, hunk header, or none. */
+function lineClass(
+  l: string,
+  classes: ReturnType<typeof useStyles>,
+): string | undefined {
+  if (l.startsWith('+') && !l.startsWith('+++')) {
+    return classes.add;
+  }
+  if (l.startsWith('-') && !l.startsWith('---')) {
+    return classes.del;
+  }
+  return l.startsWith('@@') ? classes.hunk : undefined;
+}
+
+const STATUS_COLOR: Record<string, 'primary' | 'secondary' | 'default'> = {
+  added: 'primary',
+  removed: 'secondary',
+};
+
 function Patch(props: { patch: string }) {
   const classes = useStyles();
   const lines = props.patch.split('\n').slice(2); // drop the ===/--- header the file name already says
@@ -184,15 +203,7 @@ function Patch(props: { patch: string }) {
       {lines.map((l, i) => (
         <span
           key={i}
-          className={
-            l.startsWith('+') && !l.startsWith('+++')
-              ? classes.add
-              : l.startsWith('-') && !l.startsWith('---')
-              ? classes.del
-              : l.startsWith('@@')
-              ? classes.hunk
-              : undefined
-          }
+          className={lineClass(l, classes)}
           style={
             l.startsWith('+') || l.startsWith('-') || l.startsWith('@@')
               ? undefined
@@ -256,13 +267,7 @@ function ChangesTab(props: { bundle: Bundle; version: string }) {
             <Chip
               size="small"
               label={f.status}
-              color={
-                f.status === 'added'
-                  ? 'primary'
-                  : f.status === 'removed'
-                  ? 'secondary'
-                  : 'default'
-              }
+              color={STATUS_COLOR[f.status] ?? 'default'}
             />
           </Typography>
           <Patch patch={f.patch} />
@@ -360,13 +365,14 @@ function UsedByTab(props: { bundle: Bundle; services?: Entity[] }) {
                   >
                     Upgrade
                   </LinkButton>
-                ) : behind ? (
+                ) : null}
+                {behind && !(inGit && !full) && (
                   <Typography variant="caption" color="textSecondary">
                     {full
                       ? 'full bundle: create again with a starter'
                       : 'not in Git'}
                   </Typography>
-                ) : null}
+                )}
               </TableCell>
             </TableRow>
           );
