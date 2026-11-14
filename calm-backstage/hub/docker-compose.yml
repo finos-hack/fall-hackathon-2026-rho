@@ -1,4 +1,4 @@
-# CALM Hub for calm-backstage: finos/calm-hub:latest (no-auth) + MongoDB.
+# CALM Hub for calm-backstage: finos/calm-hub:latest (no-auth) + MongoDB, and an OCI registry for template bundles.
 #
 # Based on finos/architecture-as-code calm-hub/deploy/docker-compose.yml (profile jvm, checkout c7ce7fe1a).
 # Differences: compose project name calm-backstage, Hub on host port 8090 (not 8080), MongoDB port not
@@ -6,6 +6,10 @@
 #
 # Prepare the release meta-schemas first (git-ignored): hub/copy-schemas.sh
 # Start: yarn hub:up   Seed: yarn hub:seed   Stop: yarn hub:down
+#
+# The registry (registry:2, no auth, plain http) is on host port 5050 (5000 is taken on macOS). Template bundles are
+# pushed to it as OCI artifacts, localhost:5050/calm-bundles/<name>:<version>, by `yarn bundles:push` (part of
+# `yarn hub:seed`).
 #
 # WARNING: the no-auth Quarkus profile is for local development only.
 name: calm-backstage
@@ -46,8 +50,19 @@ services:
     networks:
       - calm-net
 
+  registry:
+    image: registry:2
+    container_name: calm-backstage-registry
+    ports:
+      - "5050:5000"
+    volumes:
+      - registry-data:/var/lib/registry
+    networks:
+      - calm-net
+
 volumes:
   mongo-data:
+  registry-data:
 
 networks:
   calm-net:
