@@ -40,6 +40,12 @@ export {
 } from './template';
 export { listFiles } from './files';
 export {
+  DEFAULT_REPOSITORY_PREFIX,
+  readBundleRegistrySettings,
+  readPublishLocalDir,
+  type BundleRegistrySettings,
+} from './settings';
+export {
   BUNDLE_ARTIFACT_TYPE,
   BUNDLE_CONFIG_FILE,
   BUNDLE_CONFIG_MEDIA_TYPE,
