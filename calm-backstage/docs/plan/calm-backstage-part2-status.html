@@ -1,0 +1,157 @@
+<title>CALM Backstage Part 2</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root {
+  --bg: #f5f6f8; --surface: #ffffff; --ink: #14181f; --muted: #5a6472; --line: #dde1e7; --accent: #2b4cc9;
+  --pending: #6b7480; --pending-bg: #e9ecf0;
+  --run: #8a5200; --run-bg: #ffe9c2;
+  --done: #11663a; --done-bg: #d3f1df;
+  --fail: #a3201c; --fail-bg: #fbdad7;
+  --block: #5b2f9e; --block-bg: #e8dcf7;
+  --font-display: "Bricolage Grotesque", "Helvetica Neue", Arial, sans-serif;
+  --font-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #0f1218; --surface: #171b23; --ink: #e8ebf0; --muted: #9aa4b2; --line: #2a303b; --accent: #8fa6ff;
+  --pending: #a3acb8; --pending-bg: #262c36;
+  --run: #ffc56b; --run-bg: #3d2a08;
+  --done: #7ddca1; --done-bg: #123b25;
+  --fail: #ff9a94; --fail-bg: #4a1714;
+  --block: #cdb0ff; --block-bg: #2e1d4d;
+  color-scheme: dark; } }
+:root[data-theme="dark"] {
+  --bg: #0f1218; --surface: #171b23; --ink: #e8ebf0; --muted: #9aa4b2; --line: #2a303b; --accent: #8fa6ff;
+  --pending: #a3acb8; --pending-bg: #262c36;
+  --run: #ffc56b; --run-bg: #3d2a08;
+  --done: #7ddca1; --done-bg: #123b25;
+  --fail: #ff9a94; --fail-bg: #4a1714;
+  --block: #cdb0ff; --block-bg: #2e1d4d;
+  color-scheme: dark; }
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--ink); font-family: var(--font-body); font-size: 15px; line-height: 1.5;
+  padding-block: 28px 56px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+main { max-width: 1040px; margin: 0 auto; display: flex; flex-direction: column; gap: 32px; }
+h1, h2 { font-family: var(--font-display); text-wrap: balance; margin: 0; letter-spacing: -0.01em; }
+h1 { font-size: clamp(26px, 5vw, 38px); line-height: 1.1; }
+h2 { font-size: 20px; }
+.sub { color: var(--muted); margin: 6px 0 0; max-width: 65ch; }
+.strip { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 18px 20px; display: flex; flex-direction: column; gap: 14px; }
+.strip-top { display: flex; flex-wrap: wrap; gap: 8px 24px; align-items: center; justify-content: space-between; }
+.meta { font-family: var(--font-mono); font-size: 12.5px; color: var(--muted); }
+.bar { height: 10px; background: var(--pending-bg); border-radius: 5px; overflow: hidden; }
+.bar > i { display: block; height: 100%; width: 0%; background: var(--accent); border-radius: 5px; }
+.pill { display: inline-block; font-size: 12px; font-weight: 600; padding: 2px 9px; border-radius: 999px; white-space: nowrap; letter-spacing: 0.02em; }
+.p-pending { color: var(--pending); background: var(--pending-bg); }
+.p-run { color: var(--run); background: var(--run-bg); }
+.p-done { color: var(--done); background: var(--done-bg); }
+.p-fail { color: var(--fail); background: var(--fail-bg); }
+.p-block { color: var(--block); background: var(--block-bg); }
+.wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; min-width: 640px; }
+th { text-align: left; font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); font-weight: 600; padding: 10px 14px; border-bottom: 1px solid var(--line); }
+td { padding: 11px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
+tr:last-child td { border-bottom: 0; }
+td.n { font-family: var(--font-mono); color: var(--muted); width: 36px; }
+td.name { font-weight: 500; min-width: 200px; }
+td.hash, td.mono { font-family: var(--font-mono); font-size: 12.5px; }
+td.step, td.ev { color: var(--muted); font-size: 14px; }
+.sec { display: flex; flex-direction: column; gap: 12px; }
+ul.list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+ul.list li { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 10px 14px; }
+ul.list b { font-family: var(--font-mono); font-size: 12.5px; margin-right: 8px; color: var(--accent); }
+@media (max-width: 560px) { td, th { padding: 9px 10px; } body { font-size: 14.5px; } }
+</style>
+<main>
+  <header>
+    <h1>CALM Backstage: bundle store and Kubernetes deployment</h1>
+    <p class="sub">Part 2 makes the demo end with a running service: template bundles are pulled from an OCI registry, the service is built and deployed to a local minikube, its pods show on the service page, network rules come from the CALM architecture, and the deployment is recorded in CALM Hub. Each step is planned when it starts (docs/superpowers/plans/2026-11-14-step-N-*.md).</p>
+  </header>
+
+  <section class="strip" aria-label="Overall status">
+    <div class="strip-top">
+      <div id="overall"><span class="pill p-run">in progress</span></div>
+      <div class="meta" id="count">1 of 8 tasks done</div>
+      <div class="meta" id="stamp">started Nov 14 11:09 &middot; updated Nov 14 11:22</div>
+    </div>
+    <div class="bar" role="progressbar" aria-valuemin="0" aria-valuemax="8" aria-valuenow="1"><i id="fill" style="width:12.5%"></i></div>
+    <div class="meta" id="now">Now: step 1 (OCI bundle store) is being built; step 2 done; step 3 waiting on step 1</div>
+  </section>
+
+  <section class="sec">
+    <h2>Tasks</h2>
+    <div class="wrap"><table>
+      <thead><tr><th>#</th><th>Task</th><th>State</th><th>Current step</th><th>Commit</th><th>Evidence</th></tr></thead>
+      <tbody>
+      <tr id="t1"><td class="n">1</td><td class="name">OCI bundle store (registry:2 on 5050, OCI client, bundles:push, catalog and calm:template read the registry)</td><td><span class="pill p-run">in progress</span></td><td class="step">Subagent building: registry, OCI client, push script, catalog and calm:template</td><td class="mono">-</td><td class="ev">-</td></tr>
+      <tr id="t2"><td class="n">2</td><td class="name">Bundle web-service@3.0.0 (generated Node app, Dockerfile, Kubernetes manifests, NetworkPolicies)</td><td><span class="pill p-done">done</span></td><td class="step">Risk passed: the bundle renders, builds and runs in the cluster</td><td class="mono">234c408</td><td class="ev">Deployed in a probe namespace: 5 pods Ready, image build 13.9 s; /connections shows 3 of 3 permitted connections open; gateway to data store and 3 other unpermitted connections time out after 3.00 s. Not started in the cluster: PostgreSQL and Redis (server dry run only)</td></tr>
+      <tr id="t3"><td class="n">3</td><td class="name">Local cluster (yarn k8s:up / k8s:down, minikube profile calm-backstage with Calico, repo-local kubeconfig)</td><td><span class="pill p-run">in progress</span></td><td class="step">k8s/up.sh ran: exit 0, read-only token lists namespaces (200) and is refused secrets (403). Yarn scripts wait for step 1 to finish with package.json</td><td class="mono">-</td><td class="ev">-</td></tr>
+      <tr id="t4"><td class="n">4</td><td class="name">Build and deploy actions (calm:image:build, calm:deploy:k8s, conditional Template steps)</td><td><span class="pill p-pending">pending</span></td><td class="step">-</td><td class="mono">-</td><td class="ev">-</td></tr>
+      <tr id="t5"><td class="n">5</td><td class="name">Kubernetes tab on the service page</td><td><span class="pill p-pending">pending</span></td><td class="step">-</td><td class="mono">-</td><td class="ev">-</td></tr>
+      <tr id="t6"><td class="n">6</td><td class="name">Network rules from CALM (permitted connections open, others blocked)</td><td><span class="pill p-pending">pending</span></td><td class="step">-</td><td class="mono">-</td><td class="ev">-</td></tr>
+      <tr id="t7"><td class="n">7</td><td class="name">Record in CALM Hub (register the architecture, deployment decorator, card shows it)</td><td><span class="pill p-pending">pending</span></td><td class="step">-</td><td class="mono">-</td><td class="ev">-</td></tr>
+      <tr id="t8"><td class="n">8</td><td class="name">Hand-over (demo video, README, FINDINGS, TRACKS, fresh-clone check)</td><td><span class="pill p-pending">pending</span></td><td class="step">-</td><td class="mono">-</td><td class="ev">-</td></tr>
+      </tbody>
+    </table></div>
+  </section>
+
+  <section class="sec">
+    <h2>Deviations from the plan</h2>
+    <ul class="list" id="devs">
+      <li id="d1"><b>D1</b>The plan put the cluster at step 3. It was started first, by the lead, because steps 4 to 6 depend on it and it was the least certain part. Measured: profile calm-backstage (Kubernetes 1.37.0, Calico, 3 GB) is up; ~/.kube/config has the same checksum as before and the active context is still minikube. Step 3 now only adds the yarn scripts. <span class="pill p-done">applied</span></li>
+      <li id="d2"><b>D2</b>Risks probed before building. Calico enforces: a default-deny policy blocked a test pod, DNS included, so the bundle's policies must allow DNS. The Hub accepted a deployment decorator (201) in a scratch namespace, so the step 7 fallback is unlikely to be needed. <span class="pill p-done">documented</span></li>
+      <li id="d3"><b>D3</b>The plan had one NetworkPolicy per connection. A policy selects one set of pods, so each in-cluster connection gets two (egress from the source, ingress to the destination): 11 policies for a service with three dependencies. The gateway forwards plain HTTP although the architecture says HTTPS; no certificates are rendered. <span class="pill p-done">applied</span></li>
+    </ul>
+  </section>
+
+  <section class="sec">
+    <h2>Acceptance</h2>
+    <div class="wrap"><table>
+      <thead><tr><th>#</th><th>Criterion</th><th>Result</th><th>Actual</th></tr></thead>
+      <tbody>
+      <tr id="a1"><td class="n">1</td><td class="name">A bundle pushed with yarn bundles:push appears in the catalog and the Template without a restart</td><td><span class="pill p-pending">pending</span></td><td class="ev">-</td></tr>
+      <tr id="a2"><td class="n">2</td><td class="name">A Template run with bundle 3.0.0 and deploy on completes; all pods in the service namespace are Ready</td><td><span class="pill p-pending">pending</span></td><td class="ev">-</td></tr>
+      <tr id="a3"><td class="n">3</td><td class="name">/health returns 200 and /connections shows each permitted connection open</td><td><span class="pill p-pending">pending</span></td><td class="ev">-</td></tr>
+      <tr id="a4"><td class="n">4</td><td class="name">A connection the architecture does not permit (gateway to data store) is blocked</td><td><span class="pill p-pending">pending</span></td><td class="ev">-</td></tr>
+      <tr id="a5"><td class="n">5</td><td class="name">The service page shows the diagram, the Kubernetes tab with its pods, and where it is deployed</td><td><span class="pill p-pending">pending</span></td><td class="ev">-</td></tr>
+      <tr id="a6"><td class="n">6</td><td class="name">CALM Hub returns the new architecture and its deployment decorator</td><td><span class="pill p-pending">pending</span></td><td class="ev">-</td></tr>
+      <tr id="a7"><td class="n">7</td><td class="name">~/.kube/config and the minikube profiles minikube, coraza-demo and secure are unchanged</td><td><span class="pill p-pending">pending</span></td><td class="ev">-</td></tr>
+      <tr id="a8"><td class="n">8</td><td class="name">yarn tsc, yarn test and yarn build:backend pass; new demo video in docs/demo/</td><td><span class="pill p-pending">pending</span></td><td class="ev">-</td></tr>
+      </tbody>
+    </table></div>
+  </section>
+
+  <section class="sec">
+    <h2>Open items for Jim</h2>
+    <ul class="list" id="open">
+      <li>PR #1 on finos-hack/fall-hackathon-2026-rho needs one approving review, and the README's Hackathon Track is still "to be confirmed".</li>
+      <li>Part 2 is committed locally only. At the end you decide whether it goes up as a second PR.</li>
+    </ul>
+  </section>
+
+  <section class="sec" id="bigger">
+    <h2>Overall plan progress</h2>
+    <div class="strip">
+      <div class="strip-top">
+        <div class="meta" id="plan-count">1 of 8 phases done</div>
+        <div class="meta" id="plan-name">CALM hackathon: base, part 2, and the tracks in TRACKS.md</div>
+      </div>
+      <div class="bar" role="progressbar" aria-valuemin="0" aria-valuemax="8" aria-valuenow="1"><i id="plan-fill" style="width:12.5%"></i></div>
+      <div class="meta" id="plan-next">Next up: the rest of Tracks A–F with the bigger team from Monday 2026-11-16</div>
+    </div>
+    <div class="wrap"><table>
+      <thead><tr><th>Phase</th><th>Name</th><th>State</th><th>Outcome</th><th>Report</th></tr></thead>
+      <tbody>
+      <tr id="pl0"><td class="n">0</td><td class="name">Hackathon base (thin slice, steps 1–8)</td><td><span class="pill p-done">done</span></td><td class="ev">8 of 8 steps, 22 tests; PR #1 open on finos-hack/fall-hackathon-2026-rho (DCO passes, needs 1 review)</td><td class="mono">calm-backstage-status.html</td></tr>
+      <tr id="pl1"><td class="n">1</td><td class="name">Part 2: bundle store and deployment to local Kubernetes</td><td><span class="pill p-run">in progress</span></td><td class="ev">Covers parts of Track D (bundle store) and Track E (register in the Hub)</td><td class="mono">this page</td></tr>
+      <tr id="pl2"><td class="n">2</td><td class="name">Track A: Catalog</td><td><span class="pill p-pending">not started</span></td><td class="ev">-</td><td class="mono">-</td></tr>
+      <tr id="pl3"><td class="n">3</td><td class="name">Track B: Entity page</td><td><span class="pill p-pending">not started</span></td><td class="ev">-</td><td class="mono">-</td></tr>
+      <tr id="pl4"><td class="n">4</td><td class="name">Track C: Pattern options</td><td><span class="pill p-pending">not started</span></td><td class="ev">-</td><td class="mono">-</td></tr>
+      <tr id="pl5"><td class="n">5</td><td class="name">Track D: Template bundles (rest)</td><td><span class="pill p-pending">not started</span></td><td class="ev">-</td><td class="mono">-</td></tr>
+      <tr id="pl6"><td class="n">6</td><td class="name">Track E: Publish (rest)</td><td><span class="pill p-pending">not started</span></td><td class="ev">-</td><td class="mono">-</td></tr>
+      <tr id="pl7"><td class="n">7</td><td class="name">Track F: Provisioning</td><td><span class="pill p-pending">not started</span></td><td class="ev">-</td><td class="mono">-</td></tr>
+      </tbody>
+    </table></div>
+  </section>
+</main>

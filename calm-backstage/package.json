@@ -24,7 +24,9 @@
     "hub:up": "hub/copy-schemas.sh && docker compose -f hub/docker-compose.yml up -d",
     "hub:seed": "hub/seed.sh && node hub/push-bundles.cjs",
     "bundles:push": "node hub/push-bundles.cjs",
-    "hub:down": "docker compose -f hub/docker-compose.yml down"
+    "hub:down": "docker compose -f hub/docker-compose.yml down",
+    "k8s:up": "k8s/up.sh",
+    "k8s:down": "k8s/down.sh"
   },
   "backstage": {
     "cli": {
