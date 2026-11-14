@@ -35,14 +35,15 @@ describe('readRegistryBundles', () => {
   it('gives one bundle per tag, with its reference, digest and config', async () => {
     const read = await readRegistryBundles(registry, fakeClient());
     expect(read.warnings).toEqual([]);
-    expect(read.bundles).toEqual([
+    expect(JSON.parse(JSON.stringify(read.bundles))).toEqual([
       {
         name: 'web-service',
         version: '1.0.0',
         ref: 'localhost:5050/calm-bundles/web-service:1.0.0',
         digest: 'sha256:aaa',
         description: 'bundle at localhost:5050/calm-bundles/web-service:1.0.0',
-        pattern,
+        kind: 'full',
+        patterns: [pattern],
       },
       {
         name: 'web-service',
@@ -50,7 +51,8 @@ describe('readRegistryBundles', () => {
         ref: 'localhost:5050/calm-bundles/web-service:2.0.0',
         digest: 'sha256:bbb',
         description: 'bundle at localhost:5050/calm-bundles/web-service:2.0.0',
-        pattern,
+        kind: 'full',
+        patterns: [pattern],
       },
     ]);
   });
@@ -68,7 +70,7 @@ describe('readRegistryBundles', () => {
       }),
     );
     expect(read.bundles.map(b => b.version)).toEqual(['2.0.0']);
-    expect(read.bundles[0].pattern).toBeUndefined();
+    expect(read.bundles[0].patterns).toEqual([]);
     expect(read.warnings).toEqual([
       'bundle localhost:5050/calm-bundles/web-service:1.0.0 skipped: Error: Digest mismatch',
     ]);

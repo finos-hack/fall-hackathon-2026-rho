@@ -1,0 +1,11 @@
+{
+  "name": "Deployment rules k8s-deploy",
+  "transformer": "k8s-deploy-transformer",
+  "templates": [
+    { "template": "README.md.hbs", "from": "document", "output": "deploy/k8s/README.md", "output-type": "single", "front-matter": { "inject": false } },
+    { "template": "workloads.yaml.hbs", "from": "document", "output": "deploy/k8s/workloads.yaml", "output-type": "single" },
+    { "template": "gateway-config.yaml.hbs", "from": "document", "output": "deploy/k8s/gateway-config.yaml", "output-type": "single" },
+    { "template": "network-policy.yaml.hbs", "from": "document", "output": "deploy/k8s/network-policy.yaml", "output-type": "single" },
+    { "template": "kustomization.yaml.hbs", "from": "document", "output": "deploy/k8s/kustomization.yaml", "output-type": "single" }
+  ]
+}

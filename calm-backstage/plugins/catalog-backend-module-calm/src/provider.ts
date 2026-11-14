@@ -1,3 +1,4 @@
+import { readBundleMeta } from '@internal/backstage-plugin-calm-common';
 import { promises as fs } from 'fs';
 import { resolve } from 'path';
 import type {
@@ -263,13 +264,16 @@ export class CalmEntityProvider implements EntityProvider {
         const meta = JSON.parse(
           await fs.readFile(resolve(dir, 'calm-backstage.json'), 'utf-8'),
         );
+        const m = readBundleMeta(meta, b);
         out.push({
           name: b.name,
           version: b.version,
           path: dir,
-          description: meta.description,
-          deploy: typeof meta.deploy === 'string' ? meta.deploy : undefined,
-          pattern: meta.pattern,
+          description: m.description,
+          deploy: m.deploy,
+          kind: m.kind,
+          runtime: m.runtime,
+          patterns: m.patterns,
         });
       } catch (e) {
         this.logger.warn(

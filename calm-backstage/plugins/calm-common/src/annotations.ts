@@ -15,6 +15,10 @@ export const CALM_ANNOTATIONS = {
   /** Template bundle name, e.g. `web-service`. */
   bundle: 'calm.finos.org/bundle',
   bundleVersion: 'calm.finos.org/bundle-version',
+  /** On a bundle Resource: starter, deployment or full. */
+  bundleKind: 'calm.finos.org/bundle-kind',
+  /** On a starter bundle Resource: what it runs on. */
+  bundleRuntime: 'calm.finos.org/bundle-runtime',
   /** OCI reference of a bundle in the bundle registry, e.g. `localhost:5050/calm-bundles/web-service:2.0.0`. */
   bundleRef: 'calm.finos.org/bundle-ref',
   /** Digest of the bundle's OCI manifest (`sha256:…`): the exact content behind `bundle-ref` at the time. */

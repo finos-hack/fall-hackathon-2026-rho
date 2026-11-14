@@ -1,0 +1,10 @@
+{
+  "name": "k8s-deploy",
+  "version": "1.0.0",
+  "kind": "deployment",
+  "description": "Deployment rules for any starter: a kustomize base in deploy/k8s with a Deployment and Service per in-cluster node (the app node runs the starter's image), the gateway's nginx config, the starter contract's environment, and NetworkPolicies from the architecture's connects relationships. Nisshi 0.8.1 for event streaming.",
+  "patterns": [
+    { "namespace": "hackathon", "patternId": "web-service" },
+    { "namespace": "hackathon", "patternId": "event-streaming" }
+  ]
+}

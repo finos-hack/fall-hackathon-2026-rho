@@ -245,6 +245,79 @@ describe('templateEntity: build and deploy', () => {
   });
 });
 
+describe('templateEntity: starters and deployment rules', () => {
+  const starter = (name: string, version: string, runtime?: string): BundleInfo => ({
+    name,
+    version,
+    kind: 'starter',
+    runtime,
+    patterns: [fits],
+  });
+  const rules = (version: string): BundleInfo => ({
+    name: 'k8s-deploy',
+    version,
+    kind: 'deployment',
+    deploy: 'kubernetes',
+    patterns: [fits, { namespace: 'hackathon', patternId: 'event-streaming' }],
+  });
+  const all = [
+    bundle('3.0.0', 'kubernetes'),
+    starter('spring-boot-service', '1.0.0', 'Spring Boot 4.0.9 on Java 21'),
+    starter('node-service', '1.0.0'),
+    rules('1.0.0'),
+    rules('1.1.0'),
+  ];
+
+  it('offers starters and full bundles as bundle and deployment bundles as deployBundle', () => {
+    const t = template(all, { gitops: true });
+    expect(t.choices.bundle.enum).toEqual([
+      'node-service@1.0.0',
+      'spring-boot-service@1.0.0',
+      'web-service@3.0.0',
+    ]);
+    expect(t.choices.bundle.enumNames[1]).toBe(
+      'spring-boot-service 1.0.0 (Spring Boot 4.0.9 on Java 21)',
+    );
+    expect(t.choices.bundle.enumNames[2]).toBe('web-service 3.0.0 (full bundle)');
+    expect(t.choices.deployBundle).toMatchObject({
+      enum: ['k8s-deploy@1.0.0', 'k8s-deploy@1.1.0'],
+      default: 'k8s-deploy@1.1.0',
+    });
+  });
+
+  it('renders the deployment rules into rendered-deploy only when the starter is not full', () => {
+    const t = template(all, { gitops: true });
+    const isStarter =
+      '(parameters.bundle in ["node-service@1.0.0","spring-boot-service@1.0.0"])';
+    expect(t.stepIds.slice(5, 8)).toEqual(['template', 'template-deploy', 'publish']);
+    expect(t.step('template-deploy')).toMatchObject({
+      action: 'calm:template',
+      if: `\${{ ${isStarter} }}`,
+      input: { bundle: '${{ parameters.deployBundle }}', outputDir: 'rendered-deploy' },
+    });
+    expect(t.step('publish').input).toMatchObject({
+      deployBundle: `\${{ parameters.deployBundle if ${isStarter} else "" }}`,
+      deploySourceDir: `\${{ "rendered-deploy" if ${isStarter} else "" }}`,
+    });
+    // Every starter can be deployed (there are deployment rules), and so can the deployable full bundle.
+    expect(t.step('deploy').if).toContain('"web-service@3.0.0","node-service@1.0.0","spring-boot-service@1.0.0"');
+  });
+
+  it('has no deployment-rules choice without starters', () => {
+    const t = template([bundle('3.0.0', 'kubernetes'), rules('1.0.0')]);
+    expect(t.choices.deployBundle).toBeUndefined();
+    expect(t.stepIds).not.toContain('template-deploy');
+  });
+
+  it('does not offer a bundle that fits another pattern', () => {
+    const t = template([
+      ...all,
+      { name: 'nisshi-stream-app', version: '1.0.0', kind: 'starter', patterns: [{ patternId: 'event-streaming' }] },
+    ]);
+    expect(t.choices.bundle.enum).not.toContain('nisshi-stream-app@1.0.0');
+  });
+});
+
 describe('templateEntity: Git and Flux', () => {
   it('pushes the service to Git after publishing, tags the image with the commit and deploys with Flux', () => {
     const t = template([bundle('3.0.0', 'kubernetes')], { gitops: true });

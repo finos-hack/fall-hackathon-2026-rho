@@ -17,3 +17,4 @@ export * from './mermaid';
 export * from './deploy';
 export * from './gitea';
 export * from './flux';
+export * from './bundleMeta';

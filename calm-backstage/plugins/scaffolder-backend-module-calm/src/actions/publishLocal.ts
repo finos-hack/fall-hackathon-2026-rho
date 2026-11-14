@@ -1,3 +1,4 @@
+import { constants as fsConstants } from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {
@@ -37,6 +38,8 @@ export function serviceEntity(opts: {
   patternVersion: string;
   bundleName: string;
   bundleVersion: string;
+  /** The deployment-rules bundle, for a service made from a starter. */
+  deployBundle?: { name: string; version: string };
   /** OCI reference and manifest digest of the bundle, when it was pulled from the bundle registry. */
   bundleRef?: string;
   bundleDigest?: string;
@@ -68,8 +71,10 @@ export function serviceEntity(opts: {
           opts.namespace ? `${opts.namespace}/` : ''
         }${opts.patternId} ${
           opts.patternVersion
-        }, rendered with the template bundle ${opts.bundleName} ${
-          opts.bundleVersion
+        }, rendered with ${
+          opts.deployBundle
+            ? `the starter ${opts.bundleName} ${opts.bundleVersion} and the deployment rules ${opts.deployBundle.name} ${opts.deployBundle.version}`
+            : `the template bundle ${opts.bundleName} ${opts.bundleVersion}`
         }.`,
       annotations: {
         ...(opts.namespace ? { [ANN.namespace]: opts.namespace } : {}),
@@ -79,6 +84,12 @@ export function serviceEntity(opts: {
         [ANN.bundleVersion]: opts.bundleVersion,
         ...(opts.bundleRef ? { [ANN.bundleRef]: opts.bundleRef } : {}),
         ...(opts.bundleDigest ? { [ANN.bundleDigest]: opts.bundleDigest } : {}),
+        ...(opts.deployBundle
+          ? {
+              [ANN.deployBundle]: opts.deployBundle.name,
+              [ANN.deployBundleVersion]: opts.deployBundle.version,
+            }
+          : {}),
         [ANN.architectureFile]: `./${ARCHITECTURE_FILE}`,
         ...(opts.hub
           ? {
@@ -116,6 +127,14 @@ export function serviceEntity(opts: {
           opts.bundleName,
           opts.bundleVersion,
         )}`,
+        ...(opts.deployBundle
+          ? [
+              `resource:default/${bundleEntityName(
+                opts.deployBundle.name,
+                opts.deployBundle.version,
+              )}`,
+            ]
+          : []),
       ],
     },
   };
@@ -164,6 +183,20 @@ export function createCalmPublishLocalAction(options: {
         patternVersion: z => z.string().describe('Pattern version'),
         bundle: z =>
           z.string().describe('Template bundle as `<name>@<version>`'),
+        deployBundle: z =>
+          z
+            .string()
+            .optional()
+            .describe(
+              'Deployment-rules bundle as `<name>@<version>`, for a starter; empty for a full bundle. Recorded as calm.finos.org/deploy-bundle(-version)',
+            ),
+        deploySourceDir: z =>
+          z
+            .string()
+            .optional()
+            .describe(
+              'Files the deployment rules rendered (relative to the workspace), merged into the folder; a file both bundles rendered fails the run. Empty: none',
+            ),
         bundleRef: z =>
           z
             .string()
@@ -264,7 +297,31 @@ export function createCalmPublishLocalAction(options: {
           `Nothing to publish in ${ctx.input.sourceDir ?? 'rendered'}`,
         );
       }
-      const clash = rendered.find(
+      const deployBundle = ctx.input.deployBundle
+        ? parseBundleValue(ctx.input.deployBundle)
+        : undefined;
+      if (ctx.input.deployBundle && !deployBundle) {
+        throw new Error(
+          `Deployment bundle must be <name>@<version>, got ${JSON.stringify(
+            ctx.input.deployBundle,
+          )}`,
+        );
+      }
+      const deploySourceDir = ctx.input.deploySourceDir
+        ? resolveSafeChildPath(ctx.workspacePath, ctx.input.deploySourceDir)
+        : undefined;
+      const deployRendered = deploySourceDir
+        ? await listFiles(deploySourceDir)
+        : [];
+      const twice = deployRendered.filter(f => rendered.includes(f));
+      if (twice.length) {
+        throw new Error(
+          `Both the starter and the deployment rules rendered ${twice.join(
+            ', ',
+          )}: a starter must not render deploy/k8s`,
+        );
+      }
+      const clash = [...rendered, ...deployRendered].find(
         f => f === ARCHITECTURE_FILE || f === CATALOG_INFO_FILE,
       );
       if (clash) {
@@ -335,6 +392,18 @@ export function createCalmPublishLocalAction(options: {
       }
 
       await fs.cp(sourceDir, target, { recursive: true, errorOnExist: true });
+      if (deploySourceDir) {
+        // File by file: the folder exists now, and no file of the starter's may be replaced.
+        for (const f of deployRendered) {
+          const to = resolveSafeChildPath(target, f);
+          await fs.mkdir(path.dirname(to), { recursive: true });
+          await fs.copyFile(
+            path.join(deploySourceDir, f),
+            to,
+            fsConstants.COPYFILE_EXCL,
+          );
+        }
+      }
       await fs.copyFile(architecturePath, path.join(target, ARCHITECTURE_FILE));
       const entity = serviceEntity({
         name,
@@ -344,6 +413,7 @@ export function createCalmPublishLocalAction(options: {
         patternVersion,
         bundleName: bundle.name,
         bundleVersion: bundle.version,
+        deployBundle,
         // Empty when the bundle came from a local folder: then nothing is recorded.
         bundleRef: ctx.input.bundleRef || undefined,
         bundleDigest: ctx.input.bundleDigest || undefined,

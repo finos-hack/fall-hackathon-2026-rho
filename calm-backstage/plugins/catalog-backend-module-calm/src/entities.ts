@@ -5,11 +5,14 @@ import type { Entity } from '@backstage/catalog-model';
 import {
   CALM_ANNOTATIONS as ANN,
   CALM_ENTITY_TYPES as TYPES,
+  BundleKind,
+  BundlePatternRef,
   PatternDecision,
   TemplateDecisionParameter,
   bundleEntityName,
   compareVersions,
   controlEntityName,
+  fitsPattern,
   entityName,
   parsePatternUrl,
   parseRequirementUrl,
@@ -53,13 +56,34 @@ export interface BundleInfo {
   description?: string;
   /** Where the rendered service can be deployed (`deploy` in calm-backstage.json): `kubernetes`, or nothing. */
   deploy?: string;
+  /** starter, deployment or full (no kind in calm-backstage.json: full). */
+  kind?: BundleKind;
+  /** What a starter runs on. */
+  runtime?: string;
+  /** The patterns the bundle fits (calm-backstage.json `patterns`, or its older single `pattern`). */
+  patterns?: BundlePatternRef[];
+  /** @deprecated read `patterns`; kept for bundles described by hand in tests. */
   pattern?: {
     namespace?: string;
     patternId?: string;
     version?: string;
     url?: string;
   };
+  /** Manifest annotations of a registry bundle (source, revision, created). */
+  annotations?: Record<string, string>;
 }
+
+/** The patterns a bundle fits, from `patterns` or the older `pattern`. */
+export function bundlePatterns(b: BundleInfo): BundlePatternRef[] {
+  if (b.patterns?.length) {
+    return b.patterns;
+  }
+  return b.pattern?.patternId
+    ? [{ ...b.pattern, patternId: b.pattern.patternId }]
+    : [];
+}
+
+export const bundleKind = (b: BundleInfo): BundleKind => b.kind ?? 'full';
 
 export interface CalmSnapshot {
   hubUrl: string;
@@ -180,19 +204,25 @@ function controlEntity(c: ControlDocument, hubUrl: string): Entity {
 }
 
 function bundleEntity(b: BundleInfo, hubUrl: string): Entity {
-  const p = b.pattern;
+  const fits = bundlePatterns(b);
+  const p = fits[0];
+  const kind = bundleKind(b);
   return {
     apiVersion: 'backstage.io/v1alpha1',
     kind: 'Resource',
     metadata: {
       name: bundleEntityName(b.name, b.version),
-      title: `${b.name} ${b.version}`,
+      title: `${b.name} ${b.version}${
+        kind === 'full' ? '' : ` (${kind === 'starter' ? 'starter' : 'deployment rules'})`
+      }`,
       description: `${
         b.description ?? `CALM template bundle ${b.name} ${b.version}`
       }${b.ref ? `\n\nStored in the OCI bundle registry as ${b.ref}.` : ''}`,
       annotations: {
         [ANN.bundle]: b.name,
         [ANN.bundleVersion]: b.version,
+        [ANN.bundleKind]: kind,
+        ...(b.runtime ? { [ANN.bundleRuntime]: b.runtime } : {}),
         ...(b.ref ? { [ANN.bundleRef]: b.ref } : {}),
         ...(b.digest ? { [ANN.bundleDigest]: b.digest } : {}),
         [ANN.hubUrl]: hubUrl,
@@ -200,13 +230,17 @@ function bundleEntity(b: BundleInfo, hubUrl: string): Entity {
         ...(p?.patternId ? { [ANN.pattern]: p.patternId } : {}),
         ...(p?.version ? { [ANN.patternVersion]: p.version } : {}),
       },
-      tags: ['calm', 'calm-template-bundle'],
+      tags: ['calm', 'calm-template-bundle', `calm-bundle-${kind}`],
     },
     spec: {
       type: TYPES.bundle,
       owner: OWNER,
-      ...(p?.patternId
-        ? { dependsOn: [resourceRef(patternEntityName(p.patternId))] }
+      ...(fits.length
+        ? {
+            dependsOn: [
+              ...new Set(fits.map(f => resourceRef(patternEntityName(f.patternId)))),
+            ],
+          }
         : {}),
     },
   };
@@ -218,12 +252,13 @@ export function bundlesFor(
   bundles: BundleInfo[],
 ): BundleInfo[] {
   return bundles
-    .filter(
-      b =>
-        b.pattern?.patternId === pattern.id &&
-        (b.pattern?.namespace ?? pattern.namespace) === pattern.namespace,
+    .filter(b =>
+      fitsPattern({ patterns: bundlePatterns(b) }, pattern.namespace, pattern.id),
     )
-    .sort((a, b) => compareVersions(a.version, b.version));
+    .sort(
+      (a, b) =>
+        a.name.localeCompare(b.name) || compareVersions(a.version, b.version),
+    );
 }
 
 /** The `deploy` value of a bundle whose rendered service the Template can build and deploy to Kubernetes. */
@@ -314,22 +349,55 @@ export function templateEntity(
   decisions.forEach((d, i) => {
     choiceProperties[map[i].parameter] = decisionProperty(d);
   });
-  const bundleValues = fitting.map(b => `${b.name}@${b.version}`);
+  const value = (b: BundleInfo) => `${b.name}@${b.version}`;
+  const codeBundles = fitting.filter(b => bundleKind(b) !== 'deployment');
+  const starters = codeBundles.filter(b => bundleKind(b) === 'starter').map(value);
+  const deployRules = fitting.filter(b => bundleKind(b) === 'deployment').map(value);
+  const bundleValues = codeBundles.map(value);
   if (bundleValues.length) {
+    // Starters first (newest of each first), then the older full bundles.
+    const ordered = [
+      ...codeBundles.filter(b => bundleKind(b) === 'starter'),
+      ...codeBundles.filter(b => bundleKind(b) !== 'starter'),
+    ];
     choiceProperties.bundle = {
-      title: 'Template bundle',
-      description: 'Which bundle renders the code for the new service.',
+      title: 'Code: starter (or a full bundle)',
+      description: starters.length
+        ? 'The starter renders the code and Dockerfile; the deployment rules below render how it runs. A full bundle renders both.'
+        : 'Which bundle renders the code for the new service.',
       type: 'string',
-      enum: bundleValues,
-      default: bundleValues[bundleValues.length - 1],
+      enum: ordered.map(value),
+      enumNames: ordered.map(
+        b =>
+          `${b.name} ${b.version}${b.runtime ? ` (${b.runtime})` : ''}${
+            bundleKind(b) === 'full' ? ' (full bundle)' : ''
+          }`,
+      ),
+      default: starters.length ? starters[starters.length - 1] : bundleValues[bundleValues.length - 1],
       'ui:widget': 'radio',
     };
   }
-  // The bundles that render Kubernetes manifests, as the `bundle` parameter names them. Whether the chosen bundle
-  // is one of them is only known at run time, so the steps that need it test this list.
-  const deployable = fitting
-    .filter(b => b.deploy === DEPLOY_KUBERNETES)
-    .map(b => `${b.name}@${b.version}`);
+  if (starters.length && deployRules.length) {
+    choiceProperties.deployBundle = {
+      title: 'Deployment rules',
+      description:
+        'Render deploy/k8s for a starter: workloads, network policies from the architecture, hardening. Not used with a full bundle.',
+      type: 'string',
+      enum: deployRules,
+      default: deployRules[deployRules.length - 1],
+      'ui:widget': 'radio',
+    };
+  }
+  const isStarter = `(parameters.bundle in ${JSON.stringify(starters)})`;
+  // The bundles that render Kubernetes manifests, as the `bundle` parameter names them: full bundles that say so,
+  // and every starter when there are deployment rules. Whether the chosen bundle is one of them is only known at run
+  // time, so the steps that need it test this list.
+  const deployable = [
+    ...fitting
+      .filter(b => bundleKind(b) === 'full' && b.deploy === DEPLOY_KUBERNETES)
+      .map(value),
+    ...(deployRules.length ? starters : []),
+  ];
   const isDeployable = `(parameters.bundle in ${JSON.stringify(deployable)})`;
   if (deployable.length) {
     choiceProperties.deploy = {
@@ -455,6 +523,7 @@ export function templateEntity(
               p,
               deployable.length ? isDeployable : undefined,
               Boolean(opts.gitops),
+              starters.length && deployRules.length ? isStarter : undefined,
             )
           : []),
       ],
@@ -506,6 +575,7 @@ function publishSteps(
   p: HubDocument,
   isDeployable: string | undefined,
   gitops: boolean,
+  isStarter?: string,
 ): object[] {
   return [
     {
@@ -528,6 +598,22 @@ function publishSteps(
         outputDir: 'rendered',
       },
     },
+    ...(isStarter
+      ? [
+          {
+            // For a starter: the deployment rules render deploy/k8s from the same architecture.
+            id: 'template-deploy',
+            name: 'Render the deployment rules (calm template)',
+            if: `\${{ ${isStarter} }}`,
+            action: 'calm:template',
+            input: {
+              architecturePath: '${{ steps.fill.output.architecturePath }}',
+              bundle: '${{ parameters.deployBundle }}',
+              outputDir: 'rendered-deploy',
+            },
+          },
+        ]
+      : []),
     {
       id: 'publish',
       name: 'Publish to the local output folder',
@@ -540,6 +626,12 @@ function publishSteps(
         patternId: p.id,
         patternVersion: p.version,
         bundle: '${{ parameters.bundle }}',
+        ...(isStarter
+          ? {
+              deployBundle: `\${{ parameters.deployBundle if ${isStarter} else "" }}`,
+              deploySourceDir: `\${{ "rendered-deploy" if ${isStarter} else "" }}`,
+            }
+          : {}),
         // Set when calm:template pulled the bundle from the registry; empty for a local folder.
         bundleRef: '${{ steps.template.output.bundleRef }}',
         bundleDigest: '${{ steps.template.output.bundleDigest }}',

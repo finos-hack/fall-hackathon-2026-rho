@@ -1,0 +1,24 @@
+# {{title}}
+
+{{description}}
+
+Owner: **{{owner}}**. Started from the **node-service {{starterVersion}}** starter (Node 22, no dependencies).
+
+| File | What it is |
+|---|---|
+| `src/server.js` | The service: `GET /` (a page about itself), `/health`, `/api/info`, `/api/connections` |
+| `src/index.html` | The page |
+| `Dockerfile` | Builds the image (`node:22-alpine`, runs as a non-root user) |
+| `deploy/k8s/` | Rendered by the deployment rules, not by this starter |
+
+## Run it
+
+```sh
+PORT={{servicePort}} node src/server.js
+```
+
+## Provenance
+
+- Architecture: {{architectureId}}
+- Pattern: {{patternId}}
+- Starter: node-service {{starterVersion}}
