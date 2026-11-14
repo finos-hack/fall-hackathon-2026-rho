@@ -35,6 +35,7 @@ describe('readRegistryBundles', () => {
   it('gives one bundle per tag, with its reference, digest and config', async () => {
     const read = await readRegistryBundles(registry, fakeClient());
     expect(read.warnings).toEqual([]);
+    expect(read.unread).toEqual([]);
     expect(JSON.parse(JSON.stringify(read.bundles))).toEqual([
       {
         name: 'web-service',
@@ -74,6 +75,7 @@ describe('readRegistryBundles', () => {
     expect(read.warnings).toEqual([
       'bundle localhost:5050/calm-bundles/web-service:1.0.0 skipped: Error: Digest mismatch',
     ]);
+    expect(read.unread).toEqual([{ name: 'web-service', version: '1.0.0' }]);
   });
 
   it('throws when the registry cannot be listed', async () => {
@@ -124,6 +126,110 @@ describe('lastGoodRegistryReader', () => {
       }),
     );
     expect((await read()).bundles).toEqual([]);
+  });
+
+  it('keeps the last copy of a bundle that is still listed but cannot be read, and says so', async () => {
+    let broken = false;
+    const read = lastGoodRegistryReader(
+      registry,
+      fakeClient({
+        readBundleConfig: async ref => {
+          if (broken && ref.endsWith(':1.0.0')) {
+            throw new Error('read ECONNRESET');
+          }
+          return {
+            digest: `sha256:${broken ? 'new' : 'old'}-${ref.slice(-5)}`,
+            config: { description: `bundle at ${ref}`, pattern },
+          };
+        },
+      }),
+    );
+    const first = await read();
+    expect(first.warnings).toEqual([]);
+
+    broken = true;
+    const second = await read();
+    expect(second.failed).toBeUndefined();
+    expect(second.bundles.map(b => [b.version, b.digest])).toEqual([
+      ['1.0.0', 'sha256:old-1.0.0'],
+      ['2.0.0', 'sha256:new-2.0.0'],
+    ]);
+    expect(second.bundles[0]).toBe(first.bundles[0]);
+    expect(second.warnings).toEqual([
+      'bundle localhost:5050/calm-bundles/web-service:1.0.0 not read, keeping the copy from an earlier read: Error: read ECONNRESET',
+    ]);
+
+    // The kept copy is part of the last good read, so it survives a second failure too.
+    const third = await read();
+    expect(third.bundles).toEqual(second.bundles);
+    expect(third.warnings).toEqual(second.warnings);
+  });
+
+  it('drops a bundle whose tag the registry no longer lists', async () => {
+    let tags = ['1.0.0', '2.0.0'];
+    const read = lastGoodRegistryReader(
+      registry,
+      fakeClient({ listTags: async () => tags }),
+    );
+    expect((await read()).bundles.map(b => b.version)).toEqual([
+      '1.0.0',
+      '2.0.0',
+    ]);
+
+    tags = ['2.0.0'];
+    const second = await read();
+    expect(second.bundles.map(b => b.version)).toEqual(['2.0.0']);
+    expect(second.warnings).toEqual([]);
+  });
+
+  it('leaves out a bundle that cannot be read and was never read before', async () => {
+    const read = lastGoodRegistryReader(
+      registry,
+      fakeClient({
+        readBundleConfig: async ref => {
+          if (ref.endsWith(':1.0.0')) {
+            throw new Error('Digest mismatch');
+          }
+          return { digest: 'sha256:bbb', config: {} };
+        },
+      }),
+    );
+    const first = await read();
+    expect(first.failed).toBeUndefined();
+    expect(first.bundles.map(b => b.version)).toEqual(['2.0.0']);
+    expect(first.warnings).toEqual([
+      'bundle localhost:5050/calm-bundles/web-service:1.0.0 skipped: Error: Digest mismatch',
+    ]);
+  });
+
+  it('still gives the last good bundles, kept copies included, when the registry then cannot be listed', async () => {
+    let state: 'up' | 'one-unreadable' | 'down' = 'up';
+    const read = lastGoodRegistryReader(
+      registry,
+      fakeClient({
+        listRepositories: async () => {
+          if (state === 'down') {
+            throw new Error('connect ECONNREFUSED');
+          }
+          return ['calm-bundles/web-service'];
+        },
+        readBundleConfig: async ref => {
+          if (state === 'one-unreadable' && ref.endsWith(':2.0.0')) {
+            throw new Error('read ECONNRESET');
+          }
+          return { digest: `sha256:${ref.slice(-5)}`, config: {} };
+        },
+      }),
+    );
+    const first = await read();
+    state = 'one-unreadable';
+    expect((await read()).bundles).toEqual(first.bundles);
+
+    state = 'down';
+    const third = await read();
+    expect(String(third.failed)).toMatch(/ECONNREFUSED/);
+    expect(third.warnings).toEqual([]);
+    expect(third.bundles).toEqual(first.bundles);
   });
 });
 
