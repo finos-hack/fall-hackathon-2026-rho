@@ -59,8 +59,8 @@ Two recordings walk through this:
 - [The full walkthrough](https://youtu.be/XhFmQQTT6-k) (135 s, YouTube): the whole flow, ending with a service
   deployed to the local cluster, its network policies on the card, its pods on the Kubernetes tab, and its
   architecture and deployment in CALM Hub's own UI.
-- [The first walkthrough](https://youtu.be/zQ1cLPv3Fmk) (78 s, YouTube; also `docs/demo/calm-backstage-demo.webm`):
-  the first part only, without the registry and the deployment.
+- [The first walkthrough](https://youtu.be/zQ1cLPv3Fmk) (78 s, YouTube): the first part only, without the
+  registry and the deployment.
 
 To record the full walkthrough again with the Hub, the cluster and Backstage running:
 `node docs/demo/record-demo.cjs <new-service-name>` (it prints where the `.webm` is).
