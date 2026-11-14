@@ -239,6 +239,14 @@ export async function createRouter(options: {
       );
     }
 
+    // The cluster read (a kubectl call, up to its timeout) runs while the architecture and the recorded deployments
+    // are read. Both undefined for an entity without the Kubernetes annotations.
+    const deploymentRead = readDeployment(
+      entity,
+      options.kubernetes,
+      logger.child({ task: 'deployment' }),
+    );
+
     // The Hub first, when the entity names a Hub architecture. A service registered in the Hub keeps its file,
     // which is read when the Hub does not give the document.
     let fromTheHub: Awaited<ReturnType<typeof hubArchitecture>>;
@@ -257,13 +265,16 @@ export async function createRouter(options: {
       );
     }
     const fromFile = fromTheHub ? undefined : await fileArchitecture(entity);
-
-    // Both undefined for an entity without the Kubernetes annotations.
-    const deployment = await readDeployment(
-      entity,
-      options.kubernetes,
-      logger.child({ task: 'deployment' }),
-    );
+    const [deployment, deployments] = await Promise.all([
+      deploymentRead,
+      fromTheHub
+        ? readRecordedDeployments(
+            hub,
+            fromTheHub.ref,
+            logger.child({ task: 'hub-deployments' }),
+          )
+        : undefined,
+    ]);
     const body: ArchitectureResponse = {
       architecture: fromTheHub?.architecture ?? fromFile?.architecture,
       source: fromTheHub
@@ -278,15 +289,7 @@ export async function createRouter(options: {
           }
         : { type: 'file', path: fromFile!.path },
       ...(deployment ? { deployment } : {}),
-      ...(fromTheHub
-        ? {
-            deployments: await readRecordedDeployments(
-              hub,
-              fromTheHub.ref,
-              logger.child({ task: 'hub-deployments' }),
-            ),
-          }
-        : {}),
+      ...(deployments ? { deployments } : {}),
     };
     res.json(body);
   });
