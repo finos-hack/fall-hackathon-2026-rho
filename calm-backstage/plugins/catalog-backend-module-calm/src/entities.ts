@@ -203,7 +203,8 @@ export function bundlesFor(
     .sort((a, b) => compareVersions(a.version, b.version));
 }
 
-const RESERVED_PARAMETERS = new Set(['name', 'bundle']);
+/** The Template's own parameters (Service step `name`, Choices step `bundle`, Details step `placeholders`). */
+const RESERVED_PARAMETERS = new Set(['name', 'bundle', 'placeholders']);
 
 /** The parameter name for a decision: its relationship id, unless that clashes with a fixed field. */
 export function decisionParameter(d: PatternDecision): string {
