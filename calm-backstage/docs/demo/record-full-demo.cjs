@@ -94,6 +94,17 @@ const CHAPTERS = [
     await page.mouse.move(W / 2, H / 2);
     for (let i = 0; i < steps; i++) { await page.mouse.wheel(0, total / steps); await pause(70); }
   }
+  /** Scrolls a locator into view; tries again while the page re-renders it. */
+  async function scrollTo(locator) {
+    for (let i = 0; i < 5; i++) {
+      try {
+        await locator.scrollIntoViewIfNeeded({ timeout: 10000 });
+        return;
+      } catch {
+        await pause(700);
+      }
+    }
+  }
   const svgIn = () => page.locator('[data-testid="calm-mermaid"] svg').first().waitFor({ timeout: 60000 });
 
   /** Starts a Template run through the scaffolder API as the guest (for a service made while another one builds). */
@@ -129,7 +140,7 @@ const CHAPTERS = [
   /** On a service page: the app URL behind "Open the running app" (opened in this tab, so it stays in the video). */
   async function openApp() {
     const btn = page.getByTestId('calm-open-app');
-    await btn.scrollIntoViewIfNeeded();
+    await scrollTo(btn);
     await pause(1800);
     const href = await btn.getAttribute('href');
     await page.goto(href);
@@ -156,7 +167,7 @@ const CHAPTERS = [
   await caption('Two CALM patterns: a web service, and event streaming with Nisshi');
   await pause(3500);
   await go('/catalog/default/component/orders-service', svgIn);
-  await page.locator('[data-testid="calm-mermaid"]').first().scrollIntoViewIfNeeded();
+  await scrollTo(page.locator('[data-testid="calm-mermaid"]').first());
   await caption('An architecture page: its pattern, its controls and its diagram, live from CALM Hub');
   await pause(4500);
   await go('/catalog/default/resource/pattern-web-service', () => page.getByText('Template bundles that fit').waitFor({ timeout: 60000 }));
@@ -185,7 +196,7 @@ const CHAPTERS = [
   await page.getByRole('option', { name: '1.0.0' }).click();
   await page.getByTestId('calm-explorer-diff').getByText('k8s-deploy-transformer.js').first().waitFor({ timeout: 60000 });
   await caption('From 1.0.0 to 1.2.1: limits, liveness probes, no service-account tokens, Nisshi 0.8.2, one pod at a time for data');
-  await page.getByTestId('calm-explorer-diff').getByText('k8s-deploy-transformer.js').first().scrollIntoViewIfNeeded();
+  await scrollTo(page.getByTestId('calm-explorer-diff').getByText('k8s-deploy-transformer.js').first());
   await pause(5000);
   const source = await page.getByText(/calm-templates\/bundles at/).first().getAttribute('href');
   await page.goto(source);
@@ -204,7 +215,7 @@ const CHAPTERS = [
   await page.getByLabel('PostgreSQL').check(); await pause(700);
   await page.getByLabel(/^spring-boot-service 1\.0\.0/).check(); await pause(700);
   await page.getByLabel('k8s-deploy@1.0.0').check(); await pause(500);
-  await page.getByLabel('k8s-deploy@1.0.0').scrollIntoViewIfNeeded();
+  await scrollTo(page.getByLabel('k8s-deploy@1.0.0'));
   await caption('Choices: the data store, the starter (Spring Boot 4.0.9) and the deployment rules (1.0.0)');
   await pause(3500);
   await page.getByRole('button', { name: /^next$/i }).click();
@@ -231,7 +242,7 @@ const CHAPTERS = [
   await pause(4000);
   await page.getByText('Open the new service in the catalog').click();
   await svgIn();
-  await page.getByTestId('calm-versions').scrollIntoViewIfNeeded();
+  await scrollTo(page.getByTestId('calm-versions'));
   await caption('The service page: the bundles it was made with, its Git repository and the commit Flux applied');
   await pause(5000);
   await caption('Open the running app: Backstage reaches it through the cluster, no port-forward');
@@ -242,7 +253,7 @@ const CHAPTERS = [
   // ---- 4. Red Hat Quarkus
   await chapter(3);
   await go(`/catalog/default/component/${QUARKUS}`, svgIn);
-  await page.getByTestId('calm-versions').scrollIntoViewIfNeeded();
+  await scrollTo(page.getByTestId('calm-versions'));
   await caption(`${QUARKUS} was made with the same Template, with the Red Hat build of Quarkus starter`);
   await pause(4500);
   await openApp();
@@ -271,13 +282,13 @@ const CHAPTERS = [
   await pause(2000);
   await page.getByText('Open the new service in the catalog').click();
   await svgIn();
-  await page.locator('[data-testid="calm-mermaid"]').first().scrollIntoViewIfNeeded();
+  await scrollTo(page.locator('[data-testid="calm-mermaid"]').first());
   await caption('Its architecture: stream app → Nisshi broker → PostgreSQL, each with its network policies');
   await pause(4500);
   await openApp();
   await page.locator('#broker', { hasText: 'connected' }).waitFor({ timeout: 120000 });
   await caption('The app is connected to the broker: produce events and watch them come back');
-  await page.locator('#extra').scrollIntoViewIfNeeded();
+  await scrollTo(page.locator('#extra'));
   await pause(2000);
   for (const text of ['Order 1001 placed', 'Order 1002 paid', 'Order 1001 shipped']) {
     await page.locator('#text').fill(text);
@@ -311,7 +322,7 @@ const CHAPTERS = [
   // ---- 7. Upgrade
   await chapter(6);
   await go(`/catalog/default/component/${SPRING}`, svgIn);
-  await page.getByTestId('calm-versions').scrollIntoViewIfNeeded();
+  await scrollTo(page.getByTestId('calm-versions'));
   await caption('New versions fit the pattern: Spring Boot 4.1.2 and deployment rules 1.2.1');
   await pause(5000);
   await page.getByTestId('calm-versions').getByText('Upgrade').click();
@@ -338,7 +349,7 @@ const CHAPTERS = [
   await scrollBy(700);
   await pause(4000);
   await go(`/catalog/default/component/${SPRING}`, svgIn);
-  await page.getByTestId('calm-versions').scrollIntoViewIfNeeded();
+  await scrollTo(page.getByTestId('calm-versions'));
   await caption('The service is up to date, at the new commit');
   await pause(4000);
   await openApp();
