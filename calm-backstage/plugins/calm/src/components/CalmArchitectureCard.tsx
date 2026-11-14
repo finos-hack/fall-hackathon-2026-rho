@@ -4,6 +4,7 @@ import { EntityRefLink, useEntity } from '@backstage/plugin-catalog-react';
 import { stringifyEntityRef } from '@backstage/catalog-model';
 import {
   CALM_ANNOTATIONS as ANN,
+  RecordedDeployment,
   controlEntityName,
   parsePatternUrl,
   parseRequirementUrl,
@@ -32,9 +33,160 @@ function controlsOf(architecture: unknown) {
   return [...byRef.values()];
 }
 
+type Deployment = NonNullable<ArchitectureResponse['deployment']>;
+
+/** The network policies rendered from `connects` relationships, one entry per relationship, and the rest. */
+function policiesByRelationship(deployment: Deployment, architecture: any) {
+  const relationships: any[] = Array.isArray(architecture?.relationships)
+    ? architecture.relationships
+    : [];
+  const byRelationship = new Map<
+    string,
+    { relationship: string; protocol?: string; policies: string[] }
+  >();
+  const other: string[] = [];
+  for (const p of deployment.networkPolicies) {
+    if (!p.relationship) {
+      other.push(p.name);
+      continue;
+    }
+    const entry = byRelationship.get(p.relationship) ?? {
+      relationship: p.relationship,
+      protocol: p.protocol,
+      policies: [],
+    };
+    entry.policies.push(p.name);
+    byRelationship.set(p.relationship, entry);
+  }
+  return {
+    fromArchitecture: deployment.networkPolicies.length - other.length,
+    other,
+    relationships: [...byRelationship.values()].map(r => ({
+      ...r,
+      // The controls the architecture puts on this relationship (e.g. permitted-connection).
+      controls: controlsOf(
+        relationships.find(x => x?.['unique-id'] === r.relationship)?.controls,
+      ),
+    })),
+  };
+}
+
+/** Where a published service runs, and the network policies its architecture's relationships became. */
+function DeploymentSection(props: {
+  deployment: Deployment;
+  architecture: unknown;
+}) {
+  const { deployment } = props;
+  const policies = policiesByRelationship(deployment, props.architecture);
+  const ready = deployment.workloads.filter(w => w.ready).length;
+  return (
+    <Box mb={2} data-testid="calm-deployment">
+      <Typography variant="overline" display="block">
+        Deployment
+      </Typography>
+      <Typography variant="body2">
+        Deployed to{' '}
+        <strong>
+          {deployment.cluster} / {deployment.namespace}
+        </strong>
+        : {ready} of {deployment.workloads.length} workloads ready (
+        {deployment.workloads
+          .map(w => `${w.name}${w.ready ? '' : ' (not ready)'}`)
+          .join(', ')}
+        ).
+      </Typography>
+      <Typography variant="body2">
+        Network policies from the architecture: {policies.fromArchitecture} (
+        {policies.relationships.length} relationships).
+      </Typography>
+      <Box component="ul" mt={0.5} mb={0.5} pl={3}>
+        {policies.relationships.map(r => (
+          <Typography key={r.relationship} component="li" variant="body2">
+            <code>{r.relationship}</code>
+            {r.protocol ? ` (${r.protocol})` : ''}: {r.policies.join(', ')}
+            {r.controls.length ? ' · control ' : ' · no control on it'}
+            {r.controls.map((c, i) => (
+              <span key={c.ref}>
+                {i > 0 && ', '}
+                <EntityRefLink entityRef={c.ref} title={c.control} />
+              </span>
+            ))}
+          </Typography>
+        ))}
+      </Box>
+      {policies.other.length > 0 && (
+        <Typography variant="body2" color="textSecondary">
+          Also in the namespace: {policies.other.join(', ')}.
+        </Typography>
+      )}
+    </Box>
+  );
+}
+
+/** How many of the deployments recorded in the Hub the card lists. */
+const SHOWN_DEPLOYMENTS = 5;
+
+const dateTime = (iso?: string) =>
+  iso && !Number.isNaN(Date.parse(iso))
+    ? new Date(iso).toLocaleString()
+    : undefined;
+
+/** `32 s`, or `2 min 5 s`, between two ISO times. */
+function duration(start?: string, end?: string): string | undefined {
+  const ms = start && end ? Date.parse(end) - Date.parse(start) : NaN;
+  if (Number.isNaN(ms) || ms < 0) {
+    return undefined;
+  }
+  const seconds = Math.round(ms / 1000);
+  return seconds < 60
+    ? `${seconds} s`
+    : `${Math.floor(seconds / 60)} min ${seconds % 60} s`;
+}
+
+/** The deployments CALM Hub holds for this architecture version (deployment decorators), newest first. */
+function RecordedDeploymentsSection(props: {
+  deployments: RecordedDeployment[];
+}) {
+  const shown = props.deployments.slice(0, SHOWN_DEPLOYMENTS);
+  return (
+    <Box mb={2} data-testid="calm-recorded-deployments">
+      <Typography variant="overline" display="block">
+        Deployments recorded in CALM Hub
+      </Typography>
+      <Box component="ul" mt={0.5} mb={0.5} pl={3}>
+        {shown.map(d => {
+          const took = duration(d.startTime, d.endTime);
+          return (
+            <Typography key={d.id} component="li" variant="body2">
+              <strong>{d.status}</strong>
+              {dateTime(d.startTime) ? `, ${dateTime(d.startTime)}` : ''}
+              {took ? ` (${took})` : ''}
+              {d.appliesTo.length ? `: ${d.appliesTo.join(', ')}` : ''}
+              {d.notes ? ` · ${d.notes}` : ''}
+              {d.details && (
+                <>
+                  {' · '}
+                  <Link to={d.details}>details</Link>
+                </>
+              )}
+              {` · decorator ${d.id}`}
+            </Typography>
+          );
+        })}
+      </Box>
+      {props.deployments.length > shown.length && (
+        <Typography variant="body2" color="textSecondary">
+          The {shown.length} newest of {props.deployments.length}.
+        </Typography>
+      )}
+    </Box>
+  );
+}
+
 /**
  * The CALM architecture of an entity (a Hub architecture, or a service published from a pattern): pattern and version,
- * the controls it references, node and relationship counts, and a Mermaid diagram.
+ * the controls it references, node and relationship counts, a Mermaid diagram and, for a service deployed to the
+ * local cluster, where it runs, its network policies and the deployments recorded in CALM Hub.
  */
 export function CalmArchitectureCard() {
   const { entity } = useEntity();
@@ -66,7 +218,9 @@ export function CalmArchitectureCard() {
       subheader={
         value?.source.type === 'file'
           ? `From ${annotations[ANN.architectureFile] ?? 'architecture.json'}`
-          : 'From CALM Hub'
+          : `From CALM Hub${
+              value?.source.version ? `, version ${value.source.version}` : ''
+            }`
       }
     >
       {loading && <LinearProgress aria-label="Loading the architecture" />}
@@ -127,6 +281,15 @@ export function CalmArchitectureCard() {
               </Box>
             )}
           </Box>
+          {value.deployment && (
+            <DeploymentSection
+              deployment={value.deployment}
+              architecture={value.architecture}
+            />
+          )}
+          {value.deployments && value.deployments.length > 0 && (
+            <RecordedDeploymentsSection deployments={value.deployments} />
+          )}
           <MermaidDiagram
             source={diagram.source}
             title={`Architecture diagram of ${entity.metadata.name}`}

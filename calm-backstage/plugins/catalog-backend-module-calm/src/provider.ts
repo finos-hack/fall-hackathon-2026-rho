@@ -23,6 +23,8 @@ import {
   buildEntities,
   referencedRequirements,
 } from './entities';
+import type { BundleRegistrySettings } from '@internal/backstage-plugin-calm-node';
+import { lastGoodRegistryReader, mergeBundles } from './bundles';
 
 /**
  * Reads the control requirements the documents reference from the configured Hub, one per control: the highest
@@ -88,17 +90,25 @@ export async function readControls(
 export interface CalmProviderSettings {
   hubUrl: string;
   namespaces: string[];
+  /** Local bundle folders (authoring). */
   bundles: { name: string; version: string; path: string }[];
+  /** The OCI registry the bundles are read from. */
+  bundleRegistry?: BundleRegistrySettings;
 }
 
 /**
- * Emits CALM Hub architectures (Component), patterns, controls and template bundles (Resource), and one Template per
- * pattern. One full mutation per refresh; a failed Hub read keeps the entities of the last good refresh.
+ * Emits CALM Hub architectures (Component; not those stored for a published service), patterns, controls and template bundles (Resource), and one Template per
+ * pattern. One full mutation per refresh; a failed Hub read keeps the entities of the last good refresh. Bundles come
+ * from the OCI bundle registry and from local folders; a registry that is down gives a warning and the registry
+ * bundles of the last good read, not a failed refresh.
  */
 export class CalmEntityProvider implements EntityProvider {
   private connection?: EntityProviderConnection;
   private readonly client: CalmHubClient;
   private readonly location: string;
+  /** Registry bundles already reported as replaced by a local folder, so each is logged once. */
+  private readonly reportedReplaced = new Set<string>();
+  private readonly readRegistry?: ReturnType<typeof lastGoodRegistryReader>;
 
   constructor(
     private readonly settings: CalmProviderSettings,
@@ -107,6 +117,9 @@ export class CalmEntityProvider implements EntityProvider {
   ) {
     this.client = new CalmHubClient(settings.hubUrl);
     this.location = `calm-hub:${this.client.baseUrl}`;
+    this.readRegistry =
+      settings.bundleRegistry &&
+      lastGoodRegistryReader(settings.bundleRegistry);
   }
 
   getProviderName(): string {
@@ -134,7 +147,8 @@ export class CalmEntityProvider implements EntityProvider {
       return;
     }
     const snapshot = await this.read();
-    const { entities, warnings } = buildEntities(snapshot);
+    const { entities, warnings, serviceArchitectures } =
+      buildEntities(snapshot);
     warnings.forEach(w => this.logger.warn(`CALM catalog: ${w}`));
     await this.connection.applyMutation({
       type: 'full',
@@ -147,9 +161,11 @@ export class CalmEntityProvider implements EntityProvider {
         return { entity, locationKey: this.location };
       }),
     });
+    const left = serviceArchitectures.length
+      ? `; ${serviceArchitectures.length} architectures belong to published services and get no entity of their own`
+      : '';
     this.logger.info(
-      `CALM catalog: ${snapshot.patterns.length} patterns, ${snapshot.architectures.length} architectures, ` +
-        `${snapshot.controls.length} controls, ${snapshot.bundles.length} bundles, ${entities.length} entities`,
+      `CALM catalog: ${snapshot.patterns.length} patterns, ${snapshot.architectures.length} architectures, ${snapshot.controls.length} controls, ${snapshot.bundles.length} bundles, ${entities.length} entities${left}`,
     );
   }
 
@@ -207,7 +223,36 @@ export class CalmEntityProvider implements EntityProvider {
     };
   }
 
+  /** Local folders and registry bundles; a local folder wins over a registry bundle of the same name and version. */
   private async readBundles(): Promise<BundleInfo[]> {
+    const local = await this.readLocalBundles();
+    if (!this.readRegistry) {
+      return local;
+    }
+    // Like an unreachable Hub, a registry that cannot be read leaves the bundles of the last good read in place, so
+    // the bundle Resources and the Templates' publish steps do not disappear while it restarts.
+    const read = await this.readRegistry();
+    read.warnings.forEach(w => this.logger.warn(`CALM catalog: ${w}`));
+    if (read.failed) {
+      this.logger.warn(
+        `CALM catalog: bundle registry ${this.settings.bundleRegistry?.url} not read; keeping the ${read.bundles.length} registry bundles from the last read that worked: ${read.failed}`,
+      );
+    }
+    const fromRegistry = read.bundles;
+    const { bundles, replaced } = mergeBundles(local, fromRegistry);
+    const fresh = replaced.filter(k => !this.reportedReplaced.has(k));
+    if (fresh.length) {
+      fresh.forEach(k => this.reportedReplaced.add(k));
+      this.logger.info(
+        `CALM catalog: the local folder in calm.bundles is used instead of the registry bundle for ${fresh.join(
+          ', ',
+        )}`,
+      );
+    }
+    return bundles;
+  }
+
+  private async readLocalBundles(): Promise<BundleInfo[]> {
     const out: BundleInfo[] = [];
     for (const b of this.settings.bundles) {
       const dir = resolve(b.path);
@@ -220,6 +265,7 @@ export class CalmEntityProvider implements EntityProvider {
           version: b.version,
           path: dir,
           description: meta.description,
+          deploy: typeof meta.deploy === 'string' ? meta.deploy : undefined,
           pattern: meta.pattern,
         });
       } catch (e) {

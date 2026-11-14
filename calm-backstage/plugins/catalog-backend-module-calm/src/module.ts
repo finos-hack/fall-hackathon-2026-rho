@@ -6,6 +6,7 @@ import {
   catalogLocationsExtensionPoint,
   catalogProcessingExtensionPoint,
 } from '@backstage/plugin-catalog-node';
+import { readBundleRegistrySettings } from '@internal/backstage-plugin-calm-node';
 import { CalmEntityProvider } from './provider';
 
 export const catalogModuleCalm = createBackendModule({
@@ -44,6 +45,7 @@ export const catalogModuleCalm = createBackendModule({
                   path: b.getString('path'),
                 }),
               ),
+              bundleRegistry: readBundleRegistrySettings(config),
             },
             scheduler.createScheduledTaskRunner({
               frequency: { seconds },

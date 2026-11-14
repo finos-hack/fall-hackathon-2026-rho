@@ -22,6 +22,8 @@ import {
   CalmHubError,
   PatternDecision,
   Placeholder,
+  RecordedDeployment,
+  architectureVersionPath,
   compareVersions,
   latestVersion,
   readPatternDecisions,
@@ -30,9 +32,12 @@ import {
 } from '@internal/backstage-plugin-calm-common';
 import {
   CalmCliError,
+  KubernetesDeploySettings,
   generateArchitecture,
   normaliseChoices,
 } from '@internal/backstage-plugin-calm-node';
+import { DeploymentInfo, readDeployment } from './deployment';
+import { readRecordedDeployments } from './hubDeployments';
 
 /**
  * Body of `POST /placeholders`.
@@ -56,8 +61,23 @@ export interface PlaceholdersResponse {
 /** Response of `GET /architecture?entityRef=`. */
 export interface ArchitectureResponse {
   architecture: unknown;
-  /** Where the document came from: CALM Hub, or the published service's file (relative to the publish folder). */
-  source: { type: 'hub'; url: string } | { type: 'file'; path: string };
+  /**
+   * Where the document came from: CALM Hub (preferred when the entity has the Hub annotations), or the published
+   * service's file (relative to the publish folder).
+   */
+  source:
+    | { type: 'hub'; url: string; version: string }
+    | { type: 'file'; path: string };
+  /**
+   * For a published service with the Kubernetes annotations: what it has running in the cluster of
+   * `calm.deploy.kubernetes`. Absent when it is not deployed or the cluster could not be read.
+   */
+  deployment?: DeploymentInfo;
+  /**
+   * For an entity with the Hub annotations: the deployments CALM Hub holds for that architecture version (its
+   * deployment decorators), newest first. Empty when none is recorded or the Hub could not be read.
+   */
+  deployments?: RecordedDeployment[];
 }
 
 /** Response of `GET /pattern?entityRef=`. */
@@ -94,6 +114,8 @@ export async function createRouter(options: {
   httpAuth: HttpAuthService;
   /** Absolute path of `calm.publish.localDir`: published architecture files are read only from inside it. */
   localDir: string;
+  /** `calm.deploy.kubernetes`: the cluster a published service's deployment is read from. */
+  kubernetes?: KubernetesDeploySettings;
 }): Promise<express.Router> {
   const { logger, catalog, httpAuth, localDir } = options;
   const hub = new CalmHubClient(options.hubUrl);
@@ -134,88 +156,142 @@ export async function createRouter(options: {
     }
   }
 
+  /** The architecture version the Hub annotations name, or undefined without them. */
+  async function hubArchitecture(entity: Entity): Promise<
+    | {
+        architecture: unknown;
+        ref: { namespace: string; architecture: string; version: string };
+      }
+    | undefined
+  > {
+    const a = entity.metadata.annotations ?? {};
+    const id = a[ANN.architecture];
+    if (!id) {
+      return undefined;
+    }
+    // Coordinates from the annotations; the Hub is always the configured one (entity annotations are data).
+    const namespace = a[ANN.architectureNamespace] ?? a[ANN.namespace];
+    if (!namespace) {
+      throw new InputError(
+        `${stringifyEntityRef(entity)} has ${ANN.architecture} but no ${
+          ANN.namespace
+        }`,
+      );
+    }
+    const version =
+      a[ANN.architectureVersion] ??
+      latestVersion(
+        await fromHub(() => hub.architectureVersions(namespace, id)),
+      );
+    if (!version) {
+      throw new NotFoundError(
+        `Architecture ${namespace}/${id} has no versions`,
+      );
+    }
+    return {
+      architecture: await fromHub(() =>
+        hub.architecture(namespace, id, version),
+      ),
+      ref: { namespace, architecture: id, version },
+    };
+  }
+
+  /** The architecture file of a service published from a pattern: next to the catalog-info.yaml the catalog read. */
+  async function fileArchitecture(
+    entity: Entity,
+  ): Promise<{ architecture: unknown; path: string }> {
+    const a = entity.metadata.annotations ?? {};
+    const location = a['backstage.io/managed-by-location'] ?? '';
+    if (!location.startsWith('file:')) {
+      throw new NotAllowedError(
+        `${stringifyEntityRef(entity)} does not come from a file location`,
+      );
+    }
+    const file = path.resolve(
+      path.dirname(location.slice('file:'.length)),
+      a[ANN.architectureFile],
+    );
+    // Throws NotAllowedError for a file outside calm.publish.localDir.
+    const safe = resolveSafeChildPath(localDir, path.relative(localDir, file));
+    try {
+      return {
+        architecture: JSON.parse(await fs.readFile(safe, 'utf-8')),
+        path: path.relative(localDir, safe),
+      };
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code === 'ENOENT') {
+        throw new NotFoundError(`No architecture file at ${safe}`);
+      }
+      throw new InputError(
+        `Cannot read the architecture file ${safe}: ${(e as Error).message}`,
+      );
+    }
+  }
+
   router.get('/architecture', async (req, res) => {
     const entity = await entityFrom(req);
     const a = entity.metadata.annotations ?? {};
-
-    if (a[ANN.architecture]) {
-      // Coordinates from the annotations; the Hub is always the configured one (entity annotations are data).
-      const namespace = a[ANN.namespace];
-      const id = a[ANN.architecture];
-      if (!namespace) {
-        throw new InputError(
-          `${stringifyEntityRef(entity)} has ${ANN.architecture} but no ${
-            ANN.namespace
-          }`,
-        );
-      }
-      const version =
-        a[ANN.architectureVersion] ??
-        latestVersion(
-          await fromHub(() => hub.architectureVersions(namespace, id)),
-        );
-      if (!version) {
-        throw new NotFoundError(
-          `Architecture ${namespace}/${id} has no versions`,
-        );
-      }
-      const architecture = await fromHub(() =>
-        hub.architecture(namespace, id, version),
+    if (!a[ANN.architecture] && !a[ANN.architectureFile]) {
+      throw new NotFoundError(
+        `${stringifyEntityRef(entity)} has neither ${ANN.architecture} nor ${
+          ANN.architectureFile
+        }`,
       );
-      const body: ArchitectureResponse = {
-        architecture,
-        source: {
-          type: 'hub',
-          url: `${hub.baseUrl}/calm/namespaces/${enc(
-            namespace,
-          )}/architectures/${enc(id)}/versions/${enc(version)}`,
-        },
-      };
-      res.json(body);
-      return;
     }
 
-    if (a[ANN.architectureFile]) {
-      // A service published from a pattern: the file sits next to the catalog-info.yaml the catalog read.
-      const location = a['backstage.io/managed-by-location'] ?? '';
-      if (!location.startsWith('file:')) {
-        throw new NotAllowedError(
-          `${stringifyEntityRef(entity)} does not come from a file location`,
-        );
-      }
-      const file = path.resolve(
-        path.dirname(location.slice('file:'.length)),
-        a[ANN.architectureFile],
-      );
-      // Throws NotAllowedError for a file outside calm.publish.localDir.
-      const safe = resolveSafeChildPath(
-        localDir,
-        path.relative(localDir, file),
-      );
-      let architecture: unknown;
-      try {
-        architecture = JSON.parse(await fs.readFile(safe, 'utf-8'));
-      } catch (e) {
-        if ((e as NodeJS.ErrnoException).code === 'ENOENT') {
-          throw new NotFoundError(`No architecture file at ${safe}`);
-        }
-        throw new InputError(
-          `Cannot read the architecture file ${safe}: ${(e as Error).message}`,
-        );
-      }
-      const body: ArchitectureResponse = {
-        architecture,
-        source: { type: 'file', path: path.relative(localDir, safe) },
-      };
-      res.json(body);
-      return;
-    }
-
-    throw new NotFoundError(
-      `${stringifyEntityRef(entity)} has neither ${ANN.architecture} nor ${
-        ANN.architectureFile
-      }`,
+    // The cluster read (a kubectl call, up to its timeout) runs while the architecture and the recorded deployments
+    // are read. Both undefined for an entity without the Kubernetes annotations.
+    const deploymentRead = readDeployment(
+      entity,
+      options.kubernetes,
+      logger.child({ task: 'deployment' }),
     );
+
+    // The Hub first, when the entity names a Hub architecture. A service registered in the Hub keeps its file,
+    // which is read when the Hub does not give the document.
+    let fromTheHub: Awaited<ReturnType<typeof hubArchitecture>>;
+    try {
+      fromTheHub = await hubArchitecture(entity);
+    } catch (e) {
+      if (!a[ANN.architectureFile]) {
+        throw e;
+      }
+      logger.warn(
+        `${stringifyEntityRef(entity)}: reading ${
+          a[ANN.architectureFile]
+        } because CALM Hub did not give the architecture: ${
+          (e as Error).message ?? e
+        }`,
+      );
+    }
+    const fromFile = fromTheHub ? undefined : await fileArchitecture(entity);
+    const [deployment, deployments] = await Promise.all([
+      deploymentRead,
+      fromTheHub
+        ? readRecordedDeployments(
+            hub,
+            fromTheHub.ref,
+            logger.child({ task: 'hub-deployments' }),
+          )
+        : undefined,
+    ]);
+    const body: ArchitectureResponse = {
+      architecture: fromTheHub?.architecture ?? fromFile?.architecture,
+      source: fromTheHub
+        ? {
+            type: 'hub',
+            url: `${hub.baseUrl}${architectureVersionPath(
+              fromTheHub.ref.namespace,
+              fromTheHub.ref.architecture,
+              fromTheHub.ref.version,
+            )}`,
+            version: fromTheHub.ref.version,
+          }
+        : { type: 'file', path: fromFile!.path },
+      ...(deployment ? { deployment } : {}),
+      ...(deployments ? { deployments } : {}),
+    };
+    res.json(body);
   });
 
   router.get('/pattern', async (req, res) => {

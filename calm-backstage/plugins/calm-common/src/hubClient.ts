@@ -1,5 +1,5 @@
 /*
- * A read-only CALM Hub client. Modelled on `calm-plugins/vscode/src/extension/services/hub-client.ts` in
+ * A read-only CALM Hub client (the calls that write are in `hubWriteClient.ts`). Modelled on `calm-plugins/vscode/src/extension/services/hub-client.ts` in
  * https://github.com/finos/architecture-as-code (no auth here: the hackathon Hub runs the `no-auth` profile).
  *
  * Documents are read through the name-based `/calm/...` API because it returns each document's `$id` (the numeric
@@ -44,6 +44,43 @@ export interface CalmHubConfigurationSummary {
   name: string;
 }
 
+/**
+ * A decorator as the Hub returns it: the top-level names in camel case (`uniqueId`, `targetType`, `appliesTo`),
+ * although they are posted in kebab case; `data` comes back as posted.
+ */
+export interface CalmHubDecorator {
+  /** The Hub's numeric id, when the decorator was read by id. */
+  id?: number;
+  schema?: string;
+  uniqueId: string;
+  type: string;
+  target: string[];
+  targetType: string[];
+  appliesTo: string[];
+  data: Record<string, any>;
+}
+
+const strings = (v: unknown): string[] =>
+  Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [];
+
+/** Reads a decorator in the Hub's shape (camel case) or the posted shape (kebab case). */
+export function normaliseDecorator(raw: any, id?: number): CalmHubDecorator {
+  const schema = raw?.schema ?? raw?.$schema;
+  return {
+    ...(id !== undefined ? { id } : {}),
+    ...(typeof schema === 'string' ? { schema } : {}),
+    uniqueId: String(raw?.uniqueId ?? raw?.['unique-id'] ?? ''),
+    type: String(raw?.type ?? ''),
+    target: strings(raw?.target),
+    targetType: strings(raw?.targetType ?? raw?.['target-type']),
+    appliesTo: strings(raw?.appliesTo ?? raw?.['applies-to']),
+    data:
+      raw?.data && typeof raw.data === 'object' && !Array.isArray(raw.data)
+        ? raw.data
+        : {},
+  };
+}
+
 export interface CalmHubImplementation {
   architectureId?: number;
   customId: string;
@@ -84,7 +121,7 @@ export function latestVersion(versions: string[]): string | undefined {
 
 export class CalmHubClient {
   readonly baseUrl: string;
-  private readonly fetchImpl?: FetchLike;
+  protected readonly fetchImpl?: FetchLike;
 
   constructor(baseUrl: string, fetchImpl?: FetchLike) {
     this.baseUrl = baseUrl.replace(/\/+$/, '');
@@ -185,6 +222,37 @@ export class CalmHubClient {
       `/calm/namespaces/${enc(namespace)}/architectures/${enc(
         id,
       )}/versions/${enc(version)}`,
+    );
+  }
+
+  // Decorators
+
+  /**
+   * Ids of the decorators in a namespace. `target` is matched exactly against an entry of the decorator's `target`
+   * list and must match `^[A-Za-z0-9_/.-]+$` (the Hub answers 400 otherwise), so a full URL cannot be a filter.
+   */
+  async listDecorators(
+    namespace: string,
+    filter: { target?: string; type?: string } = {},
+  ): Promise<number[]> {
+    const query = [
+      ...(filter.target ? [`target=${enc(filter.target)}`] : []),
+      ...(filter.type ? [`type=${enc(filter.type)}`] : []),
+    ].join('&');
+    const ids = await this.values<unknown>(
+      `/api/calm/namespaces/${enc(namespace)}/decorators${
+        query ? `?${query}` : ''
+      }`,
+    );
+    return ids.filter((id): id is number => typeof id === 'number');
+  }
+
+  async getDecorator(namespace: string, id: number): Promise<CalmHubDecorator> {
+    return normaliseDecorator(
+      await this.get(
+        `/api/calm/namespaces/${enc(namespace)}/decorators/${enc(String(id))}`,
+      ),
+      id,
     );
   }
 

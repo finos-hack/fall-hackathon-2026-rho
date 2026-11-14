@@ -1,12 +1,14 @@
-// Records docs/demo/calm-backstage-demo.webm: catalog, architecture page, catalog graph, pattern page, then creates
-// a service from the pattern and opens its page.
+// Records the demo video: catalog, a template bundle from the OCI registry, architecture page, catalog graph and
+// pattern page, then creates a service from the pattern with bundle 3.0.0, deploys it to the local Kubernetes
+// cluster and opens its page and Kubernetes tab.
 //
-// Needs the Hub (yarn hub:up && yarn hub:seed) and Backstage (yarn start) running. Creates output/<service-name>,
+// Needs the Hub and bundle registry (yarn hub:up && yarn hub:seed), the cluster (yarn k8s:up) and Backstage
+// (yarn start) running. Creates output/<service-name>,
 // so pick a name that is not there yet.
 //
-//   node docs/demo/record-demo.cjs [service-name] [base-url]
+//   node docs/demo/record-demo.cjs [service-name] [base-url] [hub-url]
 //
-// Defaults: inventory-api, http://localhost:3100. Prints the path of the recorded .webm (in a temp folder).
+// Defaults: inventory-api, http://localhost:3100, http://localhost:8090. Prints the path of the recorded .webm (in a temp folder).
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -15,6 +17,7 @@ const { chromium } = createRequire(path.resolve(__dirname, '../../package.json')
 const S = fs.mkdtempSync(path.join(os.tmpdir(), 'calm-demo-'));
 const NAME = process.argv[2] || 'inventory-api';
 const BASE = process.argv[3] || 'http://localhost:3100';
+const HUB = process.argv[4] || 'http://localhost:8090';
 const W = 1440, H = 900;
 
 (async () => {
@@ -74,6 +77,9 @@ const W = 1440, H = 900;
     () => page.getByText(/pattern-web-service|Web Service/).first().waitFor({ timeout: 30000 }));
   await caption('Resources: the pattern, its controls and the template bundles');
   await pause(3500);
+  await go('/catalog/default/resource/bundle-web-service-3.0.0', () => page.getByText(/OCI bundle registry/).first().waitFor({ timeout: 30000 }));
+  await caption('Template bundles are stored in an OCI registry; 3.0.0 renders a runnable service for Kubernetes');
+  await pause(4000);
 
   // 3. Architecture page
   await go('/catalog/default/component/orders-service', svgIn);
@@ -82,6 +88,13 @@ const W = 1440, H = 900;
   await scrollToDiagram();
   await caption('The CALM architecture card: pattern, controls and a Mermaid diagram');
   await pause(4000);
+
+  // The same architecture in CALM Hub's own UI
+  await page.goto(`${HUB}/#/hackathon/architectures/orders-service/1.0.0`);
+  await page.getByText('Deployments').first().waitFor({ timeout: 30000 });
+  await pause(2500);
+  await caption('The same architecture in CALM Hub: Backstage reads it from here');
+  await pause(4500);
 
   // 4. Catalog graph
   await go('/catalog-graph?rootEntityRefs%5B%5D=component%3Adefault%2Forders-service&maxDepth=3&selectedRelations%5B%5D=dependsOn&selectedKinds%5B%5D=component&selectedKinds%5B%5D=resource&unidirectional=true&mergeRelations=true&direction=LR&showFilters=false',
@@ -113,7 +126,10 @@ const W = 1440, H = 900;
   await page.getByLabel('MongoDB').check(); await pause(900);
   await page.getByLabel('Message queue (RabbitMQ)').check(); await pause(900);
   await page.getByLabel('Observability (OpenTelemetry)').check(); await pause(900);
-  await page.getByLabel('web-service@2.0.0').check(); await pause(1500);
+  await page.getByLabel('web-service@3.0.0').check(); await pause(1200);
+  await page.getByLabel('Deploy to the local Kubernetes cluster').scrollIntoViewIfNeeded();
+  await caption('Bundle 3.0.0 can be deployed: the service goes to the local Kubernetes cluster');
+  await pause(2500);
   await page.getByRole('button', { name: /^next$/i }).click();
 
   const summary = page.getByTestId('calm-placeholders-summary');
@@ -141,18 +157,42 @@ const W = 1440, H = 900;
 
   // 7. Task run
   await page.waitForURL(/\/tasks\//);
-  await caption('The run: generate → fill → validate → template → publish → register');
-  await page.getByText('Open the new service in the catalog').waitFor({ timeout: 180000 });
-  await pause(3500);
+  await caption('The run: generate → validate → record in CALM Hub → render the bundle → build the image → deploy');
+  await page.getByText('Open the new service in the catalog').waitFor({ timeout: 420000 });
+  await caption('Done: rendered from the registry bundle, deployed, and recorded in CALM Hub');
+  await pause(2000);
+  await scrollBy(500);
+  await pause(4000);
 
   // 8. New service page
   await page.getByText('Open the new service in the catalog').click();
   await svgIn();
-  await caption(`The new service ${NAME} in the catalog, with its own architecture diagram`);
+  await caption(`The new service ${NAME} in the catalog`);
   await pause(2500);
+  await page.getByText(/Deployed to/).first().scrollIntoViewIfNeeded();
+  await caption('Where it runs, and the network policies rendered from the architecture\'s connections');
+  await pause(5000);
   await scrollToDiagram();
+  await caption('Its architecture, read from CALM Hub');
+  await pause(3500);
+  await page.locator('a, button, [role="tab"]').filter({ hasText: /^Kubernetes$/ }).first().click();
+  await page.getByText(/No pods with errors|pods? with errors/).first().waitFor({ timeout: 60000 });
+  await caption('Kubernetes tab: the pods of the service and its dependencies, live from the cluster');
   await pause(4500);
-  await caption('CALM pattern → Backstage service, end to end');
+  await scrollBy(500);
+  await pause(3000);
+
+  // Back in CALM Hub: the new architecture and its deployment
+  await page.goto(`${HUB}/#/hackathon/architectures/${NAME}/1.0.0`);
+  await page.getByText('Deployments').first().waitFor({ timeout: 30000 });
+  await pause(2500);
+  await caption(`CALM Hub now holds ${NAME}: Backstage stored the architecture it generated`);
+  await pause(5000);
+  await page.getByText('Deployments').first().click();
+  await pause(2000);
+  await caption('And the deployment Backstage recorded on it, as a CALM deployment decorator');
+  await pause(6000);
+  await caption('CALM pattern → running service, end to end');
   await pause(2500);
 
   const video = page.video();

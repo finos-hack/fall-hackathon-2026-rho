@@ -1,6 +1,6 @@
 {
   "name": "@internal/backstage-plugin-scaffolder-backend-module-calm",
-  "description": "The calm backend module for the scaffolder plugin: calm:generate, calm:fill, calm:validate, calm:template (published @finos/calm-cli), calm:publish:local and calm:register:local.",
+  "description": "The calm backend module for the scaffolder plugin: calm:generate, calm:fill, calm:validate, calm:template (published @finos/calm-cli), calm:publish:local, calm:register:local, calm:image:build and calm:deploy:k8s (local Kubernetes), calm:register:hub and calm:decorate:deployment (CALM Hub).",
   "version": "0.1.0",
   "license": "UNLICENSED",
   "private": true,

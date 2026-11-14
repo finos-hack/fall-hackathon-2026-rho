@@ -16,6 +16,7 @@ import {
   patternEntityName,
   readPatternDecisions,
   requirementUrls,
+  serviceEntityOf,
   templateEntityName,
 } from '@internal/backstage-plugin-calm-common';
 
@@ -36,12 +37,22 @@ export interface ControlDocument {
   doc: any;
 }
 
-/** A bundle from config plus its calm-backstage.json. */
+/**
+ * A template bundle and its calm-backstage.json: from the OCI bundle registry (`ref` and `digest`) or from a local
+ * folder in `calm.bundles` (`path`).
+ */
 export interface BundleInfo {
   name: string;
   version: string;
-  path: string;
+  /** Absolute path of a local bundle folder. */
+  path?: string;
+  /** OCI reference of a registry bundle, e.g. `localhost:5050/calm-bundles/web-service:2.0.0`. */
+  ref?: string;
+  /** Digest of the registry bundle's manifest (`sha256:…`). */
+  digest?: string;
   description?: string;
+  /** Where the rendered service can be deployed (`deploy` in calm-backstage.json): `kubernetes`, or nothing. */
+  deploy?: string;
   pattern?: {
     namespace?: string;
     patternId?: string;
@@ -174,11 +185,14 @@ function bundleEntity(b: BundleInfo, hubUrl: string): Entity {
     metadata: {
       name: bundleEntityName(b.name, b.version),
       title: `${b.name} ${b.version}`,
-      description:
-        b.description ?? `CALM template bundle ${b.name} ${b.version}`,
+      description: `${
+        b.description ?? `CALM template bundle ${b.name} ${b.version}`
+      }${b.ref ? `\n\nStored in the OCI bundle registry as ${b.ref}.` : ''}`,
       annotations: {
         [ANN.bundle]: b.name,
         [ANN.bundleVersion]: b.version,
+        ...(b.ref ? { [ANN.bundleRef]: b.ref } : {}),
+        ...(b.digest ? { [ANN.bundleDigest]: b.digest } : {}),
         [ANN.hubUrl]: hubUrl,
         ...(p?.namespace ? { [ANN.namespace]: p.namespace } : {}),
         ...(p?.patternId ? { [ANN.pattern]: p.patternId } : {}),
@@ -210,10 +224,13 @@ export function bundlesFor(
     .sort((a, b) => compareVersions(a.version, b.version));
 }
 
+/** The `deploy` value of a bundle whose rendered service the Template can build and deploy to Kubernetes. */
+export const DEPLOY_KUBERNETES = 'kubernetes';
+
 /**
  * The parameter name for a decision: its relationship id under a `choice-` prefix. The Template's own parameters
- * (`name`, `bundle`, `placeholders`) never start with `choice-`, and distinct relationship ids give distinct names, so
- * no decision can overwrite a fixed field or another decision.
+ * (`name`, `bundle`, `deploy`, `placeholders`) never start with `choice-`, and distinct relationship ids give distinct
+ * names, so no decision can overwrite a fixed field or another decision.
  */
 export function decisionParameter(d: PatternDecision): string {
   return `choice-${d.relationshipId}`;
@@ -234,6 +251,38 @@ function decisionProperty(d: PatternDecision): object {
     'ui:widget': 'checkboxes',
   };
 }
+
+/**
+ * The output text about the deployment. The build and deploy steps are skipped for a bundle that renders nothing to
+ * deploy and when the box is not ticked; a skipped step has no output, so each line is one expression that tests it.
+ */
+const DEPLOYED_TEXT = {
+  title: 'Local Kubernetes cluster',
+  content: [
+    '${{ ("Deployed to the namespace `" + steps.deploy.output.namespace + "` as the image `" + steps.build.output.image + "`: " + (steps.deploy.output.deployments | length) + " deployments (" + (steps.deploy.output.deployments | join(", ")) + ") and " + (steps.deploy.output.networkPolicies | length) + " network policies.") if steps.deploy.output.namespace else "Not deployed: the build and deploy steps run only when the box is ticked and the bundle renders Kubernetes manifests." }}',
+    '',
+    '${{ ("Pods: `" + steps.deploy.output.kubectl + " get pods`") if steps.deploy.output.namespace else "" }}',
+    '',
+    '${{ ("Reach a service (" + (steps.deploy.output.services | join(", ")) + "): `" + steps.deploy.output.kubectl + " port-forward svc/<service> 8080:<port>`") if steps.deploy.output.namespace else "" }}',
+  ].join('\n'),
+};
+
+/**
+ * The output text about CALM Hub: the architecture version and, in a Template that can deploy, the deployment
+ * decorator when one was posted.
+ */
+const hubText = (canDeploy: boolean) => ({
+  title: 'CALM Hub',
+  content: [
+    'Architecture: `${{ steps["register-hub"].output.namespace }}/${{ steps["register-hub"].output.architecture }}` version ${{ steps["register-hub"].output.version }}, at ${{ steps["register-hub"].output.url }} (the `$id` of the published `architecture.json`).',
+    ...(canDeploy
+      ? [
+          '',
+          '${{ ("Deployment recorded as the decorator " + steps.decorate.output.id + " (`" + steps.decorate.output.uniqueId + "`): " + steps.decorate.output.url) if steps.decorate.output.id else "No deployment recorded: nothing was deployed." }}',
+        ]
+      : []),
+  ].join('\n'),
+});
 
 export function templateEntity(
   p: HubDocument,
@@ -261,6 +310,22 @@ export function templateEntity(
       enum: bundleValues,
       default: bundleValues[bundleValues.length - 1],
       'ui:widget': 'radio',
+    };
+  }
+  // The bundles that render Kubernetes manifests, as the `bundle` parameter names them. Whether the chosen bundle
+  // is one of them is only known at run time, so the steps that need it test this list.
+  const deployable = fitting
+    .filter(b => b.deploy === DEPLOY_KUBERNETES)
+    .map(b => `${b.name}@${b.version}`);
+  const isDeployable = `(parameters.bundle in ${JSON.stringify(deployable)})`;
+  if (deployable.length) {
+    choiceProperties.deploy = {
+      title: 'Deploy to the local Kubernetes cluster',
+      description: `Builds the service's image and deploys it with its network policies (cluster from \`yarn k8s:up\`). Only for ${deployable.join(
+        ', ',
+      )}; other bundles render nothing to deploy.`,
+      type: 'boolean',
+      default: true,
     };
   }
   const required = [
@@ -300,8 +365,9 @@ export function templateEntity(
               title: 'Name',
               type: 'string',
               description:
-                'Name of the new service: lower-case letters, digits and hyphens. It names the output folder and the catalog Component.',
-              pattern: '^[a-z0-9]+(-[a-z0-9]+)*$',
+                'Name of the new service: it must start with a lower-case letter, followed by lower-case letters, digits and single hyphens (for example billing-api). It names the output folder, the catalog Component, the architecture in CALM Hub and the Kubernetes namespace.',
+              // A letter first: CALM Hub refuses other architecture names. Still a DNS label for the namespace.
+              pattern: '^[a-z][a-z0-9]*(-[a-z0-9]+)*$',
               maxLength: 63,
               'ui:autofocus': true,
             },
@@ -331,6 +397,18 @@ export function templateEntity(
         },
       ],
       steps: [
+        // First, so a run that will deploy stops before it stores anything in CALM Hub or publishes files.
+        ...(deployable.length
+          ? [
+              {
+                id: 'check-cluster',
+                name: 'Check the local Kubernetes cluster answers',
+                action: 'calm:cluster:check',
+                if: `\${{ parameters.deploy and ${isDeployable} }}`,
+                input: { name: '${{ parameters.name }}' },
+              },
+            ]
+          : []),
         {
           id: 'generate',
           name: 'Generate the architecture (calm generate)',
@@ -359,7 +437,9 @@ export function templateEntity(
             patternUrl: url,
           },
         },
-        ...(bundleValues.length ? publishSteps(p) : []),
+        ...(bundleValues.length
+          ? publishSteps(p, deployable.length ? isDeployable : undefined)
+          : []),
       ],
       output: bundleValues.length
         ? {
@@ -381,6 +461,8 @@ export function templateEntity(
                   'Architecture: **${{ steps.generate.output.nodeCount }} nodes**, **${{ steps.generate.output.relationshipCount }} relationships**, ${{ steps.fill.output.filledCount }} placeholders filled. `calm validate`: ${{ steps.validate.output.errorCount }} errors, ${{ steps.validate.output.warningCount }} warnings.',
                 ].join('\n'),
               },
+              ...(deployable.length ? [DEPLOYED_TEXT] : []),
+              hubText(deployable.length > 0),
             ],
           }
         : {
@@ -396,9 +478,24 @@ export function templateEntity(
   };
 }
 
-/** Render with the chosen bundle, publish to the local output folder and register the new service. */
-function publishSteps(p: HubDocument): object[] {
+/**
+ * Store the architecture in CALM Hub (which gives it its `$id`), render with the chosen bundle (pulled from the
+ * bundle registry, or a local folder), publish to the local output folder, then, for a bundle that renders
+ * Kubernetes manifests (`isDeployable`, an expression over the parameters) and with the `deploy` box ticked, build
+ * the image, deploy it and record the deployment in the Hub; last, register the new service.
+ */
+function publishSteps(p: HubDocument, isDeployable?: string): object[] {
   return [
+    {
+      // Before the render, so the rendered files and the published architecture.json carry the $id.
+      id: 'register-hub',
+      name: 'Store the architecture in CALM Hub',
+      action: 'calm:register:hub',
+      input: {
+        architecturePath: '${{ steps.fill.output.architecturePath }}',
+        name: '${{ parameters.name }}',
+      },
+    },
     {
       id: 'template',
       name: 'Render with the template bundle (calm template)',
@@ -421,8 +518,64 @@ function publishSteps(p: HubDocument): object[] {
         patternId: p.id,
         patternVersion: p.version,
         bundle: '${{ parameters.bundle }}',
+        // Set when calm:template pulled the bundle from the registry; empty for a local folder.
+        bundleRef: '${{ steps.template.output.bundleRef }}',
+        bundleDigest: '${{ steps.template.output.bundleDigest }}',
+        // The Hub annotations, next to architecture-file: the card reads the Hub and falls back to the file.
+        hubNamespace: '${{ steps["register-hub"].output.namespace }}',
+        hubArchitecture: '${{ steps["register-hub"].output.architecture }}',
+        hubArchitectureVersion: '${{ steps["register-hub"].output.version }}',
+        hubArchitectureUrl: '${{ steps["register-hub"].output.url }}',
+        // Adds the Kubernetes annotations to catalog-info.yaml, whether or not the service is then deployed.
+        ...(isDeployable ? { deployable: `\${{ ${isDeployable} }}` } : {}),
       },
     },
+    ...(isDeployable
+      ? [
+          {
+            id: 'build',
+            name: 'Build the image in the local cluster (minikube image build)',
+            if: `\${{ parameters.deploy and ${isDeployable} }}`,
+            action: 'calm:image:build',
+            input: {
+              dir: '${{ steps.publish.output.path }}',
+              name: '${{ parameters.name }}',
+              // Unique per run, so a rerun rolls out the new image.
+              tag: '${{ context.task.id }}',
+            },
+          },
+          {
+            id: 'deploy',
+            name: 'Deploy to the local Kubernetes cluster (kubectl apply)',
+            if: `\${{ parameters.deploy and ${isDeployable} }}`,
+            action: 'calm:deploy:k8s',
+            input: {
+              dir: '${{ steps.publish.output.path }}',
+              name: '${{ parameters.name }}',
+              image: '${{ steps.build.output.image }}',
+            },
+          },
+          {
+            id: 'decorate',
+            name: 'Record the deployment in CALM Hub (deployment decorator)',
+            if: `\${{ parameters.deploy and ${isDeployable} }}`,
+            action: 'calm:decorate:deployment',
+            input: {
+              hubNamespace: '${{ steps["register-hub"].output.namespace }}',
+              architecture: '${{ steps["register-hub"].output.architecture }}',
+              version: '${{ steps["register-hub"].output.version }}',
+              name: '${{ parameters.name }}',
+              cluster: '${{ steps.deploy.output.cluster }}',
+              namespace: '${{ steps.deploy.output.namespace }}',
+              workloads: '${{ steps.deploy.output.deployments }}',
+              architecturePath: '${{ steps.fill.output.architecturePath }}',
+              startTime: '${{ steps.deploy.output.startTime }}',
+              endTime: '${{ steps.deploy.output.endTime }}',
+              status: 'completed',
+            },
+          },
+        ]
+      : []),
     {
       id: 'register',
       name: 'Register the new service in the catalog',
@@ -461,10 +614,16 @@ function choicesInput(
   return out;
 }
 
-/** All entities for one snapshot. Later duplicates of an entity name are dropped and reported. */
+/**
+ * All entities for one snapshot. Later duplicates of an entity name are dropped and reported. A Hub architecture
+ * that `calm:register:hub` stored for a service (its metadata names the service's entity) gets no Component here:
+ * the service's own `catalog-info.yaml` is its one entity, and it points at the Hub architecture.
+ */
 export function buildEntities(s: CalmSnapshot): {
   entities: Entity[];
   warnings: string[];
+  /** Hub architectures left out because they belong to a published service. */
+  serviceArchitectures: string[];
 } {
   const warnings: string[] = [];
   const out = new Map<string, Entity>();
@@ -484,7 +643,12 @@ export function buildEntities(s: CalmSnapshot): {
     add(patternEntity(p, s.hubUrl, emittedControls));
     add(templateEntity(p, s.bundles, s.hubUrl));
   }
+  const serviceArchitectures: string[] = [];
   for (const a of s.architectures) {
+    if (serviceEntityOf(a.doc)) {
+      serviceArchitectures.push(`${a.namespace}/${a.id}`);
+      continue;
+    }
     add(architectureEntity(a, s.hubUrl));
   }
   for (const c of s.controls) {
@@ -493,7 +657,7 @@ export function buildEntities(s: CalmSnapshot): {
   for (const b of s.bundles) {
     add(bundleEntity(b, s.hubUrl));
   }
-  return { entities: [...out.values()], warnings };
+  return { entities: [...out.values()], warnings, serviceArchitectures };
 }
 
 export interface RequirementRef {

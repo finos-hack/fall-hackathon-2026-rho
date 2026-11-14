@@ -10,7 +10,10 @@ import type { CatalogService } from '@backstage/plugin-catalog-node';
 import { createTemplateAction } from '@backstage/plugin-scaffolder-node';
 import {
   CALM_ANNOTATIONS as ANN,
+  KUBERNETES_ANNOTATIONS as K8S,
   bundleEntityName,
+  deployNamespace,
+  isDnsLabel,
   parseBundleValue,
   patternEntityName,
 } from '@internal/backstage-plugin-calm-common';
@@ -34,6 +37,24 @@ export function serviceEntity(opts: {
   patternVersion: string;
   bundleName: string;
   bundleVersion: string;
+  /** OCI reference and manifest digest of the bundle, when it was pulled from the bundle registry. */
+  bundleRef?: string;
+  bundleDigest?: string;
+  /**
+   * Where the service's Kubernetes objects are, for a bundle that renders them: the value of their
+   * `backstage.io/kubernetes-id` label, and their namespace. The Kubernetes tab reads both.
+   */
+  kubernetes?: { id: string; namespace: string };
+  /**
+   * The architecture version in CALM Hub (calm:register:hub). The architecture card then reads the Hub, and falls
+   * back to the file, which stays named.
+   */
+  hub?: {
+    namespace: string;
+    architecture: string;
+    version: string;
+    url?: string;
+  };
   description?: string;
 }): Entity {
   return {
@@ -56,9 +77,34 @@ export function serviceEntity(opts: {
         [ANN.patternVersion]: opts.patternVersion,
         [ANN.bundle]: opts.bundleName,
         [ANN.bundleVersion]: opts.bundleVersion,
+        ...(opts.bundleRef ? { [ANN.bundleRef]: opts.bundleRef } : {}),
+        ...(opts.bundleDigest ? { [ANN.bundleDigest]: opts.bundleDigest } : {}),
         [ANN.architectureFile]: `./${ARCHITECTURE_FILE}`,
+        ...(opts.hub
+          ? {
+              [ANN.architecture]: opts.hub.architecture,
+              [ANN.architectureVersion]: opts.hub.version,
+              // The one namespace annotation is the pattern's; the architecture's is named only when it differs.
+              ...(opts.hub.namespace !== opts.namespace
+                ? { [ANN.architectureNamespace]: opts.hub.namespace }
+                : {}),
+            }
+          : {}),
+        ...(opts.kubernetes
+          ? {
+              [K8S.id]: opts.kubernetes.id,
+              [K8S.namespace]: opts.kubernetes.namespace,
+            }
+          : {}),
       },
       tags: ['calm', 'calm-service'],
+      ...(opts.hub?.url
+        ? {
+            links: [
+              { url: opts.hub.url, title: 'Architecture in CALM Hub (JSON)' },
+            ],
+          }
+        : {}),
     },
     spec: {
       type: 'service',
@@ -83,6 +129,8 @@ export function createCalmPublishLocalAction(options: {
   catalog: CatalogService;
   auth: Pick<AuthService, 'getOwnServiceCredentials'>;
   localDir: string;
+  /** `calm.deploy.kubernetes.namespacePrefix`: a deployable service's namespace is `<prefix><name>`. */
+  namespacePrefix: string;
 }) {
   return createTemplateAction({
     id: 'calm:publish:local',
@@ -116,6 +164,53 @@ export function createCalmPublishLocalAction(options: {
         patternVersion: z => z.string().describe('Pattern version'),
         bundle: z =>
           z.string().describe('Template bundle as `<name>@<version>`'),
+        bundleRef: z =>
+          z
+            .string()
+            .optional()
+            .describe(
+              'OCI reference the bundle was pulled from (calm:template output bundleRef); recorded as calm.finos.org/bundle-ref',
+            ),
+        bundleDigest: z =>
+          z
+            .string()
+            .optional()
+            .describe(
+              'Manifest digest of the bundle (calm:template output bundleDigest); recorded as calm.finos.org/bundle-digest',
+            ),
+        hubNamespace: z =>
+          z
+            .string()
+            .optional()
+            .describe(
+              'Hub namespace of the registered architecture (calm:register:hub output namespace)',
+            ),
+        hubArchitecture: z =>
+          z
+            .string()
+            .optional()
+            .describe(
+              'Architecture name in the Hub (calm:register:hub output architecture); with hubNamespace and hubArchitectureVersion, recorded as the calm.finos.org/architecture annotations next to architecture-file',
+            ),
+        hubArchitectureVersion: z =>
+          z
+            .string()
+            .optional()
+            .describe('Its version (calm:register:hub output version)'),
+        hubArchitectureUrl: z =>
+          z
+            .string()
+            .optional()
+            .describe(
+              'Its Hub URL (calm:register:hub output url); added as a link',
+            ),
+        deployable: z =>
+          z
+            .boolean()
+            .optional()
+            .describe(
+              'The bundle renders Kubernetes manifests (its calm-backstage.json has deploy: kubernetes): catalog-info.yaml then gets backstage.io/kubernetes-id and backstage.io/kubernetes-namespace. Default false',
+            ),
         owner: z =>
           z
             .string()
@@ -182,6 +277,38 @@ export function createCalmPublishLocalAction(options: {
       ctx.logger.info(`Task user: ${ctx.user?.ref ?? '(none)'}`);
       const owner = ctx.input.owner || DEFAULT_OWNER;
 
+      // The annotations are written whether or not the service is then deployed: with nothing deployed the
+      // Kubernetes tab is simply empty.
+      let kubernetes: { id: string; namespace: string } | undefined;
+      if (ctx.input.deployable) {
+        if (
+          isDnsLabel(name) &&
+          isDnsLabel(`${options.namespacePrefix}${name}`)
+        ) {
+          kubernetes = {
+            id: name,
+            namespace: deployNamespace(options.namespacePrefix, name),
+          };
+        } else {
+          // A name of up to 63 characters passes the form, but the namespace adds the prefix.
+          ctx.logger.warn(
+            `${name} cannot name Kubernetes objects (not a DNS label, or the namespace ${options.namespacePrefix}${name} is longer than 63 characters), so no Kubernetes annotations are written and the service cannot be deployed`,
+          );
+        }
+      }
+
+      const { hubNamespace, hubArchitecture, hubArchitectureVersion } =
+        ctx.input;
+      const hub =
+        hubNamespace && hubArchitecture && hubArchitectureVersion
+          ? {
+              namespace: hubNamespace,
+              architecture: hubArchitecture,
+              version: hubArchitectureVersion,
+              url: ctx.input.hubArchitectureUrl || undefined,
+            }
+          : undefined;
+
       await fs.mkdir(options.localDir, { recursive: true });
       const target = resolveSafeChildPath(options.localDir, name);
 
@@ -217,6 +344,11 @@ export function createCalmPublishLocalAction(options: {
         patternVersion,
         bundleName: bundle.name,
         bundleVersion: bundle.version,
+        // Empty when the bundle came from a local folder: then nothing is recorded.
+        bundleRef: ctx.input.bundleRef || undefined,
+        bundleDigest: ctx.input.bundleDigest || undefined,
+        kubernetes,
+        hub,
       });
       const catalogInfoPath = path.join(target, CATALOG_INFO_FILE);
       await fs.writeFile(catalogInfoPath, YAML.stringify(entity));

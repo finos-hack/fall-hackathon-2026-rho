@@ -1,0 +1,57 @@
+# Read-only access for the Backstage Kubernetes plugin (applied by k8s/up.sh).
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: calm-backstage-system
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: backstage-reader
+  namespace: calm-backstage-system
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: backstage-reader-token
+  namespace: calm-backstage-system
+  annotations:
+    kubernetes.io/service-account.name: backstage-reader
+type: kubernetes.io/service-account-token
+---
+# The built-in "view" role: read workloads, services, config maps and events, but not secrets.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: calm-backstage-reader-view
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: view
+subjects:
+  - kind: ServiceAccount
+    name: backstage-reader
+    namespace: calm-backstage-system
+---
+# Extra reads the plugin uses that "view" leaves out: listing namespaces, and pod logs for the pod drawer.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: calm-backstage-reader-extra
+rules:
+  - apiGroups: [""]
+    resources: [namespaces, pods/log]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: calm-backstage-reader-extra
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: calm-backstage-reader-extra
+subjects:
+  - kind: ServiceAccount
+    name: backstage-reader
+    namespace: calm-backstage-system

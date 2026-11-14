@@ -1,17 +1,22 @@
 # CALM Backstage
 
-**Hackathon Track:** _to be confirmed_
+**Hackathon Track:** CALM
 
 FINOS [CALM](https://calm.finos.org) architectures in [Backstage](https://backstage.io). Developers see the CALM
 architectures from CALM Hub in the Backstage catalog and see each architecture as a diagram on its service page. They
 can also create a new service from a CALM pattern: the pattern's options become form choices, and a template bundle
-renders the code.
+renders the code. The new service can then be built and deployed to a local Kubernetes cluster, with network
+policies made from its architecture, and its architecture and deployment are recorded in CALM Hub.
 
 ## Demo
 
-[![CALM Backstage demo](https://img.youtube.com/vi/zQ1cLPv3Fmk/maxresdefault.jpg)](https://youtu.be/zQ1cLPv3Fmk)
+[![CALM Backstage deployment demo](https://img.youtube.com/vi/XhFmQQTT6-k/maxresdefault.jpg)](https://youtu.be/XhFmQQTT6-k)
 
-▶ [Watch the walkthrough on YouTube](https://youtu.be/zQ1cLPv3Fmk)
+▶ [Watch the full walkthrough on YouTube](https://youtu.be/XhFmQQTT6-k): from a CALM pattern to a service running on
+local Kubernetes, with its architecture and deployment in CALM Hub.
+
+▶ [The first walkthrough](https://youtu.be/zQ1cLPv3Fmk) covers the catalog, the diagrams and creating a service,
+without the deployment.
 
 ## Features so far
 
@@ -33,21 +38,33 @@ renders the code.
   - The run fills the architecture, checks it with `calm validate` against the Hub's controls, renders the chosen
     bundle with `calm template`, writes the service to `output/<name>/` and registers it in the catalog. The new
     service page shows its own architecture diagram.
-- **Template bundles with versions.** `web-service@1.0.0` and `@2.0.0` render different code from the same pattern.
-  Version 2.0.0 adds a `Dockerfile` and a `deploy/` folder, and the choices change the compose services.
+- **Template bundles with versions, from an OCI registry.** `web-service@1.0.0`, `@2.0.0` and `@3.0.0` render
+  different code from the same pattern. Bundles are pushed to a local OCI registry as versioned artifacts, and a newly
+  pushed version shows up in the catalog and the form without a restart. Version 3.0.0 renders a small runnable Node
+  service, a `Dockerfile` and Kubernetes manifests.
+- **Deploy to local Kubernetes.** With bundle 3.0.0 the run builds the service's image in a local minikube cluster
+  (its own profile, with its own kubeconfig in the repository) and deploys the service, its data store, add-ons and
+  gateway to their own namespace.
+- **Network policies from CALM.** Each `connects` relationship in the architecture becomes an allow rule on top of a
+  default deny, so the gateway cannot reach the database directly. The card lists the policies, and a
+  **Kubernetes** tab shows the pods.
+- **Recorded in CALM Hub.** The generated architecture is stored in CALM Hub, and each deployment is recorded on it
+  as a deployment decorator, which the Hub's own UI shows on its Deployments tab with a link back to Backstage.
 - **Published CALM only.** Every CALM step runs the published `@finos/calm-cli`. The few parts the CLI does not offer
   as an API live in one small package and are written up as requests to the CALM project.
-- **Runs locally in a few minutes.** CALM Hub and MongoDB run in Docker with seed content: a pattern with a `oneOf`
-  and an `anyOf` decision, two architectures and a controls domain.
+- **Runs locally in a few minutes.** CALM Hub, MongoDB and the bundle registry run in Docker with seed content: a
+  pattern with a `oneOf` and an `anyOf` decision, two architectures and a controls domain.
 
 ## Installation
 
-You need Docker, Node 26 (Node 22 and 24 are allowed but untested) and the Yarn version bundled in the project.
+You need Docker, Node 26 (Node 22 and 24 are allowed but untested) and the Yarn version bundled in the project. The
+deployment also needs `minikube` and `kubectl`.
 
 ```sh
 cd calm-backstage
 yarn install
-yarn hub:up && yarn hub:seed    # CALM Hub on http://localhost:8090
+yarn hub:up && yarn hub:seed    # CALM Hub on http://localhost:8090, bundle registry on 5050
+yarn k8s:up                     # optional: minikube profile calm-backstage, for deployments
 yarn start                      # Backstage on http://localhost:3100 (backend on 7107)
 ```
 
@@ -60,7 +77,9 @@ Open http://localhost:3100 and choose **Enter** to sign in as a guest.
 2. **`orders-service`:** the CALM architecture card with its diagram.
 3. **`pattern-web-service`:** the decisions, the bundles that fit, and the link to create a service.
 4. **Create → Web Service (CALM pattern):** name the service, choose its options, fill in the details, then create
-   it. The task page links to the new service.
+   it. The task page links to the new service. With `web-service@3.0.0` and the deploy box ticked, the run also
+   deploys it to the local cluster; the service page then shows its network policies, its pods on the
+   **Kubernetes** tab and the deployment recorded in CALM Hub.
 
 [`calm-backstage/README.md`](calm-backstage/README.md) has the full guide and the package layout.
 
@@ -69,7 +88,7 @@ Open http://localhost:3100 and choose **Enter** to sign in as a guest.
 ```sh
 cd calm-backstage
 yarn tsc
-yarn test            # options reader, Hub client, placeholders, Mermaid transform
+yarn test            # options reader, Hub clients, placeholders, Mermaid transform, OCI client, actions
 yarn build:backend
 ```
 
@@ -85,9 +104,10 @@ details.
 1. **Catalog:** flows, decorators, every version, and pattern → architecture implementations.
 2. **Entity page:** a richer diagram, control status from evidence, and a flows tab.
 3. **Pattern options:** better `anyOf` UX, a description for each choice, and nested patterns.
-4. **Template bundles:** bundles from Git, npm or CALM Hub, and a "bundle update available" notice.
-5. **Publish:** publish to GitHub, and register the generated architecture in CALM Hub.
-6. **Provisioning:** connect an existing provisioning flow as an extension.
+4. **Template bundles:** bundles now come from an OCI registry; still to do: a "bundle update available" notice.
+5. **Publish:** the generated architecture is now stored in CALM Hub; still to do: publish to GitHub.
+6. **Provisioning:** local Kubernetes deployment works; still to do: redeploying an existing service, recording
+   failed deployments, and connecting an existing provisioning flow as an extension.
 
 ## Contributing
 

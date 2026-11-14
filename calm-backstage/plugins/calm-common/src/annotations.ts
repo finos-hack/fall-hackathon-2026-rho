@@ -8,11 +8,17 @@ export const CALM_ANNOTATIONS = {
   /** Architecture id (the name in the architecture's `$id`), e.g. `orders-service`. */
   architecture: 'calm.finos.org/architecture',
   architectureVersion: 'calm.finos.org/architecture-version',
+  /** Hub namespace of the architecture, when it is not the pattern's (`namespace`). */
+  architectureNamespace: 'calm.finos.org/architecture-namespace',
   /** Control requirement URL. */
   control: 'calm.finos.org/control',
   /** Template bundle name, e.g. `web-service`. */
   bundle: 'calm.finos.org/bundle',
   bundleVersion: 'calm.finos.org/bundle-version',
+  /** OCI reference of a bundle in the bundle registry, e.g. `localhost:5050/calm-bundles/web-service:2.0.0`. */
+  bundleRef: 'calm.finos.org/bundle-ref',
+  /** Digest of the bundle's OCI manifest (`sha256:…`): the exact content behind `bundle-ref` at the time. */
+  bundleDigest: 'calm.finos.org/bundle-digest',
   /** On a service created from a pattern: its architecture file, relative to `catalog-info.yaml`. */
   architectureFile: 'calm.finos.org/architecture-file',
   /** Base URL of the CALM Hub the entity was read from. */

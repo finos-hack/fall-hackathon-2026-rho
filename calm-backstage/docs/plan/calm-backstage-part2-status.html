@@ -1,0 +1,166 @@
+<title>CALM Backstage Part 2</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root {
+  --bg: #f5f6f8; --surface: #ffffff; --ink: #14181f; --muted: #5a6472; --line: #dde1e7; --accent: #2b4cc9;
+  --pending: #6b7480; --pending-bg: #e9ecf0;
+  --run: #8a5200; --run-bg: #ffe9c2;
+  --done: #11663a; --done-bg: #d3f1df;
+  --fail: #a3201c; --fail-bg: #fbdad7;
+  --block: #5b2f9e; --block-bg: #e8dcf7;
+  --font-display: "Bricolage Grotesque", "Helvetica Neue", Arial, sans-serif;
+  --font-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #0f1218; --surface: #171b23; --ink: #e8ebf0; --muted: #9aa4b2; --line: #2a303b; --accent: #8fa6ff;
+  --pending: #a3acb8; --pending-bg: #262c36;
+  --run: #ffc56b; --run-bg: #3d2a08;
+  --done: #7ddca1; --done-bg: #123b25;
+  --fail: #ff9a94; --fail-bg: #4a1714;
+  --block: #cdb0ff; --block-bg: #2e1d4d;
+  color-scheme: dark; } }
+:root[data-theme="dark"] {
+  --bg: #0f1218; --surface: #171b23; --ink: #e8ebf0; --muted: #9aa4b2; --line: #2a303b; --accent: #8fa6ff;
+  --pending: #a3acb8; --pending-bg: #262c36;
+  --run: #ffc56b; --run-bg: #3d2a08;
+  --done: #7ddca1; --done-bg: #123b25;
+  --fail: #ff9a94; --fail-bg: #4a1714;
+  --block: #cdb0ff; --block-bg: #2e1d4d;
+  color-scheme: dark; }
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--ink); font-family: var(--font-body); font-size: 15px; line-height: 1.5;
+  padding-block: 28px 56px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+main { max-width: 1040px; margin: 0 auto; display: flex; flex-direction: column; gap: 32px; }
+h1, h2 { font-family: var(--font-display); text-wrap: balance; margin: 0; letter-spacing: -0.01em; }
+h1 { font-size: clamp(26px, 5vw, 38px); line-height: 1.1; }
+h2 { font-size: 20px; }
+.sub { color: var(--muted); margin: 6px 0 0; max-width: 65ch; }
+.strip { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 18px 20px; display: flex; flex-direction: column; gap: 14px; }
+.strip-top { display: flex; flex-wrap: wrap; gap: 8px 24px; align-items: center; justify-content: space-between; }
+.meta { font-family: var(--font-mono); font-size: 12.5px; color: var(--muted); }
+.bar { height: 10px; background: var(--pending-bg); border-radius: 5px; overflow: hidden; }
+.bar > i { display: block; height: 100%; width: 0%; background: var(--accent); border-radius: 5px; }
+.pill { display: inline-block; font-size: 12px; font-weight: 600; padding: 2px 9px; border-radius: 999px; white-space: nowrap; letter-spacing: 0.02em; }
+.p-pending { color: var(--pending); background: var(--pending-bg); }
+.p-run { color: var(--run); background: var(--run-bg); }
+.p-done { color: var(--done); background: var(--done-bg); }
+.p-fail { color: var(--fail); background: var(--fail-bg); }
+.p-block { color: var(--block); background: var(--block-bg); }
+.wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; min-width: 640px; }
+th { text-align: left; font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); font-weight: 600; padding: 10px 14px; border-bottom: 1px solid var(--line); }
+td { padding: 11px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
+tr:last-child td { border-bottom: 0; }
+td.n { font-family: var(--font-mono); color: var(--muted); width: 36px; }
+td.name { font-weight: 500; min-width: 200px; }
+td.hash, td.mono { font-family: var(--font-mono); font-size: 12.5px; }
+td.step, td.ev { color: var(--muted); font-size: 14px; }
+.sec { display: flex; flex-direction: column; gap: 12px; }
+ul.list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+ul.list li { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 10px 14px; }
+ul.list b { font-family: var(--font-mono); font-size: 12.5px; margin-right: 8px; color: var(--accent); }
+@media (max-width: 560px) { td, th { padding: 9px 10px; } body { font-size: 14.5px; } }
+</style>
+<main>
+  <header>
+    <h1>CALM Backstage: bundle store and Kubernetes deployment</h1>
+    <p class="sub">Part 2 makes the demo end with a running service: template bundles are pulled from an OCI registry, the service is built and deployed to a local minikube, its pods show on the service page, network rules come from the CALM architecture, and the deployment is recorded in CALM Hub. Each step is planned when it starts (docs/superpowers/plans/2026-11-14-step-N-*.md).</p>
+  </header>
+
+  <section class="strip" aria-label="Overall status">
+    <div class="strip-top">
+      <div id="overall"><span class="pill p-done">done, awaiting your review</span></div>
+      <div class="meta" id="count">8 of 8 tasks done</div>
+      <div class="meta" id="stamp">started Nov 14 11:09 &middot; updated Nov 14 13:03</div>
+    </div>
+    <div class="bar" role="progressbar" aria-valuemin="0" aria-valuemax="8" aria-valuenow="8"><i id="fill" style="width:100%"></i></div>
+    <div class="meta" id="now">Now: finished</div>
+  </section>
+
+  <section class="sec">
+    <h2>Tasks</h2>
+    <div class="wrap"><table>
+      <thead><tr><th>#</th><th>Task</th><th>State</th><th>Current step</th><th>Commit</th><th>Evidence</th></tr></thead>
+      <tbody>
+      <tr id="t1"><td class="n">1</td><td class="name">OCI bundle store (registry:2 on 5050, OCI client, bundles:push, catalog and calm:template read the registry)</td><td><span class="pill p-done">done</span></td><td class="step">Risk passed: oras 1.2.0 pulls what our client pushed</td><td class="mono">84a6cb3 854ce3a 47b4f37 e2ed4a0</td><td class="ev">Lead re-ran: tsc exit 0; 8 suites, 52 tests pass; yarn bundles:push pushed 3 bundles, same digests as the subagent; after restart the catalog log shows 3 bundles from the registry. Not yet checked: a Template run through Backstage (step 4 covers it)</td></tr>
+      <tr id="t2"><td class="n">2</td><td class="name">Bundle web-service@3.0.0 (generated Node app, Dockerfile, Kubernetes manifests, NetworkPolicies)</td><td><span class="pill p-done">done</span></td><td class="step">Risk passed: the bundle renders, builds and runs in the cluster</td><td class="mono">234c408</td><td class="ev">Deployed in a probe namespace: 5 pods Ready, image build 13.9 s; /connections shows 3 of 3 permitted connections open; gateway to data store and 3 other unpermitted connections time out after 3.00 s. Not started in the cluster: PostgreSQL and Redis (server dry run only)</td></tr>
+      <tr id="t3"><td class="n">3</td><td class="name">Local cluster (yarn k8s:up / k8s:down, minikube profile calm-backstage with Calico, repo-local kubeconfig)</td><td><span class="pill p-done">done</span></td><td class="step">yarn k8s:up and k8s:down work against profile calm-backstage</td><td class="mono">ae5ca85</td><td class="ev">k8s/up.sh exit 0; read-only token lists namespaces (200), refused secrets (403); ~/.kube/config checksum unchanged, context still minikube, other profiles same status</td></tr>
+      <tr id="t4"><td class="n">4</td><td class="name">Build and deploy actions (calm:image:build, calm:deploy:k8s, conditional Template steps)</td><td><span class="pill p-done">done</span></td><td class="step">Risk passed: a Template run in Backstage ends with a running service</td><td class="mono">0a837de 70a1dfa 1870753</td><td class="ev">Task dab10358 completed in 32 s (build 1 s, deploy 30 s): namespace calm-stock-api, 4 Deployments, 9 NetworkPolicies. A run with bundle 2.0.0 skipped build and deploy. Lead re-ran: tsc exit 0; 13 suites, 88 tests pass; 4 pods 1/1 Running</td></tr>
+      <tr id="t5"><td class="n">5</td><td class="name">Kubernetes tab on the service page</td><td><span class="pill p-done">done</span></td><td class="step">The Kubernetes tab works with the read-only service account, no extension config needed</td><td class="mono">(in 1870753)</td><td class="ev">docs/demo/k8s-tab.png: cluster calm-backstage, 4 pods, no pods with errors, each Deployment lists its pod Running 1/1</td></tr>
+      <tr id="t6"><td class="n">6</td><td class="name">Network rules from CALM (permitted connections open, others blocked)</td><td><span class="pill p-done">done</span></td><td class="step">Card lists the network policies per relationship with the control</td><td class="mono">6a718d8 ef41628</td><td class="ev">Lead re-ran in calm-stock-api: service to PostgreSQL exit 0; gateway to PostgreSQL exit 1 after the 3 s timeout. Card: 7 policies for 4 relationships, 3 naming permitted-connection</td></tr>
+      <tr id="t7"><td class="n">7</td><td class="name">Record in CALM Hub (register the architecture, deployment decorator, card shows it)</td><td><span class="pill p-done">done</span></td><td class="step">Risk came true once (the Hub needs a title), fixed, then passed</td><td class="mono">65b4643 d69ad4a caa5636 4db7e16 b2d158c</td><td class="ev">billing-api run completed in 11 s, all 10 steps; the Hub has billing-api 1.0.0 with $id and title, and deployment decorator 6 on it; a bundle 2.0.0 run stored the architecture with no decorator. Lead re-ran: 16 suites, 125 tests pass; Hub returns the decorator for the architecture</td></tr>
+      <tr id="t8"><td class="n">8</td><td class="name">Hand-over (demo video, README, FINDINGS, TRACKS, fresh-clone check)</td><td><span class="pill p-done">done</span></td><td class="step">From-scratch run done; video now shows CALM Hub</td><td class="mono">ab1f2a6 f847966 9e387e3 85b7894</td><td class="ev">From scratch in the main repo: k8s:down, Hub and registry volumes removed, hub:up and hub:seed (10 documents, 3 bundles), k8s:up, then coldstart-api on the cold cluster: 4 pods Running, 2 of 2 connections open, gateway to PostgreSQL blocked. 16 suites, 125 tests. Fresh clone: install, tsc, tests and build exit 0. Video 135 s (courier-api)</td></tr>
+      </tbody>
+    </table></div>
+  </section>
+
+  <section class="sec">
+    <h2>Deviations from the plan</h2>
+    <ul class="list" id="devs">
+      <li id="d1"><b>D1</b>The plan put the cluster at step 3. It was started first, by the lead, because steps 4 to 6 depend on it and it was the least certain part. Measured: profile calm-backstage (Kubernetes 1.37.0, Calico, 3 GB) is up; ~/.kube/config has the same checksum as before and the active context is still minikube. Step 3 now only adds the yarn scripts. <span class="pill p-done">applied</span></li>
+      <li id="d2"><b>D2</b>Risks probed before building. Calico enforces: a default-deny policy blocked a test pod, DNS included, so the bundle's policies must allow DNS. The Hub accepted a deployment decorator (201) in a scratch namespace, so the step 7 fallback is unlikely to be needed. <span class="pill p-done">documented</span></li>
+      <li id="d8"><b>D8</b>The first video showed Backstage only. Jim asked for CALM Hub in it. The Hub UI showed "No deployment history" for our decorator: it looks decorators up by the architecture's numeric path with hyphens in the version, not the name-based path. The decorator now names both, and the Hub's Deployments tab shows the deployment. <span class="pill p-done">applied</span></li>
+      <li id="d7"><b>D7</b>Found in the from-scratch run: with no cluster, a run with the deploy box ticked (the default) failed at the image build after it had already stored the architecture in the Hub and published files. A new first step, calm:cluster:check, now stops such a run before it writes anything; measured: the run fails at check-cluster, with no folder and no Hub document. <span class="pill p-done">applied</span></li>
+      <li id="d6"><b>D6</b>The plan expected the Hub to accept a generated architecture as it is. It refused it: a title is required (calm generate sets none), the name must start with a letter, and the first version must be 1.0.0. The run now sets the title to the service name, and the name field requires a leading letter. A marker in the architecture's metadata stops the catalog showing a stored service twice. The findings are in FINDINGS.md. <span class="pill p-done">applied</span></li>
+      <li id="d5"><b>D5</b>Found in step 4: the scaffolder renders step conditions with nunjitsu, and a render error leaves a truthy string, so a wrong condition would run the step instead of skipping it. The build and deploy conditions were evaluated with that renderer before use. Also added: the deploy action only reuses a namespace that carries the service's own label, so a service name cannot reach another calm- namespace. <span class="pill p-done">applied</span></li>
+      <li id="d4"><b>D4</b>A subagent's check printed part of the git-ignored app-config.local.yaml, including the cluster's read-only service account token, into its own tool output. The token only reads the local calm-backstage cluster (no secrets) and was not copied anywhere; yarn k8s:down then k8s:up replaces it. Later subagents are told not to read that file. <span class="pill p-done">documented</span></li>
+      <li id="d3"><b>D3</b>The plan had one NetworkPolicy per connection. A policy selects one set of pods, so each in-cluster connection gets two (egress from the source, ingress to the destination): 11 policies for a service with three dependencies. The gateway forwards plain HTTP although the architecture says HTTPS; no certificates are rendered. <span class="pill p-done">applied</span></li>
+    </ul>
+  </section>
+
+  <section class="sec">
+    <h2>Acceptance</h2>
+    <div class="wrap"><table>
+      <thead><tr><th>#</th><th>Criterion</th><th>Result</th><th>Actual</th></tr></thead>
+      <tbody>
+      <tr id="a1"><td class="n">1</td><td class="name">A bundle pushed with yarn bundles:push appears in the catalog and the Template without a restart</td><td><span class="pill p-done">pass</span></td><td class="ev">Pushed a copy of 2.0.0 as web-service:2.1.0 with yarn bundles:push; with Backstage left running, the next catalog refresh logged 4 bundles (3 before). The Template choice for 2.1.0 was not opened in the UI</td></tr>
+      <tr id="a2"><td class="n">2</td><td class="name">A Template run with bundle 3.0.0 and deploy on completes; all pods in the service namespace are Ready</td><td><span class="pill p-done">pass</span></td><td class="ev">coldstart-api on a cluster started from nothing: task completed; 4 of 4 pods 1/1 Running. Earlier: stock-api, billing-api, freight-api</td></tr>
+      <tr id="a3"><td class="n">3</td><td class="name">/health returns 200 and /connections shows each permitted connection open</td><td><span class="pill p-done">pass</span></td><td class="ev">/health 200; /connections: postgres-database:5432 and cache:6379 both open</td></tr>
+      <tr id="a4"><td class="n">4</td><td class="name">A connection the architecture does not permit (gateway to data store) is blocked</td><td><span class="pill p-done">pass</span></td><td class="ev">gateway to PostgreSQL and to Redis, and service to the Kubernetes API, each time out after 3.00 s</td></tr>
+      <tr id="a5"><td class="n">5</td><td class="name">The service page shows the diagram, the Kubernetes tab with its pods, and where it is deployed</td><td><span class="pill p-done">pass</span></td><td class="ev">Video and docs/demo/hub-recorded-service.png: diagram, "Deployed to calm-backstage / calm-…", network policies per relationship, Kubernetes tab with 5 pods and no errors</td></tr>
+      <tr id="a6"><td class="n">6</td><td class="name">CALM Hub returns the new architecture and its deployment decorator</td><td><span class="pill p-done">pass</span></td><td class="ev">Hub API returns the architecture and its decorator; the Hub UI Deployments tab for courier-api shows 1 completed deployment (7 s) with its 5 components</td></tr>
+      <tr id="a7"><td class="n">7</td><td class="name">~/.kube/config and the minikube profiles minikube, coraza-demo and secure are unchanged</td><td><span class="pill p-done">pass</span></td><td class="ev">~/.kube/config checksum a00fedf4… at the start, after k8s:down and after k8s:up; context still minikube; coraza-demo OK, minikube OK, secure Stopped throughout</td></tr>
+      <tr id="a8"><td class="n">8</td><td class="name">yarn tsc, yarn test and yarn build:backend pass; new demo video in docs/demo/</td><td><span class="pill p-done">pass</span></td><td class="ev">tsc exit 0; 16 suites, 125 tests; build:backend exit 0; docs/demo/calm-backstage-deploy-demo.webm (135 s)</td></tr>
+      </tbody>
+    </table></div>
+  </section>
+
+  <section class="sec">
+    <h2>Open items for Jim</h2>
+    <ul class="list" id="open">
+      <li>Part 2 is in local commits on main only; nothing was pushed. Decide whether it goes to finos-hack/fall-hackathon-2026-rho as a second PR (or onto PR #1, which still needs one review). The new video is 18 MB.</li>
+      <li>The README's Hackathon Track on PR #1 is still "to be confirmed".</li>
+      <li>Not built: running the Template again for an existing service name fails at publish (the output folder exists), so a service cannot be redeployed from Backstage yet. A failed deployment is not recorded in the Hub.</li>
+      <li>Covered by unit tests only: the deploy box off with bundle 3.0.0, and dry runs. The name field shows the form's raw pattern error for a bad name.</li>
+      <li>Running now: Backstage on 3100, the Hub and registry containers, and minikube profile calm-backstage with coldstart-api, parcel-api and courier-api. yarn k8s:down and yarn hub:down stop them.</li>
+      <li>Left from the checks: output/ holds older services whose Hub documents and namespaces were reset (their pages fall back to the local file), plus nocluster-api from a failed run. output/ is git-ignored; delete folders you do not want.</li>
+    </ul>
+  </section>
+
+  <section class="sec" id="bigger">
+    <h2>Overall plan progress</h2>
+    <div class="strip">
+      <div class="strip-top">
+        <div class="meta" id="plan-count">2 of 8 phases done</div>
+        <div class="meta" id="plan-name">CALM hackathon: base, part 2, and the tracks in TRACKS.md</div>
+      </div>
+      <div class="bar" role="progressbar" aria-valuemin="0" aria-valuemax="8" aria-valuenow="2"><i id="plan-fill" style="width:25%"></i></div>
+      <div class="meta" id="plan-next">Next up: the rest of Tracks A–F with the bigger team from Monday 2026-11-16</div>
+    </div>
+    <div class="wrap"><table>
+      <thead><tr><th>Phase</th><th>Name</th><th>State</th><th>Outcome</th><th>Report</th></tr></thead>
+      <tbody>
+      <tr id="pl0"><td class="n">0</td><td class="name">Hackathon base (thin slice, steps 1–8)</td><td><span class="pill p-done">done</span></td><td class="ev">8 of 8 steps, 22 tests; PR #1 open on finos-hack/fall-hackathon-2026-rho (DCO passes, needs 1 review)</td><td class="mono">calm-backstage-status.html</td></tr>
+      <tr id="pl1"><td class="n">1</td><td class="name">Part 2: bundle store and deployment to local Kubernetes</td><td><span class="pill p-done">done</span></td><td class="ev">8 of 8 steps, 8 of 8 acceptance criteria pass, 125 tests; a Template run ends with a running service recorded in CALM Hub</td><td class="mono">this page</td></tr>
+      <tr id="pl2"><td class="n">2</td><td class="name">Track A: Catalog</td><td><span class="pill p-pending">not started</span></td><td class="ev">-</td><td class="mono">-</td></tr>
+      <tr id="pl3"><td class="n">3</td><td class="name">Track B: Entity page</td><td><span class="pill p-pending">not started</span></td><td class="ev">-</td><td class="mono">-</td></tr>
+      <tr id="pl4"><td class="n">4</td><td class="name">Track C: Pattern options</td><td><span class="pill p-pending">not started</span></td><td class="ev">-</td><td class="mono">-</td></tr>
+      <tr id="pl5"><td class="n">5</td><td class="name">Track D: Template bundles (rest)</td><td><span class="pill p-pending">not started</span></td><td class="ev">-</td><td class="mono">-</td></tr>
+      <tr id="pl6"><td class="n">6</td><td class="name">Track E: Publish (rest)</td><td><span class="pill p-pending">not started</span></td><td class="ev">-</td><td class="mono">-</td></tr>
+      <tr id="pl7"><td class="n">7</td><td class="name">Track F: Provisioning</td><td><span class="pill p-pending">not started</span></td><td class="ev">-</td><td class="mono">-</td></tr>
+      </tbody>
+    </table></div>
+  </section>
+</main>
