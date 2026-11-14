@@ -1,7 +1,8 @@
 # Demo: CALM + Backstage + template bundles
 
-`calm-backstage-full-demo.webm` (5:25) retakes everything so far (parts 1, 2 and 3) in one take. It opens with
-this table of contents; each chapter starts with a card showing its number.
+The full demo (5:25) retakes everything so far (parts 1, 2 and 3) in one take. It opens with this table of contents;
+each chapter starts with a card showing its number. The video is not committed; it will be linked here once it is on
+YouTube.
 
 | # | Starts at | Chapter | What you see |
 |---|---|---|---|
@@ -25,5 +26,5 @@ Record it again (pick a suffix not used yet; it names `orders-<suffix>`, `billin
 node docs/demo/record-full-demo.cjs <suffix> <out-dir> http://localhost:3100
 ```
 
-Older recordings: `calm-backstage-deploy-demo.webm` (part 2) and `calm-backstage-demo.webm` (part 1), recorded by
-`record-demo.cjs`.
+Older recordings, recorded by `record-demo.cjs`: [part 2](https://youtu.be/XhFmQQTT6-k) and
+[part 1](https://youtu.be/zQ1cLPv3Fmk) on YouTube.
