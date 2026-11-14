@@ -27,7 +27,10 @@ export const calmPlugin = createBackendPlugin({
         const hubUrl = config.getString('calm.hubUrl');
         // Same folder as calm:publish:local.
         const localDir = readPublishLocalDir(config);
-        // Default auth policy: every route needs a user or service token.
+        // Default auth policy: every route needs a user or service token, except "Open the running app": the browser
+        // opens it in a new tab, which carries no Backstage token. It reaches only the api-gateway Service of a
+        // namespace a CALM deploy action made (see appProxy.ts). Local development only.
+        httpRouter.addAuthPolicy({ path: '/app', allow: 'unauthenticated' });
         httpRouter.use(
           await createRouter({
             hubUrl,

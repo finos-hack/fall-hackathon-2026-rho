@@ -20,6 +20,7 @@ import Alert from '@material-ui/lab/Alert';
 import { ArchitectureResponse, useCalmBackend } from '../api';
 import { MermaidDiagram } from './MermaidDiagram';
 import { VersionsSection } from './VersionsSection';
+import { OpenAppButton } from './OpenAppButton';
 
 /** The controls a CALM document references, as control Resource refs (one per domain and control). */
 function controlsOf(architecture: unknown) {
@@ -322,6 +323,11 @@ export function CalmArchitectureCard() {
               </Box>
             )}
           </Box>
+          {value.deployment && (
+            <Box mb={2}>
+              <OpenAppButton name={entity.metadata.name} />
+            </Box>
+          )}
           {annotations[ANN.bundle] && <VersionsSection entityRef={entityRef} />}
           {value.gitops && <GitopsSection gitops={value.gitops} />}
           {value.deployment && (

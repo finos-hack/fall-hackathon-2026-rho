@@ -45,6 +45,7 @@ import { readRecordedDeployments } from './hubDeployments';
 import { GitopsInfo, readGitops } from './gitops';
 import { upgradesFor } from './upgrades';
 import { bundleDiff, bundleFile, bundleFiles, groupBundles } from './bundles';
+import { createAppProxy } from './appProxy';
 
 /**
  * Body of `POST /placeholders`.
@@ -135,6 +136,11 @@ export async function createRouter(options: {
   const hubPrefix = `${hub.baseUrl}/`;
   const router = Router();
   router.use(express.json());
+
+  // "Open the running app" (unauthenticated: a new browser tab has no Backstage token; see plugin.ts).
+  const appProxy = createAppProxy(options.kubernetes);
+  router.get('/app/:name', appProxy);
+  router.all('/app/:name/*', appProxy);
 
   /** The entity named by `?entityRef=`, read with the caller's credentials. */
   async function entityFrom(req: express.Request): Promise<Entity> {
