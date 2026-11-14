@@ -106,8 +106,9 @@ const kubernetesNames = (ids, { max, valid }) => {
 };
 // A NetworkPolicy name is a DNS subdomain of at most 253 characters; `-ingress` takes 8 of them.
 const POLICY_PREFIX_MAX = 253 - '-ingress'.length;
-// Words YAML 1.1 reads as a boolean or null: a name or label value that is one of them must not be written bare.
-const YAML_WORD = /^(y|yes|n|no|true|false|on|off|null)$/i;
+// Words kustomize's YAML reads as a boolean or null: a name or label value that is one of them must not be written
+// bare. (It quotes the YAML 1.1 words such as `on` and `yes` itself.)
+const YAML_WORD = /^(true|True|TRUE|false|False|FALSE|null|Null|NULL)$/;
 // A node's name is its Deployment, Service, container and DNS name and a label value: an RFC 1035 label (a Service
 // name must start with a letter) of at most 63 characters.
 const NODE_NAME_MAX = 63;
