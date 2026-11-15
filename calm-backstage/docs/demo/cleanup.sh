@@ -12,7 +12,12 @@ K="kubectl --kubeconfig $R/.kube/config --context calm-backstage"
 TOKEN=$(curl -s "$BACKEND/api/auth/guest/refresh" | node -e 'let s="";process.stdin.on("data",c=>s+=c).on("end",()=>{try{process.stdout.write(JSON.parse(s).backstageIdentity.token)}catch{}})')
 for n in "$@"; do
   case "$n" in *[!a-z0-9-]*|"") echo "skipped $n: not a service name"; continue ;; esac
-  $K -n flux-system delete kustomization "calm-$n" --ignore-not-found --wait=true --timeout=120s >/dev/null
+  # Flux prunes as the service account, so it goes only once the Kustomization is gone: without it the finalizer
+  # cannot run and the Kustomization stays Terminating.
+  if ! $K -n flux-system delete kustomization "calm-$n" --ignore-not-found --wait=true --timeout=120s >/dev/null; then
+    echo "Kustomization flux-system/calm-$n is still there (Flux could not prune it); kept its service account. Check: $K -n flux-system get kustomization calm-$n -o yaml" >&2
+    exit 1
+  fi
   $K -n flux-system delete serviceaccount "calm-$n" --ignore-not-found >/dev/null
   $K -n flux-system delete gitrepository "calm-$n" --ignore-not-found >/dev/null
   $K delete namespace "calm-$n" --ignore-not-found --wait=true --timeout=180s >/dev/null
