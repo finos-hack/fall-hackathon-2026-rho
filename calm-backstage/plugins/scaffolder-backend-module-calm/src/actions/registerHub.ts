@@ -1,5 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import YAML from 'yaml';
 import {
   type AuthService,
   type LoggerService,
@@ -8,6 +9,7 @@ import {
 import type { CatalogService } from '@backstage/plugin-catalog-node';
 import { createTemplateAction } from '@backstage/plugin-scaffolder-node';
 import {
+  CALM_ANNOTATIONS as ANN,
   CalmHubError,
   CalmHubWriteClient,
   HUB_NAME,
@@ -22,7 +24,7 @@ import {
   serviceEntityOf,
 } from '@internal/backstage-plugin-calm-common';
 import { assertClaimable, fileLocationRef, lookUpClaim } from './catalogClaim';
-import { ARCHITECTURE_FILE, CATALOG_INFO_FILE } from './publishLocal';
+import { CATALOG_INFO_FILE } from './publishLocal';
 
 export const DEFAULT_HUB_VERSION = '1.0.0';
 
@@ -112,7 +114,7 @@ export function createCalmRegisterHubAction(options: {
   return createTemplateAction({
     id: 'calm:register:hub',
     description:
-      "Stores the architecture in CALM Hub (namespace calm.publish.hubNamespace) as <name> version <version>, sets its $id to that version's Hub URL, adds a title (the name) and a description when it has none, marks it as the service's in metadata, and writes all of it back to the workspace file. An identical latest version is reused; a different one gets the next patch version, since Hub versions cannot change. A dry run reads the Hub and writes nothing to it. With mode prepare it makes the checks and writes the file but stores nothing; with mode store (after prepare) it stores the prepared file as the version its $id names, reuses that version when the Hub holds the same document, and fails when it holds another; when that store fails, it removes publishedDir if that folder holds the same prepared file.",
+      "Stores the architecture in CALM Hub (namespace calm.publish.hubNamespace) as <name> version <version>, sets its $id to that version's Hub URL, adds a title (the name) and a description when it has none, marks it as the service's in metadata, and writes all of it back to the workspace file. An identical latest version is reused; a different one gets the next patch version, since Hub versions cannot change. A dry run reads the Hub and writes nothing to it. With mode prepare it makes the checks and writes the file but stores nothing; with mode store (after prepare) it stores the prepared file as the version its $id names, reuses that version when the Hub holds the same document, and fails when it holds another; when that store fails, it removes publishedDir if its catalog-info.yaml names the same architecture version.",
     supportsDryRun: true,
     schema: {
       input: {
@@ -426,13 +428,16 @@ async function storePrepared(
   try {
     await opts.checkClaim();
     const { versions } = await ownedVersions(hub, namespace, name, entityRef);
-    const publishedDir = ctx.input.publishedDir;
-    if (publishedDir && !ctx.isDryRun) {
-      // What was published (and pushed next) must be what is stored.
-      const published = await readPublished(opts.target);
-      if (!sameJson(published, read)) {
+    if (ctx.input.publishedDir && !ctx.isDryRun) {
+      // What was published (and pushed next) must name what is stored.
+      const named = await publishedVersion(opts.target);
+      if (named.architecture !== name || named.version !== version) {
         throw new Error(
-          `The published folder's ${ARCHITECTURE_FILE} differs from the one being stored (${file})`,
+          `The published folder's ${CATALOG_INFO_FILE} names ${JSON.stringify(
+            named.architecture,
+          )} version ${JSON.stringify(
+            named.version,
+          )}, not the ${name} version ${version} being stored`,
         );
       }
     }
@@ -481,7 +486,7 @@ async function storePrepared(
       ctx,
       opts.target,
       ctx.input.publishedDir,
-      url,
+      { name, version },
     );
     if (!removed) {
       throw e;
@@ -503,18 +508,19 @@ async function storePrepared(
 }
 
 /**
- * The architecture.json of the published service folder. A missing or broken file gives a clear error that does not
- * echo its content.
+ * The architecture the published service folder's catalog-info.yaml names (CALM Hub holds the architecture itself).
+ * A missing or broken file gives a clear error that does not echo its content.
  */
-async function readPublished(target: string): Promise<unknown> {
-  const publishedFile = path.join(target, ARCHITECTURE_FILE);
+async function publishedVersion(
+  target: string,
+): Promise<{ architecture?: string; version?: string }> {
   const fail = (why: string) =>
     new Error(
-      `Could not check the published ${ARCHITECTURE_FILE} in ${target}: ${why}`,
+      `Could not check the published ${CATALOG_INFO_FILE} in ${target}: ${why}`,
     );
   let text: string;
   try {
-    text = await fs.readFile(publishedFile, 'utf-8');
+    text = await fs.readFile(path.join(target, CATALOG_INFO_FILE), 'utf-8');
   } catch (e) {
     throw fail(
       (e as NodeJS.ErrnoException).code === 'ENOENT'
@@ -524,23 +530,29 @@ async function readPublished(target: string): Promise<unknown> {
           })`,
     );
   }
+  let doc: any;
   try {
-    return JSON.parse(text);
+    doc = YAML.parse(text);
   } catch {
-    throw fail('it is not valid JSON');
+    throw fail('it is not valid YAML');
   }
+  const annotations = doc?.metadata?.annotations ?? {};
+  return {
+    architecture: annotations[ANN.architecture],
+    version: annotations[ANN.architectureVersion],
+  };
 }
 
 /**
- * Removes `publishedDir` when it is the service folder calm:publish:local made (`target`) and its architecture.json
- * has the `$id` of the prepared file: proof that this run published it. Gives the removed folder, or undefined when
+ * Removes `publishedDir` when it is the service folder calm:publish:local made (`target`) and its catalog-info.yaml
+ * names the architecture and version being stored: proof that this run published it. Gives the removed folder, or undefined when
  * nothing was removed. Never throws: a cleanup error is logged, so it cannot hide the store error.
  */
 async function removePublished(
   ctx: StoreContext,
   target: string,
   publishedDir: string,
-  id: string,
+  expected: { name: string; version: string },
 ): Promise<string | undefined> {
   try {
     const dir = path.resolve(publishedDir);
@@ -550,12 +562,17 @@ async function removePublished(
       );
       return undefined;
     }
-    const published = (await readPublished(dir)) as any;
-    if (published?.$id !== id) {
+    const named = await publishedVersion(dir);
+    if (
+      named.architecture !== expected.name ||
+      named.version !== expected.version
+    ) {
       ctx.logger.warn(
-        `Kept ${dir}: its ${ARCHITECTURE_FILE} names ${JSON.stringify(
-          published?.$id,
-        )}, not ${id}, so this run did not publish it`,
+        `Kept ${dir}: its ${CATALOG_INFO_FILE} names ${JSON.stringify(
+          named.architecture,
+        )} version ${JSON.stringify(named.version)}, not ${expected.name} ${
+          expected.version
+        }, so this run did not publish it`,
       );
       return undefined;
     }

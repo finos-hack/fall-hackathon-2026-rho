@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import YAML from 'yaml';
 import {
   CALM_ANNOTATIONS as ANN,
   CalmHubError,
@@ -578,13 +579,29 @@ describe('with a workspace', () => {
       const published = () => path.join(workspace, 'output', 'billing-api');
       // Prepare, publish (a copy of the prepared file), and another document in the Hub as the prepared version.
       // With conflict false, the Hub is left empty.
+      // What calm:publish:local writes: the catalog-info.yaml naming the architecture version.
+      const publishedInfo = (version = '1.0.0', arch = 'billing-api') =>
+        YAML.stringify({
+          apiVersion: 'backstage.io/v1alpha1',
+          kind: 'Component',
+          metadata: {
+            name: 'billing-api',
+            annotations: {
+              'calm.finos.org/architecture': arch,
+              'calm.finos.org/architecture-version': version,
+            },
+          },
+        });
       const prepareAndPublish = async (
         hub: ReturnType<typeof fakeHub>,
         conflict = true,
       ) => {
         await register(hub, ctx({ name: 'billing-api', mode: 'prepare' }));
         await fs.mkdir(published(), { recursive: true });
-        await fs.copyFile(file(), path.join(published(), 'architecture.json'));
+        await fs.writeFile(
+          path.join(published(), 'catalog-info.yaml'),
+          publishedInfo(),
+        );
         if (conflict) {
           hub.architectures.set(
             'billing-api',
@@ -660,19 +677,19 @@ describe('with a workspace', () => {
         expect(await exists(published())).toBe(false);
       });
 
-      it("fails, storing nothing, when the published folder's architecture.json differs from the workspace file", async () => {
+      it("fails, storing nothing, when the published folder's catalog-info.yaml names another version", async () => {
         const hub = fakeHub(base);
         await prepareAndPublish(hub, false);
-        const drifted = await readFile();
         await fs.writeFile(
-          file(),
-          JSON.stringify({ ...drifted, nodes: drifted.nodes.slice(1) }),
+          path.join(published(), 'catalog-info.yaml'),
+          publishedInfo('0.0.1'),
         );
         await expect(register(hub, store())).rejects.toThrow(
-          /published folder's architecture.json differs from the one being stored[\s\S]*Nothing was stored/,
+          /published folder's catalog-info.yaml names "billing-api" version "0.0.1", not the billing-api version 1.0.0 being stored/,
         );
+        // It names another version, so this run did not publish it: kept.
         expect(hub.posts()).toEqual([]);
-        expect(await exists(published())).toBe(false);
+        expect(await exists(published())).toBe(true);
       });
 
       it('removes the folder when the Hub answers 409 and holds another document', async () => {
@@ -718,9 +735,12 @@ describe('with a workspace', () => {
         const readFile = jest.spyOn(fs, 'readFile');
         try {
           for (const dir of [output, sub, path.join(workspace, 'elsewhere')]) {
-            // Each holds a copy of the prepared file.
+            // Each holds the published catalog-info.yaml.
             await fs.mkdir(dir, { recursive: true });
-            await fs.copyFile(file(), path.join(dir, 'architecture.json'));
+            await fs.writeFile(
+              path.join(dir, 'catalog-info.yaml'),
+              publishedInfo(),
+            );
             readFile.mockClear();
             await expect(
               register(hub, store({ publishedDir: dir })),
@@ -728,7 +748,7 @@ describe('with a workspace', () => {
               /publishedDir must be the folder calm:publish:local wrote for billing-api .*Nothing was stored/,
             );
             expect(readFile).not.toHaveBeenCalledWith(
-              path.join(dir, 'architecture.json'),
+              path.join(dir, 'catalog-info.yaml'),
               expect.anything(),
             );
             expect(await exists(dir)).toBe(true);
@@ -740,20 +760,20 @@ describe('with a workspace', () => {
         expect(await exists(published())).toBe(true);
       });
 
-      it('fails clearly, storing nothing, when the published architecture.json is missing or not JSON', async () => {
+      it('fails clearly, storing nothing, when the published catalog-info.yaml is missing or not YAML', async () => {
         const hub = fakeHub(base);
         await prepareAndPublish(hub, false);
-        const publishedFile = path.join(published(), 'architecture.json');
+        const publishedFile = path.join(published(), 'catalog-info.yaml');
         await fs.rm(publishedFile);
         const missing = await register(hub, store()).catch(e => e);
         expect(missing.message).toMatch(
-          /Could not check the published architecture.json in .*billing-api: it is missing/,
+          /Could not check the published catalog-info.yaml in .*billing-api: it is missing/,
         );
         expect(missing.message).not.toMatch(/ENOENT/);
-        await fs.writeFile(publishedFile, '{"secret-content": ');
+        await fs.writeFile(publishedFile, 'secret-content: [');
         const broken = await register(hub, store()).catch(e => e);
         expect(broken.message).toMatch(
-          /Could not check the published architecture.json in .*billing-api: it is not valid JSON/,
+          /Could not check the published catalog-info.yaml in .*billing-api: it is not valid YAML/,
         );
         expect(broken.message).not.toContain('secret');
         expect(hub.posts()).toEqual([]);
@@ -783,12 +803,12 @@ describe('with a workspace', () => {
         );
       });
 
-      it('keeps a folder whose architecture.json names another $id', async () => {
+      it('keeps a folder whose catalog-info.yaml names another version', async () => {
         const hub = fakeHub(base);
         await prepareAndPublish(hub);
         await fs.writeFile(
-          path.join(published(), 'architecture.json'),
-          JSON.stringify({ $id: versionUrl('billing-api', '0.0.1') }),
+          path.join(published(), 'catalog-info.yaml'),
+          publishedInfo('0.0.1'),
         );
         await expect(
           register(
@@ -799,7 +819,7 @@ describe('with a workspace', () => {
               publishedDir: published(),
             }),
           ),
-        ).rejects.toThrow(/differs from the one being stored/);
+        ).rejects.toThrow(/names "billing-api" version "0.0.1"/);
         expect(await exists(published())).toBe(true);
       });
 
@@ -1034,7 +1054,7 @@ describe('serviceEntity: Hub annotations', () => {
   };
   const url = versionUrl('billing-api', '1.0.0');
 
-  it('names the Hub architecture and version and keeps the file', () => {
+  it('names the Hub architecture and version, and no architecture file', () => {
     const entity = serviceEntity({
       ...opts,
       hub: {
@@ -1048,11 +1068,13 @@ describe('serviceEntity: Hub annotations', () => {
       [ANN.namespace]: 'hackathon',
       [ANN.architecture]: 'billing-api',
       [ANN.architectureVersion]: '1.0.0',
-      [ANN.architectureFile]: './architecture.json',
     });
     expect(
       entity.metadata.annotations?.[ANN.architectureNamespace],
     ).toBeUndefined();
+    expect(entity.metadata.annotations).not.toHaveProperty(
+      ANN.architectureFile,
+    );
     expect(entity.metadata.links).toEqual([
       { url, title: 'Architecture in CALM Hub (JSON)' },
     ]);
@@ -1073,9 +1095,15 @@ describe('serviceEntity: Hub annotations', () => {
     });
   });
 
-  it('has only the file without a Hub architecture', () => {
-    const entity = serviceEntity(opts);
-    expect(entity.metadata.annotations?.[ANN.architecture]).toBeUndefined();
+  it('has no link without a Hub URL', () => {
+    const entity = serviceEntity({
+      ...opts,
+      hub: {
+        namespace: 'hackathon',
+        architecture: 'billing-api',
+        version: '1.0.0',
+      },
+    });
     expect(entity.metadata.links).toBeUndefined();
   });
 });

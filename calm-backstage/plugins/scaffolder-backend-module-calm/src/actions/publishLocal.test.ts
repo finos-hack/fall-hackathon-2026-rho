@@ -50,7 +50,39 @@ const input = {
   patternVersion: '1.0.0',
   bundle: 'node-service@1.0.0',
   deployable: true,
+  hubNamespace: 'hackathon',
+  hubArchitecture: 'orders',
+  hubArchitectureVersion: '1.0.0',
 };
+
+describe('calm:publish:local and CALM Hub', () => {
+  it('publishes no architecture copy: the annotations point at CALM Hub', async () => {
+    await action().handler(ctx(input));
+    const dir = path.join(root, 'output', 'orders');
+    await expect(
+      fs.stat(path.join(dir, 'architecture.json')),
+    ).rejects.toThrow();
+    const entity = YAML.parse(
+      await fs.readFile(path.join(dir, 'catalog-info.yaml'), 'utf-8'),
+    );
+    expect(entity.metadata.annotations).toMatchObject({
+      'calm.finos.org/architecture': 'orders',
+      'calm.finos.org/architecture-version': '1.0.0',
+    });
+    expect(entity.metadata.annotations).not.toHaveProperty(
+      'calm.finos.org/architecture-file',
+    );
+  });
+
+  it('fails without the CALM Hub coordinates, writing nothing', async () => {
+    await expect(
+      action().handler(ctx({ ...input, hubArchitectureVersion: '' })),
+    ).rejects.toThrow(/CALM Hub is the only store of the architecture/);
+    await expect(
+      fs.stat(path.join(root, 'output', 'orders')),
+    ).rejects.toThrow();
+  });
+});
 
 describe('calm:publish:local with deployment rules', () => {
   it('merges the deployment rules and records the deployment bundle', async () => {
