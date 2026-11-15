@@ -83,6 +83,11 @@ Scope: GitHub publish, dry run, register the architecture in the Hub.
   recorded too: `calm:deploy:k8s` and `calm:deploy:gitops` take `record` and, when the deploy fails after it started,
   post a `failed` decorator (applies to the nodes the rendered workloads are labelled with, the error in the notes)
   and rethrow the error.
+- Done: the gateway reaches the service over TLS, as the architecture's HTTPS relationship says. The deployment rules
+  `k8s-deploy` 1.3.0 put an nginx sidecar on 8443 in front of the destination of an HTTPS relationship inside the
+  cluster, with a certificate cert-manager issues from a self-signed CA in the namespace; the gateway checks it, and
+  the network policies allow 8443. `yarn k8s:up` installs cert-manager v1.16.2. To use it: push the bundle
+  (`yarn bundles:push`) and recreate the cluster (`yarn k8s:down`, `yarn k8s:up`), or run `yarn k8s:up` again on it.
 - Left:
   - An existing service cannot be redeployed: `calm:register:hub` and `calm:publish:local` refuse a name whose
     folder exists.
@@ -92,7 +97,6 @@ Scope: GitHub publish, dry run, register the architecture in the Hub.
     the output folder, so a clashing name writes nothing.
   - `calm:image:build`, `calm:deploy:k8s` and `calm:decorate:deployment` have no dry run: in a dry run the
     scaffolder skips the publish step they depend on.
-  - The gateway forwards plain HTTP although the architecture says HTTPS.
 - `calm:publish:local` still writes `output/<name>/` and `calm:register:local` adds a file location.
 - Done (part 3): services are pushed to Gitea and deployed by Flux (`calm:git:publish`, `calm:deploy:gitops`); the
   card shows the Flux status and the commit applied; upgrades go through a merged pull request. Each Kustomization

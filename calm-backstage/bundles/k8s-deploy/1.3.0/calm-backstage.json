@@ -1,0 +1,10 @@
+{
+  "name": "k8s-deploy",
+  "version": "1.3.0",
+  "kind": "deployment",
+  "description": "Deployment rules for any starter, version 1.3.0: everything in 1.2.1 (a Deployment and Service per in-cluster node, the gateway's nginx config, the starter contract's environment, NetworkPolicies from the architecture's connects relationships, resource limits, liveness probes, no service-account tokens in pods, app.kubernetes.io labels, Nisshi 0.8.2, backing services rolled out one pod at a time) plus TLS between workloads joined by an HTTPS relationship: the gateway proxies to the service over HTTPS and checks its certificate, which an nginx sidecar serves on 8443 (Service port 443), issued by cert-manager from a self-signed CA in the namespace. Needs cert-manager in the cluster: `yarn k8s:up` installs it.",
+  "patterns": [
+    { "namespace": "hackathon", "patternId": "web-service" },
+    { "namespace": "hackathon", "patternId": "event-streaming" }
+  ]
+}
