@@ -26,7 +26,8 @@
     "bundles:push": "node hub/push-bundles.cjs",
     "hub:down": "docker compose -f hub/docker-compose.yml down",
     "k8s:up": "k8s/up.sh",
-    "k8s:down": "k8s/down.sh"
+    "k8s:down": "k8s/down.sh",
+    "test:k8s": "node --test k8s/*.test.cjs"
   },
   "backstage": {
     "cli": {

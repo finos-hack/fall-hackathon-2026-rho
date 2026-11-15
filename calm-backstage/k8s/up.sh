@@ -37,7 +37,9 @@ kc -n kube-system rollout status daemonset/calico-node --timeout=300s
 kc -n kube-system rollout status deployment/calico-kube-controllers --timeout=300s
 
 # Flux (source and kustomize controllers only, pinned in k8s/flux-install.cjs): deploys each service from its
-# repository in the local Gitea (http://host.minikube.internal:3300 from inside the cluster).
+# repository in the local Gitea (http://host.minikube.internal:3300 from inside the cluster). A Kustomization without a
+# service account is applied as the permissionless flux-system/default, never as the controller's cluster-admin account.
+# Rerunning `yarn k8s:up` on an existing cluster applies this.
 echo "k8s:up: installing Flux"
 node "$ROOT_DIR/k8s/flux-install.cjs" | kc apply --server-side --force-conflicts -f - >/dev/null
 kc -n flux-system rollout status deployment/source-controller --timeout=300s
