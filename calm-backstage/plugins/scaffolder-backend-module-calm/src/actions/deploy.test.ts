@@ -431,7 +431,8 @@ describe('calm:deploy:k8s: a failed deployment', () => {
     await expect(result).rejects.toThrow(/timed out waiting/);
     expect(posted).toHaveLength(1);
     expect(posted[0]).toMatchObject({
-      'unique-id': 'orders-task-1',
+      // Not the unique-id a successful retry of the task records.
+      'unique-id': 'orders-task-1-failed',
       // The Service's label does not count: only workloads name the node they run.
       'applies-to': ['web-service'],
       data: {

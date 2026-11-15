@@ -1,12 +1,15 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { LoggerService } from '@backstage/backend-plugin-api';
+import {
+  LoggerService,
+  resolveSafeChildPath,
+} from '@backstage/backend-plugin-api';
 import {
   CalmHubWriteClient,
   workloadNode,
 } from '@internal/backstage-plugin-calm-common';
 import YAML from 'yaml';
-import { recordDeployment } from './decorateDeployment';
+import { deployedNodes, recordDeployment } from './decorateDeployment';
 
 /** The workload kinds that name the architecture node they run (see `workloadNode`). */
 const WORKLOAD_KINDS = ['Deployment', 'StatefulSet', 'DaemonSet'];
@@ -57,7 +60,8 @@ export function oneLine(error: unknown): string {
 
 /**
  * Records a failed deployment in CALM Hub as a deployment decorator with the status `failed`: it applies to the
- * nodes the rendered base labels (all the architecture's nodes when none is labelled) and says what failed. Never
+ * architecture nodes the rendered workloads name (all the architecture's nodes when none of them names one) and says
+ * what failed. Its unique-id ends in `-failed`, so a retry that succeeds does not reuse it. Never
  * throws: a problem recording it is logged as a warning, so the caller's own error is the one that surfaces.
  */
 export async function recordFailedDeployment(opts: {
@@ -77,17 +81,31 @@ export async function recordFailedDeployment(opts: {
 }): Promise<void> {
   const { hub, record, logger } = opts;
   try {
-    if (!hub || opts.appBaseUrl === undefined) {
+    if (!hub) {
       throw new Error('the action has no CALM Hub client');
     }
-    let workloads = await labelledNodes(opts.baseDir);
-    if (!workloads.length) {
-      const file = path.resolve(
-        opts.workspacePath,
-        record.architecturePath ?? 'architecture.json',
+    if (opts.appBaseUrl === undefined) {
+      throw new Error(
+        "the action has no app.baseUrl, which the decorator's deployment-details links to",
       );
-      const doc = JSON.parse(await fs.readFile(file, 'utf-8'));
-      workloads = (Array.isArray(doc?.nodes) ? doc.nodes : [])
+    }
+    const file = resolveSafeChildPath(
+      opts.workspacePath,
+      record.architecturePath ?? 'architecture.json',
+    );
+    const architecture = JSON.parse(await fs.readFile(file, 'utf-8'));
+    const labelled = await labelledNodes(opts.baseDir);
+    let workloads = deployedNodes(labelled, architecture);
+    const notNodes = labelled.filter(w => !workloads.includes(w));
+    if (notNodes.length) {
+      logger.warn(
+        `Not nodes of the architecture, so left out of applies-to: ${notNodes.join(
+          ', ',
+        )}`,
+      );
+    }
+    if (!workloads.length) {
+      workloads = (Array.isArray(architecture?.nodes) ? architecture.nodes : [])
         .map((n: any) => n?.['unique-id'])
         .filter((id: unknown): id is string => typeof id === 'string');
     }
@@ -108,6 +126,8 @@ export async function recordFailedDeployment(opts: {
         }, namespace ${opts.namespace}).`,
         workspacePath: opts.workspacePath,
         taskId: opts.taskId,
+        // A retry of the task that succeeds records its own decorator: the two must not share a unique-id.
+        uniqueIdSuffix: '-failed',
       },
       logger,
     );

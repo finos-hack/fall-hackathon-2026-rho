@@ -51,6 +51,8 @@ export interface DeploymentRecord {
   workspacePath: string;
   /** Makes the decorator's unique-id; the time when the action runs outside a task. */
   taskId?: string;
+  /** Appended to the unique-id, e.g. `-failed`, so a failed and a successful run of one task differ. */
+  uniqueIdSuffix?: string;
 }
 
 /**
@@ -106,7 +108,9 @@ export async function recordDeployment(
       : [architectureVersionUiTarget(hubNamespace, numericId, version)];
 
   // One decorator per run: the task id, or the time when the action runs outside a task.
-  const uniqueId = `${name}-${input.taskId ?? Date.now()}`;
+  const uniqueId = `${name}-${input.taskId ?? Date.now()}${
+    input.uniqueIdSuffix ?? ''
+  }`;
   const decorator = deploymentDecorator({
     uniqueId,
     target,
