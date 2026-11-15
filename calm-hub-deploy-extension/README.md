@@ -12,6 +12,10 @@ service card already reads the deployments this extension records.
 
 ![The Deployment tab in CALM Hub](docs/demo/deployment-tab.png)
 
+▶ [The demo](docs/demo/calm-hub-deploy-demo.mp4) (2:10): a terminal on the cluster and CALM Hub side by side, from
+a pattern decision changed in CALM Hub to the cluster following it, then a version the controls gate refuses, then
+the same extension over MCP. Chapters and how to record it again: [docs/demo](docs/demo/README.md).
+
 ## What it adds to CALM Hub
 
 On an architecture version, under **Extensions**:
