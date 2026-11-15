@@ -270,6 +270,17 @@ export function bundlesFor(
     );
 }
 
+/**
+ * The newest bundle: the highest version across all names, and the later name when versions are equal. `bundlesFor`
+ * sorts by name first, so the last element would be the newest version of the alphabetically last name instead.
+ */
+export function newestBundle(bundles: BundleInfo[]): BundleInfo {
+  return bundles.reduce((best, b) => {
+    const c = compareVersions(b.version, best.version);
+    return c > 0 || (c === 0 && b.name.localeCompare(best.name) > 0) ? b : best;
+  });
+}
+
 /** The `deploy` value of a bundle whose rendered service the Template can build and deploy to Kubernetes. */
 export const DEPLOY_KUBERNETES = 'kubernetes';
 
@@ -386,9 +397,13 @@ export function templateEntity(
             bundleKind(b) === 'full' ? ' (full bundle)' : ''
           }`,
       ),
-      default: starters.length
-        ? starters[starters.length - 1]
-        : bundleValues[bundleValues.length - 1],
+      default: value(
+        newestBundle(
+          starters.length
+            ? codeBundles.filter(b => bundleKind(b) === 'starter')
+            : codeBundles,
+        ),
+      ),
       'ui:widget': 'radio',
     };
   }
@@ -399,7 +414,9 @@ export function templateEntity(
         'Render deploy/k8s for a starter: workloads, network policies from the architecture, hardening. Not used with a full bundle.',
       type: 'string',
       enum: deployRules,
-      default: deployRules[deployRules.length - 1],
+      default: value(
+        newestBundle(fitting.filter(b => bundleKind(b) === 'deployment')),
+      ),
       'ui:widget': 'radio',
     };
   }

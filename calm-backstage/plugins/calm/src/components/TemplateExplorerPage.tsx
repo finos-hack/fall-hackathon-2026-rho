@@ -12,7 +12,9 @@ import { Entity, stringifyEntityRef } from '@backstage/catalog-model';
 import {
   CALM_ANNOTATIONS as ANN,
   compareVersions,
+  newestFitting,
   patternEntityName,
+  serviceBundles,
   upgradeTemplatePath,
 } from '@internal/backstage-plugin-calm-common';
 import Box from '@material-ui/core/Box';
@@ -310,7 +312,24 @@ function UsedByTab(props: { bundle: Bundle; services?: Entity[] }) {
   if (!props.services) {
     return <LinearProgress />;
   }
-  const latest = props.bundle.versions[0]?.version;
+  const { bundle } = props;
+  const available = bundle.versions.map(v => ({
+    ...v,
+    name: bundle.name,
+    kind: bundle.kind,
+  }));
+  /** The newest version that fits the service's pattern, as the card and the upgrade run see it. */
+  const newestFor = (e: Entity): string | undefined => {
+    const pattern = serviceBundles(e.metadata.annotations).pattern;
+    return pattern
+      ? newestFitting(
+          available,
+          bundle.name,
+          pattern.namespace,
+          pattern.patternId,
+        )?.version
+      : undefined;
+  };
   const users = props.services
     .map(e => ({ e, version: usedVersion(e, props.bundle) }))
     .filter((u): u is { e: Entity; version: string } => Boolean(u.version))
@@ -334,6 +353,7 @@ function UsedByTab(props: { bundle: Bundle; services?: Entity[] }) {
       </TableHead>
       <TableBody>
         {users.map(({ e, version }) => {
+          const latest = newestFor(e);
           const behind = latest && compareVersions(version, latest) < 0;
           const ref = stringifyEntityRef(e);
           const inGit = Boolean(e.metadata.annotations?.[ANN.gitops]);
