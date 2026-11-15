@@ -170,16 +170,23 @@ function fakeKubectl(opts: {
   failFlux?: string;
 }) {
   const calls: string[][] = [];
-  /** What each `apply -f` applied, and the remote's main at that moment. */
-  const applied: { objects: any[]; remoteMain: string; call: number }[] = [];
+  /** What each `apply` applied, its arguments before `-f`, and the remote's main at that moment. */
+  const applied: {
+    objects: any[];
+    flags: string[];
+    remoteMain: string;
+    call: number;
+  }[] = [];
   const kubectl = async (args: string[]) => {
     calls.push(args);
     const a = args.join(' ');
-    if (args[0] === 'apply' && args[1] === '-f') {
+    if (args[0] === 'apply') {
+      const f = args.indexOf('-f');
       applied.push({
-        objects: YAML.parseAllDocuments(await fs.readFile(args[2], 'utf-8'))
+        objects: YAML.parseAllDocuments(await fs.readFile(args[f + 1], 'utf-8'))
           .map(d => d.toJSON())
           .filter(Boolean),
+        flags: args.slice(1, f),
         remoteMain: await git(opts.remote, ['rev-parse', 'main']),
         call: calls.length - 1,
       });
@@ -311,6 +318,13 @@ describe('calm:deploy:gitops', () => {
     const [tenant, flux] = fake.applied;
     // The prune-disabled Namespace is on the cluster before Flux sees an overlay without it.
     expect(tenant.remoteMain).toBe(before);
+    // Server-side apply under its own field manager: Flux takes over fields owned by kubectl's managers.
+    expect(tenant.flags).toEqual([
+      '--server-side',
+      '--field-manager=calm-backstage',
+      '--force-conflicts',
+    ]);
+    expect(flux.flags).toEqual([]);
     expect(tenant.objects[0]).toMatchObject({
       metadata: {
         name: 'calm-orders',

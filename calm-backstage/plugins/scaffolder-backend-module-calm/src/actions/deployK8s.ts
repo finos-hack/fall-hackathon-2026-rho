@@ -193,10 +193,18 @@ export async function checkNamespace(
   );
 }
 
-/** Applies `objects` with `kubectl apply -f` from a temporary file: they are cluster state, not part of a repository. */
+/** The field manager `applyObjects` uses with `serverSide`: not one of kubectl's, which Flux takes over. */
+const FIELD_MANAGER = 'calm-backstage';
+
+/**
+ * Applies `objects` with `kubectl apply -f` from a temporary file: they are cluster state, not part of a repository.
+ * With `serverSide`, it uses server-side apply under the field manager `FIELD_MANAGER`: Flux's kustomize-controller
+ * takes over the fields that kubectl's own managers own on objects it applies, and can drop them.
+ */
 export async function applyObjects(
   kubectl: Kubectl,
   objects: object[],
+  options: { serverSide?: boolean } = {},
 ): Promise<void> {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'calm-objects-'));
   try {
@@ -205,7 +213,18 @@ export async function applyObjects(
       file,
       objects.map(o => `---\n${YAML.stringify(o)}`).join(''),
     );
-    await kubectl(['apply', '-f', file]);
+    await kubectl([
+      'apply',
+      ...(options.serverSide
+        ? [
+            '--server-side',
+            `--field-manager=${FIELD_MANAGER}`,
+            '--force-conflicts',
+          ]
+        : []),
+      '-f',
+      file,
+    ]);
   } finally {
     await fs.rm(tmp, { recursive: true, force: true });
   }

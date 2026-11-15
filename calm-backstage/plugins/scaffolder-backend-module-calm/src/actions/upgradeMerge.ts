@@ -128,7 +128,9 @@ export function createCalmUpgradeMergeAction(options: {
       );
       await gitCommitAll(dir, `Deploy ${image}`, git);
       const diffStat = await gitDiffStat(dir, gitops.branch, git);
-      await applyObjects(kubectl, fluxTenantObjects({ name, namespace }));
+      await applyObjects(kubectl, fluxTenantObjects({ name, namespace }), {
+        serverSide: true,
+      });
       const repo = serviceRepository(gitops, name);
       // The upgrade branch is this action's own: a run that failed after pushing it left an older one there.
       await gitPush(dir, repo.pushUrl, branch, gitops.auth, {

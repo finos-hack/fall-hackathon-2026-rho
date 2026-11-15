@@ -52,18 +52,21 @@ const settings = () => ({
   namespacePrefix: 'calm-',
 });
 
-/** A kubectl standing in for the cluster: records what each `apply -f` applied, and the remote's branches then. */
+/** A kubectl standing in for the cluster: records what each `apply` applied, its arguments before `-f`, and the remote's branches then. */
 function fakeKubectl(remote: string, namespace?: any) {
-  const applied: { objects: any[]; remoteBranches: string }[] = [];
+  const applied: { objects: any[]; flags: string[]; remoteBranches: string }[] =
+    [];
   const kubectl = async (args: string[]) => {
     if (args[0] === 'get' && args[1] === 'namespace') {
       return namespace ? JSON.stringify(namespace) : '';
     }
-    if (args[0] === 'apply' && args[1] === '-f') {
+    if (args[0] === 'apply') {
+      const f = args.indexOf('-f');
       applied.push({
-        objects: YAML.parseAllDocuments(await fs.readFile(args[2], 'utf-8'))
+        objects: YAML.parseAllDocuments(await fs.readFile(args[f + 1], 'utf-8'))
           .map(d => d.toJSON())
           .filter(Boolean),
+        flags: args.slice(1, f),
         remoteBranches: await git(remote, [
           'for-each-ref',
           '--format=%(refname:short) %(objectname)',
@@ -435,6 +438,12 @@ describe('calm:upgrade:merge', () => {
       name: 'calm-orders',
       annotations: { 'kustomize.toolkit.fluxcd.io/prune': 'disabled' },
     });
+    // Server-side apply under its own field manager: Flux takes over fields owned by kubectl's managers.
+    expect(tenant.flags).toEqual([
+      '--server-side',
+      '--field-manager=calm-backstage',
+      '--force-conflicts',
+    ]);
     // Applied while the remote held only the old main: before the branch was pushed and merged.
     expect(tenant.remoteBranches).toBe(`main ${before}`);
     expect(

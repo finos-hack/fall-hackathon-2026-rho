@@ -206,7 +206,9 @@ export function createCalmDeployGitopsAction(options: {
       );
       // Before the push: the pushed overlay no longer holds the Namespace, and for a service deployed before that
       // change, Flux would prune it unless it is already marked prune-disabled.
-      await applyObjects(kubectl, fluxTenantObjects({ name, namespace }));
+      await applyObjects(kubectl, fluxTenantObjects({ name, namespace }), {
+        serverSide: true,
+      });
       const repo = serviceRepository(gitops, name);
       await gitPush(dir, repo.pushUrl, gitops.branch, gitops.auth, git);
 

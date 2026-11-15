@@ -158,7 +158,9 @@ build of Quarkus 3.33.4 and 3.40.1 (BOM `com.redhat.quarkus.platform:quarkus-bom
   Namespace in its Kustomization's inventory; the push that drops `namespace.yaml` would delete the namespace and
   everything in it. The Namespace carries `kustomize.toolkit.fluxcd.io/prune: disabled`, applied before that push.
   An upgrade is the risky path: the old Kustomization can reconcile the merge commit before `calm:deploy:gitops`
-  runs, so `calm:upgrade:merge` applies the annotation too.
+  runs, so `calm:upgrade:merge` applies the annotation too. Both apply it server-side under their own field manager
+  (`calm-backstage`): Flux takes over the fields owned by kubectl's managers on objects it applies, so an old
+  Kustomization still applying `namespace.yaml` would drop an annotation set by a plain `kubectl apply`.
 - **GitHub is not a drop-in.** Push-to-create, the pull request API and anonymous reads by Flux are Gitea's. The Git
   host sits behind `GiteaClient`; a GitHub client is a track.
 
