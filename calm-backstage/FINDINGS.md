@@ -230,8 +230,13 @@ build of Quarkus 3.33.4 and 3.40.1 (BOM `com.redhat.quarkus.platform:quarkus-bom
     origin, so the app's script is same-origin with Backstage's APIs. Use `user-cookie` auth or a separate origin.
   - Anyone who can push to a service repository in Gitea (port 3300, fixed admin password) can change anything in
     that service's namespace through Flux (each Kustomization runs as a service account bound to `admin` there;
-    the namespace enforces Pod Security `baseline`, so not privileged or host-access pods). Gitea is published on
-    127.0.0.1:3300, so by default that is anyone on this machine, not the network; with `GITEA_BIND=0.0.0.0` (Linux)
-    it is the network again unless a firewall blocks 3300. Seed a random password.
+    the namespace enforces Pod Security `baseline`, so not privileged or host-access pods).
+    A Kustomization without `serviceAccountName` is applied as `flux-system/default`, which has no permissions
+    (kustomize-controller runs with `--default-service-account=default`), so a service deployed before #12 stops
+    reconciling, its workloads keep running, until it is redeployed. Pod Security `baseline` is enforced on a
+    pre-existing service namespace the next time the service is deployed; a workload that needs more (privileged,
+    host namespaces, paths or ports) then fails admission.
+    Gitea is published on 127.0.0.1:3300, so by default that is anyone on this machine, not the network; with
+    `GITEA_BIND=0.0.0.0` (Linux) it is the network again unless a firewall blocks 3300. Seed a random password.
 - **A `PageBlueprint` gets a sidebar item from the plugin's `title` and `icon` and a `routeRef`**, not from the page's
   own title.
