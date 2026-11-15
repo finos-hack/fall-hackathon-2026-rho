@@ -148,7 +148,7 @@ export function createCalmRegisterHubAction(options: {
             .string()
             .optional()
             .describe(
-              'Store mode: the folder calm:publish:local made from the prepared file (inside calm.publish.localDir). Removed when the store fails, if its architecture.json has the same $id, so the Template can be run again',
+              'Store mode: the folder calm:publish:local made from the prepared file (calm.publish.localDir/<name>). Its architecture.json must be the file being stored. Removed when the store fails, if it is that folder and its architecture.json has the same $id, so the Template can be run again',
             ),
       },
       output: {
@@ -196,12 +196,14 @@ export function createCalmRegisterHubAction(options: {
       // name the catalog holds from elsewhere, or a service folder that exists, would make publish fail after the Hub
       // had a new version. The store mode runs after the publish, which made the folder, so it skips the folder check.
       const target = resolveSafeChildPath(options.localDir, name);
-      assertClaimable(
-        await lookUpClaim(options, entityRef),
-        fileLocationRef(path.join(target, CATALOG_INFO_FILE)),
-        entityRef,
-      );
+      const checkClaim = async () =>
+        assertClaimable(
+          await lookUpClaim(options, entityRef),
+          fileLocationRef(path.join(target, CATALOG_INFO_FILE)),
+          entityRef,
+        );
       if (mode === 'store') {
+        // The store mode makes the claim check in its cleanup path: a refusal there removes the published folder.
         await storePrepared(ctx, {
           hub,
           namespace,
@@ -209,10 +211,12 @@ export function createCalmRegisterHubAction(options: {
           entityRef,
           file,
           read,
-          localDir: options.localDir,
+          target,
+          checkClaim,
         });
         return;
       }
+      await checkClaim();
       const folderExists = await fs
         .stat(target)
         .then(() => true)
@@ -349,7 +353,8 @@ interface StoreContext {
 /**
  * Store mode: stores the prepared file, as it is, as the version its `$id` names (what was rendered and published
  * names that version). An identical document at that version is reused; another one fails, writing nothing. When
- * nothing could be stored, the folder this run published is removed (see `removePublished`).
+ * the store fails after the file checks and before a POST that worked, the folder this run published is removed
+ * (see `removePublished`).
  */
 async function storePrepared(
   ctx: StoreContext,
@@ -360,7 +365,10 @@ async function storePrepared(
     entityRef: string;
     file: string;
     read: Record<string, any>;
-    localDir: string;
+    /** The service folder calm:publish:local made: the only folder the cleanup may remove. */
+    target: string;
+    /** The catalog name check. */
+    checkClaim: () => Promise<unknown>;
   },
 ) {
   const { hub, namespace, name, entityRef, file, read } = opts;
@@ -397,10 +405,28 @@ async function storePrepared(
     );
   }
 
-  const { versions } = await ownedVersions(hub, namespace, name, entityRef);
-
+  // Everything from here on may fail with nothing stored for this run: the folder this run published is then removed.
   let created = false;
+  // Set when the POST itself failed (a network error or a 5xx): the Hub may have committed the version.
+  let postFailed = false;
   try {
+    await opts.checkClaim();
+    const { versions } = await ownedVersions(hub, namespace, name, entityRef);
+    const publishedDir = ctx.input.publishedDir;
+    if (publishedDir && !ctx.isDryRun) {
+      // What was published (and pushed next) must be what is stored.
+      const published = JSON.parse(
+        await fs.readFile(
+          path.join(path.resolve(publishedDir), ARCHITECTURE_FILE),
+          'utf-8',
+        ),
+      );
+      if (!sameJson(published, read)) {
+        throw new Error(
+          `The published folder's ${ARCHITECTURE_FILE} differs from the one being stored (${file})`,
+        );
+      }
+    }
     // The Hub's document at the version, if it holds it: the same one (`$id` aside) is reused, another one fails.
     const reuse = async (held: unknown) => {
       if (!sameJson(withoutId(held as Record<string, any>), withoutId(read))) {
@@ -424,6 +450,7 @@ async function storePrepared(
         created = true;
       } catch (e) {
         if (!(e instanceof CalmHubError && e.status === 409)) {
+          postFailed = true;
           throw e;
         }
         // Another run stored the version in between.
@@ -443,17 +470,18 @@ async function storePrepared(
     }
     const removed = await removePublished(
       ctx,
-      opts.localDir,
+      opts.target,
       ctx.input.publishedDir,
       url,
     );
     if (!removed) {
       throw e;
     }
+    const message = (e as Error).message.replace(/[.\s]+$/, '');
     throw new Error(
-      `${
-        (e as Error).message
-      }. Nothing was stored in CALM Hub, and the folder ${removed} this run published was removed, so the Template can be run again`,
+      postFailed
+        ? `${message}. Storing in CALM Hub failed, and CALM Hub may or may not hold ${namespace}/${name} ${version} now; the folder ${removed} this run published was removed, so the Template can be run again (a rerun with the same document reuses it if CALM Hub has it)`
+        : `${message}. Nothing was stored in CALM Hub, and the folder ${removed} this run published was removed, so the Template can be run again`,
       { cause: e },
     );
   }
@@ -466,20 +494,23 @@ async function storePrepared(
 }
 
 /**
- * Removes `publishedDir`, a folder inside `calm.publish.localDir`, when its architecture.json has the `$id` of the
- * prepared file: proof that this run published it. Gives the removed folder, or undefined when nothing was removed.
- * Never throws: a cleanup error is logged, so it cannot hide the store error.
+ * Removes `publishedDir` when it is the service folder calm:publish:local made (`target`) and its architecture.json
+ * has the `$id` of the prepared file: proof that this run published it. Gives the removed folder, or undefined when
+ * nothing was removed. Never throws: a cleanup error is logged, so it cannot hide the store error.
  */
 async function removePublished(
   ctx: StoreContext,
-  localDir: string,
+  target: string,
   publishedDir: string,
   id: string,
 ): Promise<string | undefined> {
   try {
-    const dir = resolveSafeChildPath(localDir, publishedDir);
-    if (dir === path.resolve(localDir)) {
-      throw new Error(`${dir} is calm.publish.localDir itself`);
+    const dir = path.resolve(publishedDir);
+    if (dir !== path.resolve(target)) {
+      ctx.logger.warn(
+        `Kept ${dir}: it is not the service folder ${target}, the only folder this step removes`,
+      );
+      return undefined;
     }
     const published = JSON.parse(
       await fs.readFile(path.join(dir, ARCHITECTURE_FILE), 'utf-8'),
@@ -494,7 +525,7 @@ async function removePublished(
     }
     await fs.rm(dir, { recursive: true, force: true });
     ctx.logger.info(
-      `Removed ${dir}, which this run published, since nothing was stored in CALM Hub`,
+      `Removed ${dir}, which this run published, since storing in CALM Hub failed`,
     );
     return dir;
   } catch (e) {

@@ -381,11 +381,15 @@ describe('with a workspace', () => {
   describe('calm:register:hub, prepare and store', () => {
     const noEntities = { getEntityByRef: jest.fn(async () => undefined) };
     const auth = { getOwnServiceCredentials: jest.fn(async () => ({})) } as any;
-    const register = (hub: ReturnType<typeof fakeHub>, c: any) =>
+    const register = (
+      hub: ReturnType<typeof fakeHub>,
+      c: any,
+      catalog: any = noEntities,
+    ) =>
       createCalmRegisterHubAction({
         hub: hub.client,
         namespace: 'hackathon',
-        catalog: noEntities,
+        catalog,
         auth,
         localDir: path.join(workspace, 'output'),
       }).handler(c);
@@ -573,15 +577,156 @@ describe('with a workspace', () => {
     describe('when the store fails', () => {
       const published = () => path.join(workspace, 'output', 'billing-api');
       // Prepare, publish (a copy of the prepared file), and another document in the Hub as the prepared version.
-      const prepareAndPublish = async (hub: ReturnType<typeof fakeHub>) => {
+      // With conflict false, the Hub is left empty.
+      const prepareAndPublish = async (
+        hub: ReturnType<typeof fakeHub>,
+        conflict = true,
+      ) => {
         await register(hub, ctx({ name: 'billing-api', mode: 'prepare' }));
         await fs.mkdir(published(), { recursive: true });
         await fs.copyFile(file(), path.join(published(), 'architecture.json'));
+        if (conflict) {
+          hub.architectures.set(
+            'billing-api',
+            new Map([['1.0.0', ours({ title: 'Other', nodes: [] })]]),
+          );
+        }
+      };
+      const store = (extra: object = {}) =>
+        ctx({
+          name: 'billing-api',
+          mode: 'store',
+          publishedDir: published(),
+          ...extra,
+        });
+      const removedMessage =
+        /Nothing was stored in CALM Hub, and the folder .*billing-api this run published was removed, so the Template can be run again/;
+
+      it('removes the folder when the Hub fails at the start (500), and rethrows the 500', async () => {
+        const hub = fakeHub(base);
+        await prepareAndPublish(hub, false);
+        jest
+          .spyOn(hub.client, 'architectureVersions')
+          .mockRejectedValueOnce(
+            new CalmHubError(500, base, 'GET versions -> 500: down'),
+          );
+        const error = await register(hub, store()).catch(e => e);
+        expect(error.message).toMatch(/GET versions -> 500: down/);
+        expect(error.message).toMatch(removedMessage);
+        expect(await exists(published())).toBe(false);
+        expect(hub.posts()).toEqual([]);
+      });
+
+      it("removes the folder when the Hub's architecture is another service's", async () => {
+        const hub = fakeHub(base);
+        await prepareAndPublish(hub, false);
         hub.architectures.set(
           'billing-api',
-          new Map([['1.0.0', ours({ title: 'Other', nodes: [] })]]),
+          new Map([
+            [
+              '1.0.0',
+              {
+                title: 'X',
+                metadata: {
+                  'calm-backstage': { entity: 'component:default/other' },
+                },
+              },
+            ],
+          ]),
         );
-      };
+        await expect(register(hub, store())).rejects.toThrow(
+          /was registered for component:default\/other[\s\S]*Nothing was stored in CALM Hub, and the folder/,
+        );
+        expect(await exists(published())).toBe(false);
+        expect(hub.posts()).toEqual([]);
+      });
+
+      it('removes the folder when the catalog holds the name from elsewhere', async () => {
+        const hub = fakeHub(base);
+        await prepareAndPublish(hub, false);
+        const catalog = {
+          getEntityByRef: jest.fn(async () => ({
+            metadata: {
+              name: 'billing-api',
+              annotations: {
+                'backstage.io/managed-by-location': 'url:https://example.com/x',
+              },
+            },
+          })),
+        };
+        await expect(register(hub, store(), catalog)).rejects.toThrow(
+          removedMessage,
+        );
+        expect(await exists(published())).toBe(false);
+      });
+
+      it("fails, storing nothing, when the published folder's architecture.json differs from the workspace file", async () => {
+        const hub = fakeHub(base);
+        await prepareAndPublish(hub, false);
+        const drifted = await readFile();
+        await fs.writeFile(
+          file(),
+          JSON.stringify({ ...drifted, nodes: drifted.nodes.slice(1) }),
+        );
+        await expect(register(hub, store())).rejects.toThrow(
+          /published folder's architecture.json differs from the one being stored[\s\S]*Nothing was stored/,
+        );
+        expect(hub.posts()).toEqual([]);
+        expect(await exists(published())).toBe(false);
+      });
+
+      it('removes the folder when the Hub answers 409 and holds another document', async () => {
+        const hub = fakeHub(base);
+        await prepareAndPublish(hub, false);
+        jest
+          .spyOn(hub.client, 'createArchitectureVersion')
+          .mockImplementationOnce(async (_ns, name, version) => {
+            hub.architectures.set(
+              name,
+              new Map([[version, ours({ title: 'Other', nodes: [] })]]),
+            );
+            throw new CalmHubError(409, versionUrl(name, version), '409');
+          });
+        await expect(register(hub, store())).rejects.toThrow(
+          /already holds another document[\s\S]*Nothing was stored in CALM Hub/,
+        );
+        expect(await exists(published())).toBe(false);
+      });
+
+      it('does not claim nothing was stored when the POST itself failed', async () => {
+        const hub = fakeHub(base);
+        await prepareAndPublish(hub, false);
+        jest
+          .spyOn(hub.client, 'createArchitectureVersion')
+          .mockRejectedValueOnce(new Error('socket hang up.'));
+        const error = await register(hub, store()).catch(e => e);
+        expect(error.message).toMatch(/socket hang up/);
+        expect(error.message).not.toMatch(/Nothing was stored/);
+        expect(error.message).toMatch(
+          /may or may not hold hackathon\/billing-api 1\.0\.0[\s\S]*the same document reuses it/,
+        );
+        expect(error.message).not.toContain('..');
+        expect(await exists(published())).toBe(false);
+      });
+
+      it('refuses to remove calm.publish.localDir itself, or a folder other than the service folder', async () => {
+        const hub = fakeHub(base);
+        await prepareAndPublish(hub);
+        const output = path.join(workspace, 'output');
+        const sub = path.join(published(), 'sub');
+        for (const dir of [output, sub]) {
+          // Each holds a copy of the prepared file, so only the target check keeps it.
+          await fs.mkdir(dir, { recursive: true });
+          await fs.copyFile(file(), path.join(dir, 'architecture.json'));
+          const c = store({ publishedDir: dir });
+          const error = await register(hub, c).catch(e => e);
+          expect(error.message).toMatch(/already holds another document/);
+          expect(error.message).not.toMatch(/removed/);
+          expect(c.logger.warn).toHaveBeenCalled();
+          expect(await exists(dir)).toBe(true);
+        }
+        expect(await exists(published())).toBe(true);
+      });
       const exists = (p: string) =>
         fs.stat(p).then(
           () => true,
@@ -622,7 +767,7 @@ describe('with a workspace', () => {
               publishedDir: published(),
             }),
           ),
-        ).rejects.toThrow(/already holds another document/);
+        ).rejects.toThrow(/differs from the one being stored/);
         expect(await exists(published())).toBe(true);
       });
 

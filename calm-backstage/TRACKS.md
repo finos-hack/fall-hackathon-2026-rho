@@ -95,10 +95,15 @@ Scope: GitHub publish, dry run, register the architecture in the Hub.
     `prepare` mode first, in `store` mode then), so a run that fails in the render or the publish leaves nothing in
     the Hub. `prepare` checks the catalog and the output folder, so a clashing name writes nothing. `store` stores
     the prepared file as the version its `$id` names (an identical document at that version is reused, another one
-    fails); when the store fails, nothing is in Git yet and it removes the folder this run published
-    (`publishedDir`), so the Template can be run again. A failure after the store (git publish, build, deploy) still
-    leaves the stored version, which cannot be deleted (a rerun with the same document reuses it), and the published
-    folder, so a rerun with that name is refused.
+    fails), and first checks that the published `architecture.json` is that file. When the store step fails before a
+    version was written (the Hub unreachable or answering an error, the catalog or Hub name taken in between, a
+    different document at that version, a published file that differs) or in the POST itself (the Hub may or may not
+    hold the version then; a rerun with the same document reuses it), nothing is in Git yet and it removes the
+    service folder this run published (`publishedDir`, only `<localDir>/<name>` with the same `$id`), so the Template
+    can be run again. A workspace file without a prepared `$id` fails with the folder kept, and so does a failed
+    read-back after a POST that worked (the version exists). A failure after the store (git publish, build, deploy)
+    still leaves the stored version, which cannot be deleted (a rerun with the same document reuses it), and the
+    published folder, so a rerun with that name is refused.
   - `calm:image:build`, `calm:deploy:k8s` and `calm:decorate:deployment` have no dry run: in a dry run the
     scaffolder skips the publish step they depend on.
 - `calm:publish:local` still writes `output/<name>/` and `calm:register:local` adds a file location.
