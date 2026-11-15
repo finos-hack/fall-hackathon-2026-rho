@@ -51,14 +51,14 @@ app-config.local.yaml --config <that file>`. Both share the Hub, the registry, G
 4. **Create** (`/create` → *Web Service (CALM pattern)*):
    - **Service**: a name (a lower-case letter first, then letters, digits and hyphens).
    - **Choices**: the data store (one of PostgreSQL or MongoDB), the add-ons (any of Redis, RabbitMQ,
-     OpenTelemetry), the template bundle (`web-service@1.0.0`, `@2.0.0` or `@3.0.1`) and, for a bundle that renders
-     Kubernetes manifests (`@3.0.1`), whether to deploy to the local cluster.
+     OpenTelemetry), the template bundle (`web-service@1.0.0`, `@2.0.0` or `@3.0.0`) and, for a bundle that renders
+     Kubernetes manifests (`@3.0.0`), whether to deploy to the local cluster.
    - **Details**: the values `calm generate` leaves open for those choices (host, ports, owner, service name).
    - The run generates the architecture, fills the values, runs `calm validate`, stores the architecture in CALM
      Hub (namespace `hackathon`, as `<name>` version 1.0.0, which gives it its `$id`), renders the bundle, writes the
      result to `output/<name>/` and registers it in the catalog. The new service page shows its own diagram, read
      from the Hub.
-5. **Deploy** (needs `yarn k8s:up`, then a restart of Backstage): with `web-service@3.0.1` and the deploy box ticked,
+5. **Deploy** (needs `yarn k8s:up`, then a restart of Backstage): with `web-service@3.0.0` and the deploy box ticked,
    the run also builds the service's image inside the cluster and applies its manifests to the namespace
    `calm-<name>`. The service page then shows where it runs and the network policies made from the architecture's
    relationships, and its **Kubernetes** tab lists the pods. The run also records the deployment in CALM Hub, as a
@@ -70,7 +70,7 @@ app-config.local.yaml --config <that file>`. Both share the Hub, the registry, G
 
 6. **Template Explorer** (sidebar): every bundle in the registry as starters, deployment rules and full bundles. For
    a version: its OCI reference and digest, its source folder in Gitea at the commit it was published from, its
-   files, what changed from an older version (try `k8s-deploy` 1.0.0 → 1.2.2), and the services that use it.
+   files, what changed from an older version (try `k8s-deploy` 1.0.0 → 1.2.1), and the services that use it.
 7. **Create with a starter**: on the web-service Template choose a starter (`spring-boot-service`,
    `quarkus-service` or `node-service`) and deployment rules (`k8s-deploy`). The run pushes the service to
    `calm-services/<name>` in Gitea, builds the image from that commit, commits the overlay, and Flux deploys it. The
@@ -82,9 +82,10 @@ app-config.local.yaml --config <that file>`. Both share the Hub, the registry, G
    consumes through a [Nisshi](https://nisshi.io) broker, with PostgreSQL or SQLite storage. Its page sends events and
    shows them coming back.
 10. **Upgrade**: create a service on `spring-boot-service@1.0.0` and `k8s-deploy@1.0.0`. The card then says 1.1.0 and
-    1.2.2 are available; **Upgrade** runs the `calm-upgrade` Template: re-render on a branch, build, open and merge a
+    1.3.0 are available; **Upgrade** runs the `calm-upgrade` Template: re-render on a branch, build, open and merge a
     pull request in Gitea, Flux applies the merge commit, CALM Hub records the deployment. The app page then shows
-    Spring Boot 4.1.2 and `k8s-deploy@1.2.2`.
+    Spring Boot 4.1.2 and `k8s-deploy@1.3.0`. `k8s-deploy` 1.3.0 needs cert-manager: run `yarn k8s:up` again on a
+    cluster created before it.
 
 To change a bundle, add a new version folder in Gitea's `calm-templates/bundles` (or in `bundles/`) and run
 `node hub/push-bundles.cjs --from-git` (or `yarn bundles:push`). A published version never changes: changed content

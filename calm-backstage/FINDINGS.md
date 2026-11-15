@@ -120,6 +120,13 @@ Each is a candidate for a published, supported API.
 - **minikube's docker driver can give the API server a new port on each start.** `k8s/up.sh` rewrites
   `app-config.local.yaml` every time, and Backstage needs a restart after it.
 - **Policies need a CNI that enforces them.** The profile is started with `--cni=calico`.
+- **A NetworkPolicy names the pod's port, not the Service's.** The TLS sidecar (`k8s-deploy` 1.3.0) is reached on
+  Service port 443, but its policies allow 8443, the port it listens on in the pod.
+- **`nginx-unprivileged` listens on 8080 out of the box** (its `conf.d/default.conf`), the starters' default port. A
+  sidecar next to an app on 8080 must replace that folder, as the TLS sidecar's ConfigMap does, or one of them fails
+  to bind.
+- **cert-manager's resources are CRDs**: a bundle that renders an `Issuer` or a `Certificate` fails to apply on a
+  cluster without cert-manager. Clusters made before `yarn k8s:up` installed it need it run again.
 - **An image built into minikube needs a tag other than `latest` and `imagePullPolicy: IfNotPresent`**, or the pod
   tries to pull it.
 - **`hub/push-bundles.cjs` loads a TypeScript file through Node's type stripping**, which Node 22 before 22.18

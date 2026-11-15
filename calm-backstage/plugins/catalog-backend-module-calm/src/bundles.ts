@@ -5,6 +5,7 @@ import { readBundleMeta } from '@internal/backstage-plugin-calm-common';
 import {
   type BundleRegistrySettings,
   bundleRef,
+  headBundleDigest,
   listRepositories,
   listTags,
   readBundleConfig,
@@ -16,13 +17,67 @@ export interface BundleRegistryClient {
   listRepositories(registryUrl: string, prefix?: string): Promise<string[]>;
   listTags(registryUrl: string, repository: string): Promise<string[]>;
   readBundleConfig(ref: string): Promise<{ digest: string; config: any }>;
+  /** The manifest digest under the tag, from a HEAD request; `undefined` when the registry answers 404. */
+  headBundleDigest(ref: string): Promise<string | undefined>;
 }
 
 const defaultClient: BundleRegistryClient = {
   listRepositories,
   listTags,
   readBundleConfig,
+  headBundleDigest,
 };
+
+/**
+ * How many refreshes in a row `lastGoodRegistryReader` keeps an earlier copy of a bundle it cannot read, before it
+ * drops it. At the default 60 s refresh, about three minutes.
+ */
+export const MAX_KEPT_REFRESHES = 3;
+
+/** A tag the registry lists. */
+export interface BundleTag {
+  name: string;
+  version: string;
+}
+
+/** One listed tag and what reading it gave, in the registry's order. */
+type TagRead = BundleTag & { ref: string } & (
+    | { bundle: BundleInfo }
+    | { error: unknown }
+  );
+
+const tagKey = (t: BundleTag) => `${t.name}@${t.version}`;
+
+/** Lists the registry and reads every tag at once, each one tried twice; throws when the registry cannot be listed. */
+async function readTags(
+  registry: BundleRegistrySettings,
+  client: BundleRegistryClient,
+): Promise<TagRead[]> {
+  const prefix = registry.repositoryPrefix.replace(/^\/+|\/+$/g, '');
+  const repositories = await client.listRepositories(registry.url, prefix);
+  const read = await Promise.all(
+    repositories.map(async repository => {
+      const name = prefix ? repository.slice(prefix.length + 1) : repository;
+      const versions = await client.listTags(registry.url, repository);
+      return Promise.all(
+        versions.map(async (version): Promise<TagRead> => {
+          const ref = bundleRef(registry.url, prefix, name, version);
+          const tryRead = () => readOne(client, ref, name, version);
+          try {
+            return { name, version, ref, bundle: await tryRead() };
+          } catch {
+            try {
+              return { name, version, ref, bundle: await tryRead() };
+            } catch (error) {
+              return { name, version, ref, error };
+            }
+          }
+        }),
+      );
+    }),
+  );
+  return read.flat();
+}
 
 /**
  * Every bundle in the registry: one per tag of each repository under the prefix. The name is the repository below
@@ -30,56 +85,137 @@ const defaultClient: BundleRegistryClient = {
  * calm-backstage.json).
  *
  * A registry that cannot be listed throws (the caller turns that into one warning). A single tag that cannot be
- * read is left out and named in `warnings`.
+ * read, on a second try either, is left out, named in `warnings` and listed in `unread`.
  */
 export async function readRegistryBundles(
   registry: BundleRegistrySettings,
   client: BundleRegistryClient = defaultClient,
-): Promise<{ bundles: BundleInfo[]; warnings: string[] }> {
+): Promise<{ bundles: BundleInfo[]; warnings: string[]; unread: BundleTag[] }> {
+  const bundles: BundleInfo[] = [];
   const warnings: string[] = [];
-  const prefix = registry.repositoryPrefix.replace(/^\/+|\/+$/g, '');
-  const repositories = await client.listRepositories(registry.url, prefix);
-  // Every tag is read at once; the list keeps the registry's order.
-  const read = await Promise.all(
-    repositories.map(async repository => {
-      const name = prefix ? repository.slice(prefix.length + 1) : repository;
-      const versions = await client.listTags(registry.url, repository);
-      return Promise.all(
-        versions.map(version => {
-          const ref = bundleRef(registry.url, prefix, name, version);
-          return readOne(client, ref, name, version).catch(e => {
-            warnings.push(`bundle ${ref} skipped: ${e}`);
-            return undefined;
-          });
-        }),
-      );
-    }),
-  );
-  const bundles = read.flat().filter((b): b is BundleInfo => b !== undefined);
-  return { bundles, warnings };
+  const unread: BundleTag[] = [];
+  for (const tag of await readTags(registry, client)) {
+    if ('bundle' in tag) {
+      bundles.push(tag.bundle);
+    } else {
+      unread.push({ name: tag.name, version: tag.version });
+      warnings.push(`bundle ${tag.ref} skipped: ${tag.error}`);
+    }
+  }
+  return { bundles, warnings, unread };
+}
+
+/** A tag's bundle for this refresh, if any; a warning when it was not read; how many refreshes in a row it was kept. */
+type Outcome = {
+  key: string;
+  bundle?: BundleInfo;
+  warning?: string;
+  kept?: number;
+};
+
+/**
+ * What becomes of a listed tag that could not be read but has a copy from an earlier read, kept `keptBefore`
+ * refreshes in a row until now.
+ */
+async function keepOrDrop(
+  client: BundleRegistryClient,
+  tag: TagRead & { error: unknown },
+  kept: BundleInfo,
+  keptBefore: number,
+): Promise<Outcome> {
+  const key = tagKey(tag);
+  const notRead = `bundle ${tag.ref} not read: ${tag.error}`;
+  const count = keptBefore + 1;
+  if (count > MAX_KEPT_REFRESHES) {
+    return {
+      key,
+      warning: `${notRead}; skipped, not read for ${count} refreshes in a row`,
+    };
+  }
+  let checked: string;
+  try {
+    const digest = await client.headBundleDigest(tag.ref);
+    if (digest === undefined) {
+      return {
+        key,
+        warning: `${notRead}; skipped, the registry has no manifest under the tag`,
+      };
+    }
+    if (digest !== kept.digest) {
+      return {
+        key,
+        warning: `${notRead}; skipped, the tag now has manifest ${digest}, the earlier copy is of ${kept.digest}`,
+      };
+    }
+    checked = `the tag still has manifest ${digest}`;
+  } catch (e) {
+    checked = `its manifest could not be checked: ${e}`;
+  }
+  return {
+    key,
+    bundle: kept,
+    kept: count,
+    warning: `${notRead}; keeping the copy from an earlier read (${count} of ${MAX_KEPT_REFRESHES}), ${checked}`,
+  };
 }
 
 /**
  * Reads the registry on each call and keeps the bundles of the last read that worked. When the registry cannot be
  * listed it gives those instead, with `failed` set, so a registry restart does not empty the catalog's bundles.
+ *
+ * A tag the registry still lists but cannot read (on a second try either) keeps its bundle from the last read for up
+ * to `MAX_KEPT_REFRESHES` refreshes in a row, with a warning each time, while a HEAD on its manifest gives the digest
+ * of that copy or cannot be answered (the registry restarting, say). A HEAD that gives another digest (the tag was
+ * pushed over) or 404 (the manifest is gone) drops it at once. A tag the registry no longer lists is dropped.
  */
 export function lastGoodRegistryReader(
   registry: BundleRegistrySettings,
   client: BundleRegistryClient = defaultClient,
 ) {
   let last: BundleInfo[] = [];
+  /** Per tag key: the refreshes in a row its copy has been kept. */
+  let keptFor = new Map<string, number>();
   return async (): Promise<{
     bundles: BundleInfo[];
     warnings: string[];
     failed?: unknown;
   }> => {
+    let tags: TagRead[];
     try {
-      const read = await readRegistryBundles(registry, client);
-      last = read.bundles;
-      return read;
+      tags = await readTags(registry, client);
     } catch (e) {
       return { bundles: last, warnings: [], failed: e };
     }
+    const previous = new Map(last.map(b => [tagKey(b), b]));
+    const results = await Promise.all(
+      tags.map(async (tag): Promise<Outcome> => {
+        const key = tagKey(tag);
+        if ('bundle' in tag) {
+          return { key, bundle: tag.bundle };
+        }
+        const kept = previous.get(key);
+        if (!kept) {
+          return { key, warning: `bundle ${tag.ref} skipped: ${tag.error}` };
+        }
+        return keepOrDrop(client, tag, kept, keptFor.get(key) ?? 0);
+      }),
+    );
+    const bundles: BundleInfo[] = [];
+    const warnings: string[] = [];
+    keptFor = new Map();
+    for (const r of results) {
+      if (r.bundle) {
+        bundles.push(r.bundle);
+      }
+      if (r.warning) {
+        warnings.push(r.warning);
+      }
+      if (r.kept !== undefined) {
+        keptFor.set(r.key, r.kept);
+      }
+    }
+    last = bundles;
+    return { bundles, warnings };
   };
 }
 
@@ -113,11 +249,10 @@ export function mergeBundles(
   local: BundleInfo[],
   registry: BundleInfo[],
 ): { bundles: BundleInfo[]; replaced: string[] } {
-  const key = (b: BundleInfo) => `${b.name}@${b.version}`;
-  const inLocal = new Set(local.map(key));
-  const replaced = registry.map(key).filter(k => inLocal.has(k));
+  const inLocal = new Set(local.map(tagKey));
+  const replaced = registry.map(tagKey).filter(k => inLocal.has(k));
   return {
-    bundles: [...local, ...registry.filter(b => !inLocal.has(key(b)))],
+    bundles: [...local, ...registry.filter(b => !inLocal.has(tagKey(b)))],
     replaced,
   };
 }
