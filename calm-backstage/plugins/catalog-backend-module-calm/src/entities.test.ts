@@ -247,6 +247,47 @@ describe('templateEntity: build and deploy', () => {
   });
 });
 
+describe('templateEntity: the default bundle is the newest, whatever its name', () => {
+  const full = (name: string, version: string): BundleInfo => ({
+    name,
+    version,
+    patterns: [fits],
+  });
+  const starterOf = (name: string, version: string): BundleInfo => ({
+    name,
+    version,
+    kind: 'starter',
+    patterns: [fits],
+  });
+
+  it('full bundles only: the highest version across names, not the last name', () => {
+    const t = template([
+      full('web-service', '2.0.0'),
+      full('alpha-service', '3.0.0'),
+    ]);
+    expect(t.choices.bundle.default).toBe('alpha-service@3.0.0');
+  });
+
+  it('starters: the highest version across names, not the last name', () => {
+    const t = template([
+      starterOf('node-service', '2.0.0'),
+      starterOf('spring-boot-service', '1.0.0'),
+    ]);
+    expect(t.choices.bundle.default).toBe('node-service@2.0.0');
+  });
+
+  it('equal versions: the later name; versions compare as versions, not text', () => {
+    expect(
+      template([full('a-service', '1.0.0'), full('b-service', '1.0.0')]).choices
+        .bundle.default,
+    ).toBe('b-service@1.0.0');
+    expect(
+      template([full('web-service', '1.9.0'), full('web-service', '1.10.0')])
+        .choices.bundle.default,
+    ).toBe('web-service@1.10.0');
+  });
+});
+
 describe('templateEntity: starters and deployment rules', () => {
   const starter = (
     name: string,
