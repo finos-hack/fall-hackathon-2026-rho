@@ -62,6 +62,10 @@ cert-manager (`yarn k8s:up` installs it).
 {{#each tlsWorkloads}}
 | `{{id}}` | `{{tls.secretName}}` |
 {{/each}}
+
+During an upgrade from 1.2.1, traffic through the gateway can fail until the gateway pod has rolled out and the
+certificate is issued. nginx does not reload when cert-manager renews the CA or a certificate: restart the pods after
+a renewal.
 {{/if}}
 
 ## Provenance
