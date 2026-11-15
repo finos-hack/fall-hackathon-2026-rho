@@ -86,9 +86,10 @@ Scope: GitHub publish, dry run, register the architecture in the Hub.
 - Left:
   - An existing service cannot be redeployed: `calm:register:hub` and `calm:publish:local` refuse a name whose
     folder exists.
-  - `calm:register:hub` runs before the render, so a run that fails later (render, publish, build or deploy) leaves
-    its architecture version in the Hub, which cannot delete versions. It checks the catalog and the output folder
-    first, so a clashing name writes nothing.
+  - The Hub write happens after the render, publish and git publish (`calm:register:hub` in `prepare` mode first, in
+    `store` mode then), so a run that fails there leaves nothing in the Hub. A failed build or deploy still leaves
+    the version, which cannot be deleted (and the failed deploy is recorded on it once failed deployments are
+    recorded). `prepare` checks the catalog and the output folder, so a clashing name writes nothing.
   - `calm:image:build`, `calm:deploy:k8s` and `calm:decorate:deployment` have no dry run: in a dry run the
     scaffolder skips the publish step they depend on.
   - The gateway forwards plain HTTP although the architecture says HTTPS.
