@@ -191,6 +191,7 @@ describe('templateEntity: build and deploy', () => {
       'register-hub',
       'template',
       'publish',
+      'store-hub',
       'build',
       'deploy',
       'decorate',
@@ -234,6 +235,7 @@ describe('templateEntity: build and deploy', () => {
       'register-hub',
       'template',
       'publish',
+      'store-hub',
       'register',
     ]);
     expect(t.step('publish').input.deployable).toBeUndefined();
@@ -384,6 +386,7 @@ describe('templateEntity: Git and Flux', () => {
       'template',
       'publish',
       'git-publish',
+      'store-hub',
       'build',
       'deploy',
       'decorate',
@@ -412,16 +415,26 @@ describe('templateEntity: Git and Flux', () => {
 });
 
 describe('templateEntity: CALM Hub', () => {
-  it('stores the architecture before the render, and publishes with the Hub annotations', () => {
+  it('prepares the architecture before the render, stores it after the publish, and publishes with the Hub annotations', () => {
     const t = template([bundle('2.0.0')]);
     expect(t.step('register-hub')).toMatchObject({
       action: 'calm:register:hub',
       input: {
         architecturePath: '${{ steps.fill.output.architecturePath }}',
         name: '${{ parameters.name }}',
+        mode: 'prepare',
       },
     });
     expect(t.step('register-hub').if).toBeUndefined();
+    expect(t.step('store-hub')).toMatchObject({
+      action: 'calm:register:hub',
+      input: {
+        architecturePath: '${{ steps.fill.output.architecturePath }}',
+        name: '${{ parameters.name }}',
+        mode: 'store',
+      },
+    });
+    expect(t.step('store-hub').if).toBeUndefined();
     expect(t.step('publish').input).toMatchObject({
       hubNamespace: '${{ steps["register-hub"].output.namespace }}',
       hubArchitecture: '${{ steps["register-hub"].output.architecture }}',
@@ -434,9 +447,9 @@ describe('templateEntity: CALM Hub', () => {
     expect(t.step('decorate')).toMatchObject({
       action: 'calm:decorate:deployment',
       input: {
-        hubNamespace: '${{ steps["register-hub"].output.namespace }}',
-        architecture: '${{ steps["register-hub"].output.architecture }}',
-        version: '${{ steps["register-hub"].output.version }}',
+        hubNamespace: '${{ steps["store-hub"].output.namespace }}',
+        architecture: '${{ steps["store-hub"].output.architecture }}',
+        version: '${{ steps["store-hub"].output.version }}',
         name: '${{ parameters.name }}',
         cluster: '${{ steps.deploy.output.cluster }}',
         namespace: '${{ steps.deploy.output.namespace }}',
