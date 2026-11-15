@@ -23,13 +23,11 @@ export const calmPlaceholdersFormField = FormFieldBlueprint.make({
   },
 });
 
-/** A Hub architecture, or a service published from a pattern (with its architecture file). */
+/** A Hub architecture, or a service published from a pattern: both name their architecture in CALM Hub. */
 export const hasCalmArchitecture = (entity: Entity) => {
   const a = entity.metadata.annotations ?? {};
   return Boolean(
-    a[ANN.architecture] ||
-      a[ANN.architectureFile] ||
-      entity.spec?.type === TYPES.architecture,
+    a[ANN.architecture] || entity.spec?.type === TYPES.architecture,
   );
 };
 

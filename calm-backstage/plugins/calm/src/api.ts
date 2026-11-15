@@ -12,10 +12,8 @@ import type {
 /** Response of calm-backend `GET /architecture`. */
 export interface ArchitectureResponse {
   architecture: any;
-  /** CALM Hub (with the version read), or the published service's own file. */
-  source:
-    | { type: 'hub'; url: string; version?: string }
-    | { type: 'file'; path: string };
+  /** CALM Hub, the only store of architectures, with the version read. */
+  source: { type: 'hub'; url: string; version?: string };
   /** A published service's deployment in the local cluster; absent when it is not deployed or was not read. */
   deployment?: {
     cluster: string;
