@@ -148,9 +148,10 @@ export default class K8sDeployTransformer {
         const app = nodes.find(n => n['node-type'] === 'service');
         const appNode = app?.['unique-id'] ?? 'web-service';
         const gateway = byId(GATEWAY_NODE);
-        // An empty or blank service name counts as none.
+        // An empty or blank service name counts as none, and a number is its string.
         const named = app?.metadata?.['service-name'];
-        const serviceName = typeof named === 'string' && named.trim() ? named : appNode;
+        const serviceName = (typeof named === 'string' || typeof named === 'number') && String(named).trim()
+            ? String(named) : appNode;
         const owner = app?.metadata?.owner ?? 'unknown';
         const topic = app?.metadata?.topic;
         const servicePort = archPort(app) ?? 8080;

@@ -138,7 +138,7 @@ describe('summariseObjects', () => {
             annotations: { 'calm.finos.org/unique-id': 'Orders_API' },
           },
         },
-        // The same node under an earlier converted name, until it is pruned: listed once in nodes.
+        // The same node under an earlier converted name, which remains until it is pruned: listed once in nodes.
         {
           kind: 'Deployment',
           metadata: {

@@ -73,10 +73,9 @@ export async function recordDeployment(
     input.architecturePath ?? 'architecture.json',
   );
   const doc = JSON.parse(await fs.readFile(file, 'utf-8'));
-  const appliesTo = deployedNodes(input.workloads, doc);
-  const notNodes = [...new Set(input.workloads)].filter(
-    w => !appliesTo.includes(w),
-  );
+  const workloads = [...new Set(input.workloads)];
+  const appliesTo = deployedNodes(workloads, doc);
+  const notNodes = workloads.filter(w => !appliesTo.includes(w));
   if (notNodes.length) {
     logger.warn(
       `Not nodes of the architecture, so left out of applies-to: ${notNodes.join(

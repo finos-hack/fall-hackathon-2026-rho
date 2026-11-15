@@ -41,8 +41,8 @@ const BACKING = {
 // Kubernetes name may not. An id that is already a valid name is used as it is, so nothing rendered by 3.0.0 is
 // renamed. Any other id is lower-cased, each run of other characters becomes one `-` and `x-` goes in front when it
 // would not start with a letter; that name gets a short hash of the id when another id has it too, when it is cut to
-// `max` characters, or when it is still not `valid` (a word YAML reads as a boolean or null). The original id stays in
-// an annotation.
+// `max` characters, or when it is still not `valid`. Only policy names are converted here; a policy keeps its
+// relationship's id in the calm.finos.org/relationship annotation.
 const SUBDOMAIN = /^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$/;
 const hash = s => {
     let h = 0x811c9dc5; // FNV-1a, 32 bits
@@ -107,9 +107,10 @@ export default class WebServiceTransformer {
 
         const service = byId(APP_NODE);
         const gateway = byId(GATEWAY_NODE);
-        // An empty or blank service name counts as none (since 3.0.1).
+        // An empty or blank service name counts as none, and a number is its string (since 3.0.1).
         const named = service?.metadata?.['service-name'];
-        const serviceName = typeof named === 'string' && named.trim() ? named : APP_NODE;
+        const serviceName = (typeof named === 'string' || typeof named === 'number') && String(named).trim()
+            ? String(named) : APP_NODE;
         const owner = service?.metadata?.owner ?? 'unknown';
         const servicePort = archPort(service) ?? 8080;
 

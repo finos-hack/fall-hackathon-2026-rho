@@ -2,19 +2,13 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { LoggerService } from '@backstage/backend-plugin-api';
 import {
-  CALM_KUBERNETES,
   CalmHubWriteClient,
+  workloadNode,
 } from '@internal/backstage-plugin-calm-common';
 import YAML from 'yaml';
 import { recordDeployment } from './decorateDeployment';
 
-/**
- * The label the bundles put on a workload: the name of the architecture node it was rendered from. That is the node's
- * `unique-id`, unless the id is not a valid Kubernetes name (k8s-deploy 1.2.2 and later): then the label is a converted
- * name and the id is in the `calm.finos.org/unique-id` annotation.
- */
-const NODE_LABEL = 'calm.finos.org/node';
-/** The workload kinds whose `calm.finos.org/node` label names the architecture node they run. */
+/** The workload kinds that name the architecture node they run (see `workloadNode`). */
 const WORKLOAD_KINDS = ['Deployment', 'StatefulSet', 'DaemonSet'];
 const MAX_NOTE_ERROR = 300;
 
@@ -42,14 +36,8 @@ export async function labelledNodes(baseDir: string): Promise<string[]> {
       if (!WORKLOAD_KINDS.includes(doc?.kind)) {
         continue;
       }
-      const node =
-        doc.metadata?.annotations?.[CALM_KUBERNETES.uniqueIdAnnotation] ??
-        doc.spec?.template?.metadata?.annotations?.[
-          CALM_KUBERNETES.uniqueIdAnnotation
-        ] ??
-        doc.metadata?.labels?.[NODE_LABEL] ??
-        doc.spec?.template?.metadata?.labels?.[NODE_LABEL];
-      if (typeof node === 'string') {
+      const node = workloadNode(doc);
+      if (node !== undefined) {
         nodes.add(node);
       }
     }

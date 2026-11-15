@@ -7,6 +7,7 @@ import {
   CalmHubWriteClient,
   KUBERNETES_ID_LABEL,
   deployNamespace,
+  workloadNode,
 } from '@internal/backstage-plugin-calm-common';
 import {
   KubernetesDeploySettings,
@@ -198,7 +199,7 @@ export async function listAndWaitForRollouts(
 
 export interface Deployed {
   deployments: string[];
-  /** The nodes the Deployments were rendered from, each once: a `calm.finos.org/unique-id` annotation, else the name. */
+  /** The nodes the Deployments were rendered from, each once: `workloadNode`, else the Deployment's name. */
   nodes: string[];
   networkPolicies: string[];
   services: string[];
@@ -220,12 +221,7 @@ export function summariseObjects(items: any[]): Deployed {
       ...new Set(
         items
           .filter(i => i?.kind === 'Deployment')
-          .map(i =>
-            String(
-              i.metadata?.annotations?.[CALM_KUBERNETES.uniqueIdAnnotation] ??
-                i.metadata?.name,
-            ),
-          ),
+          .map(i => workloadNode(i) ?? String(i.metadata?.name)),
       ),
     ].sort(),
     networkPolicies: names('NetworkPolicy'),

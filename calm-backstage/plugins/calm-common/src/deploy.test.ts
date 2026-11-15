@@ -1,4 +1,4 @@
-import { deployNamespace, isDnsLabel } from './deploy';
+import { deployNamespace, isDnsLabel, workloadNode } from './deploy';
 
 describe('deployNamespace', () => {
   it('puts the prefix before the service name', () => {
@@ -35,5 +35,27 @@ describe('deployNamespace', () => {
     expect(() => deployNamespace('kube-', 'public')).toThrow(
       /Refusing to deploy/,
     );
+  });
+});
+
+describe('workloadNode', () => {
+  it('reads the unique-id annotation, then the node label, on the object or its pod template', () => {
+    const annotations = { 'calm.finos.org/unique-id': 'Web_Service' };
+    const labels = { 'calm.finos.org/node': 'web-service-ab12cd' };
+    expect(workloadNode({ metadata: { annotations, labels } })).toBe(
+      'Web_Service',
+    );
+    expect(
+      workloadNode({
+        metadata: { labels },
+        spec: { template: { metadata: { annotations } } },
+      }),
+    ).toBe('Web_Service');
+    expect(workloadNode({ metadata: { labels } })).toBe('web-service-ab12cd');
+    expect(workloadNode({ spec: { template: { metadata: { labels } } } })).toBe(
+      'web-service-ab12cd',
+    );
+    expect(workloadNode({ metadata: { name: 'x' } })).toBeUndefined();
+    expect(workloadNode(undefined)).toBeUndefined();
   });
 });
