@@ -1,8 +1,10 @@
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import YAML from 'yaml';
 import {
   CALM_ANNOTATIONS as ANN,
+  CalmHubError,
   CalmHubWriteClient,
   FetchLike,
 } from '@internal/backstage-plugin-calm-common';
@@ -380,11 +382,15 @@ describe('with a workspace', () => {
   describe('calm:register:hub, prepare and store', () => {
     const noEntities = { getEntityByRef: jest.fn(async () => undefined) };
     const auth = { getOwnServiceCredentials: jest.fn(async () => ({})) } as any;
-    const register = (hub: ReturnType<typeof fakeHub>, c: any) =>
+    const register = (
+      hub: ReturnType<typeof fakeHub>,
+      c: any,
+      catalog: any = noEntities,
+    ) =>
       createCalmRegisterHubAction({
         hub: hub.client,
         namespace: 'hackathon',
-        catalog: noEntities,
+        catalog,
         auth,
         localDir: path.join(workspace, 'output'),
       }).handler(c);
@@ -444,28 +450,413 @@ describe('with a workspace', () => {
       expect(hub.posts()).toHaveLength(1);
     });
 
-    it('store fails, writing nothing, when the Hub gained a version in between', async () => {
+    // The other runs' documents carry this service's mark, so the ownership check passes.
+    const ours = (doc: object) => ({
+      ...doc,
+      metadata: {
+        'calm-backstage': { entity: 'component:default/billing-api' },
+      },
+    });
+
+    it('store reuses the prepared version although the Hub gained a newer one in between', async () => {
+      const hub = fakeHub(base);
+      await register(hub, ctx({ name: 'billing-api' }));
+      await fs.writeFile(file(), JSON.stringify(architecture));
+      await register(hub, ctx({ name: 'billing-api', mode: 'prepare' }));
+      expect((await readFile()).$id).toBe(versionUrl('billing-api', '1.0.0'));
+      // Another run stores a different document as 1.0.1.
+      hub.architectures
+        .get('billing-api')!
+        .set('1.0.1', ours({ title: 'Other', nodes: [] }));
+      const c = ctx({ name: 'billing-api', mode: 'store' });
+      await register(hub, c);
+      expect(hub.posts()).toHaveLength(1);
+      expect(c.outputs).toMatchObject({
+        version: '1.0.0',
+        url: versionUrl('billing-api', '1.0.0'),
+        created: false,
+      });
+    });
+
+    it('store stores the prepared version although the Hub would choose another now', async () => {
+      const hub = fakeHub(base);
+      hub.architectures.set(
+        'billing-api',
+        new Map([['1.0.0', ours({ title: 'Old', nodes: [] })]]),
+      );
+      await register(
+        hub,
+        ctx({ name: 'billing-api', version: '2.0.0', mode: 'prepare' }),
+      );
+      const prepared = await readFile();
+      expect(prepared.$id).toBe(versionUrl('billing-api', '2.0.0'));
+      // Another run stores the same document as 1.0.1: a new choice would now reuse it.
+      hub.architectures.get('billing-api')!.set('1.0.1', prepared);
+      const c = ctx({ name: 'billing-api', mode: 'store' });
+      await register(hub, c);
+      expect(hub.posts()).toEqual([
+        {
+          method: 'POST',
+          url: versionUrl('billing-api', '2.0.0'),
+          body: prepared,
+        },
+      ]);
+      expect(c.outputs).toMatchObject({ version: '2.0.0', created: true });
+    });
+
+    it('store refuses, posting nothing, when the Hub holds another document as the prepared version', async () => {
       const hub = fakeHub(base);
       await register(hub, ctx({ name: 'billing-api', mode: 'prepare' }));
       hub.architectures.set(
         'billing-api',
-        new Map([
-          [
-            '1.0.0',
-            {
-              title: 'Other',
-              nodes: [],
-              metadata: {
-                'calm-backstage': { entity: 'component:default/billing-api' },
-              },
-            },
-          ],
-        ]),
+        new Map([['1.0.0', ours({ title: 'Other', nodes: [] })]]),
       );
       await expect(
         register(hub, ctx({ name: 'billing-api', mode: 'store' })),
-      ).rejects.toThrow(/Nothing was stored; run the Template again/);
+      ).rejects.toThrow(
+        /already holds another document as hackathon\/billing-api 1\.0\.0/,
+      );
       expect(hub.posts()).toEqual([]);
+    });
+
+    it('store reuses the version when the Hub answers 409 and holds the same document', async () => {
+      const hub = fakeHub(base);
+      await register(hub, ctx({ name: 'billing-api', mode: 'prepare' }));
+      // Another run stores the same document between the version list and the POST.
+      jest
+        .spyOn(hub.client, 'createArchitectureVersion')
+        .mockImplementationOnce(async (_ns, name, version, doc) => {
+          hub.architectures.set(name, new Map([[version, doc]]));
+          throw new CalmHubError(409, versionUrl(name, version), '409');
+        });
+      const c = ctx({ name: 'billing-api', mode: 'store' });
+      await register(hub, c);
+      expect(c.outputs).toMatchObject({ version: '1.0.0', created: false });
+    });
+
+    it('store fails when the Hub answers 409 and holds another document', async () => {
+      const hub = fakeHub(base);
+      await register(hub, ctx({ name: 'billing-api', mode: 'prepare' }));
+      jest
+        .spyOn(hub.client, 'createArchitectureVersion')
+        .mockImplementationOnce(async (_ns, name, version) => {
+          hub.architectures.set(
+            name,
+            new Map([[version, ours({ title: 'Other', nodes: [] })]]),
+          );
+          throw new CalmHubError(409, versionUrl(name, version), '409');
+        });
+      await expect(
+        register(hub, ctx({ name: 'billing-api', mode: 'store' })),
+      ).rejects.toThrow(
+        /already holds another document as hackathon\/billing-api 1\.0\.0/,
+      );
+    });
+
+    it('store refuses a file that was not prepared, before any Hub request', async () => {
+      const hub = fakeHub(base);
+      await expect(
+        register(hub, ctx({ name: 'billing-api', mode: 'store' })),
+      ).rejects.toThrow(
+        /has no \$id .*run calm:register:hub with mode prepare/,
+      );
+      await fs.writeFile(
+        file(),
+        JSON.stringify({
+          ...architecture,
+          $id: versionUrl('orders-service', '1.0.0'),
+        }),
+      );
+      await expect(
+        register(hub, ctx({ name: 'billing-api', mode: 'store' })),
+      ).rejects.toThrow(
+        /is not a version of hackathon\/billing-api.*run calm:register:hub with mode prepare/,
+      );
+      expect(hub.calls).toEqual([]);
+    });
+
+    describe('when the store fails', () => {
+      const published = () => path.join(workspace, 'output', 'billing-api');
+      // Prepare, publish (a copy of the prepared file), and another document in the Hub as the prepared version.
+      // With conflict false, the Hub is left empty.
+      // What calm:publish:local writes: the catalog-info.yaml naming the architecture version.
+      const publishedInfo = (version = '1.0.0', arch = 'billing-api') =>
+        YAML.stringify({
+          apiVersion: 'backstage.io/v1alpha1',
+          kind: 'Component',
+          metadata: {
+            name: 'billing-api',
+            annotations: {
+              'calm.finos.org/architecture': arch,
+              'calm.finos.org/architecture-version': version,
+            },
+          },
+        });
+      const prepareAndPublish = async (
+        hub: ReturnType<typeof fakeHub>,
+        conflict = true,
+      ) => {
+        await register(hub, ctx({ name: 'billing-api', mode: 'prepare' }));
+        await fs.mkdir(published(), { recursive: true });
+        await fs.writeFile(
+          path.join(published(), 'catalog-info.yaml'),
+          publishedInfo(),
+        );
+        if (conflict) {
+          hub.architectures.set(
+            'billing-api',
+            new Map([['1.0.0', ours({ title: 'Other', nodes: [] })]]),
+          );
+        }
+      };
+      const store = (extra: object = {}) =>
+        ctx({
+          name: 'billing-api',
+          mode: 'store',
+          publishedDir: published(),
+          ...extra,
+        });
+      const removedMessage =
+        /Nothing was stored in CALM Hub, and the folder .*billing-api this run published was removed, so the Template can be run again/;
+
+      it('removes the folder when the Hub fails at the start (500), and rethrows the 500', async () => {
+        const hub = fakeHub(base);
+        await prepareAndPublish(hub, false);
+        jest
+          .spyOn(hub.client, 'architectureVersions')
+          .mockRejectedValueOnce(
+            new CalmHubError(500, base, 'GET versions -> 500: down'),
+          );
+        const error = await register(hub, store()).catch(e => e);
+        expect(error.message).toMatch(/GET versions -> 500: down/);
+        expect(error.message).toMatch(removedMessage);
+        expect(await exists(published())).toBe(false);
+        expect(hub.posts()).toEqual([]);
+      });
+
+      it("removes the folder when the Hub's architecture is another service's", async () => {
+        const hub = fakeHub(base);
+        await prepareAndPublish(hub, false);
+        hub.architectures.set(
+          'billing-api',
+          new Map([
+            [
+              '1.0.0',
+              {
+                title: 'X',
+                metadata: {
+                  'calm-backstage': { entity: 'component:default/other' },
+                },
+              },
+            ],
+          ]),
+        );
+        await expect(register(hub, store())).rejects.toThrow(
+          /was registered for component:default\/other[\s\S]*Nothing was stored in CALM Hub, and the folder/,
+        );
+        expect(await exists(published())).toBe(false);
+        expect(hub.posts()).toEqual([]);
+      });
+
+      it('removes the folder when the catalog holds the name from elsewhere', async () => {
+        const hub = fakeHub(base);
+        await prepareAndPublish(hub, false);
+        const catalog = {
+          getEntityByRef: jest.fn(async () => ({
+            metadata: {
+              name: 'billing-api',
+              annotations: {
+                'backstage.io/managed-by-location': 'url:https://example.com/x',
+              },
+            },
+          })),
+        };
+        await expect(register(hub, store(), catalog)).rejects.toThrow(
+          removedMessage,
+        );
+        expect(await exists(published())).toBe(false);
+      });
+
+      it("fails, storing nothing, when the published folder's catalog-info.yaml names another version", async () => {
+        const hub = fakeHub(base);
+        await prepareAndPublish(hub, false);
+        await fs.writeFile(
+          path.join(published(), 'catalog-info.yaml'),
+          publishedInfo('0.0.1'),
+        );
+        await expect(register(hub, store())).rejects.toThrow(
+          /published folder's catalog-info.yaml names "billing-api" version "0.0.1", not the billing-api version 1.0.0 being stored/,
+        );
+        // It names another version, so this run did not publish it: kept.
+        expect(hub.posts()).toEqual([]);
+        expect(await exists(published())).toBe(true);
+      });
+
+      it('removes the folder when the Hub answers 409 and holds another document', async () => {
+        const hub = fakeHub(base);
+        await prepareAndPublish(hub, false);
+        jest
+          .spyOn(hub.client, 'createArchitectureVersion')
+          .mockImplementationOnce(async (_ns, name, version) => {
+            hub.architectures.set(
+              name,
+              new Map([[version, ours({ title: 'Other', nodes: [] })]]),
+            );
+            throw new CalmHubError(409, versionUrl(name, version), '409');
+          });
+        await expect(register(hub, store())).rejects.toThrow(
+          /already holds another document[\s\S]*Nothing was stored in CALM Hub/,
+        );
+        expect(await exists(published())).toBe(false);
+      });
+
+      it('does not claim nothing was stored when the POST itself failed', async () => {
+        const hub = fakeHub(base);
+        await prepareAndPublish(hub, false);
+        jest
+          .spyOn(hub.client, 'createArchitectureVersion')
+          .mockRejectedValueOnce(new Error('socket hang up.'));
+        const error = await register(hub, store()).catch(e => e);
+        expect(error.message).toMatch(/socket hang up/);
+        expect(error.message).not.toMatch(/Nothing was stored/);
+        expect(error.message).toMatch(
+          /may or may not hold hackathon\/billing-api 1\.0\.0[\s\S]*the same document reuses it/,
+        );
+        expect(error.message).not.toContain('..');
+        expect(await exists(published())).toBe(false);
+      });
+
+      it('refuses a publishedDir other than the service folder up front: no Hub request, no read, nothing removed', async () => {
+        const hub = fakeHub(base);
+        await prepareAndPublish(hub);
+        const callsBefore = hub.calls.length;
+        const output = path.join(workspace, 'output');
+        const sub = path.join(published(), 'sub');
+        const readFile = jest.spyOn(fs, 'readFile');
+        try {
+          for (const dir of [output, sub, path.join(workspace, 'elsewhere')]) {
+            // Each holds the published catalog-info.yaml.
+            await fs.mkdir(dir, { recursive: true });
+            await fs.writeFile(
+              path.join(dir, 'catalog-info.yaml'),
+              publishedInfo(),
+            );
+            readFile.mockClear();
+            await expect(
+              register(hub, store({ publishedDir: dir })),
+            ).rejects.toThrow(
+              /publishedDir must be the folder calm:publish:local wrote for billing-api .*Nothing was stored/,
+            );
+            expect(readFile).not.toHaveBeenCalledWith(
+              path.join(dir, 'catalog-info.yaml'),
+              expect.anything(),
+            );
+            expect(await exists(dir)).toBe(true);
+          }
+        } finally {
+          readFile.mockRestore();
+        }
+        expect(hub.calls.length).toBe(callsBefore);
+        expect(await exists(published())).toBe(true);
+      });
+
+      it('fails clearly, storing nothing, when the published catalog-info.yaml is missing or not YAML', async () => {
+        const hub = fakeHub(base);
+        await prepareAndPublish(hub, false);
+        const publishedFile = path.join(published(), 'catalog-info.yaml');
+        await fs.rm(publishedFile);
+        const missing = await register(hub, store()).catch(e => e);
+        expect(missing.message).toMatch(
+          /Could not check the published catalog-info.yaml in .*billing-api: it is missing/,
+        );
+        expect(missing.message).not.toMatch(/ENOENT/);
+        await fs.writeFile(publishedFile, 'secret-content: [');
+        const broken = await register(hub, store()).catch(e => e);
+        expect(broken.message).toMatch(
+          /Could not check the published catalog-info.yaml in .*billing-api: it is not valid YAML/,
+        );
+        expect(broken.message).not.toContain('secret');
+        expect(hub.posts()).toEqual([]);
+      });
+
+      const exists = (p: string) =>
+        fs.stat(p).then(
+          () => true,
+          () => false,
+        );
+
+      it('removes the folder this run published, and says so', async () => {
+        const hub = fakeHub(base);
+        await prepareAndPublish(hub);
+        const c = ctx({
+          name: 'billing-api',
+          mode: 'store',
+          publishedDir: published(),
+        });
+        await expect(register(hub, c)).rejects.toThrow(
+          /already holds another document[\s\S]*Nothing was stored in CALM Hub, and the folder .*billing-api this run published was removed, so the Template can be run again/,
+        );
+        expect(await exists(published())).toBe(false);
+        expect(await exists(path.join(workspace, 'output'))).toBe(true);
+        expect(c.logger.info).toHaveBeenCalledWith(
+          expect.stringContaining(`Removed ${published()}`),
+        );
+      });
+
+      it('keeps a folder whose catalog-info.yaml names another version', async () => {
+        const hub = fakeHub(base);
+        await prepareAndPublish(hub);
+        await fs.writeFile(
+          path.join(published(), 'catalog-info.yaml'),
+          publishedInfo('0.0.1'),
+        );
+        await expect(
+          register(
+            hub,
+            ctx({
+              name: 'billing-api',
+              mode: 'store',
+              publishedDir: published(),
+            }),
+          ),
+        ).rejects.toThrow(/names "billing-api" version "0.0.1"/);
+        expect(await exists(published())).toBe(true);
+      });
+
+      it('a cleanup error does not hide the store error', async () => {
+        const hub = fakeHub(base);
+        await prepareAndPublish(hub);
+        const rm = jest
+          .spyOn(fs, 'rm')
+          .mockRejectedValueOnce(new Error('EBUSY: resource busy'));
+        try {
+          const c = store();
+          const error = await register(hub, c).catch(e => e);
+          expect(error.message).toMatch(/already holds another document/);
+          expect(error.message).not.toMatch(/removed/);
+          expect(c.logger.warn).toHaveBeenCalledWith(
+            expect.stringContaining('EBUSY'),
+          );
+        } finally {
+          rm.mockRestore();
+        }
+        expect(await exists(published())).toBe(true);
+      });
+
+      it('removes nothing in a dry run', async () => {
+        const hub = fakeHub(base);
+        await prepareAndPublish(hub);
+        await expect(
+          register(
+            hub,
+            ctx(
+              { name: 'billing-api', mode: 'store', publishedDir: published() },
+              { isDryRun: true },
+            ),
+          ),
+        ).rejects.toThrow(/already holds another document/);
+        expect(await exists(published())).toBe(true);
+      });
     });
 
     it('store reuses an identical latest version and posts nothing', async () => {
@@ -473,9 +864,10 @@ describe('with a workspace', () => {
       await register(hub, ctx({ name: 'billing-api' }));
       await fs.writeFile(file(), JSON.stringify(architecture));
       await register(hub, ctx({ name: 'billing-api', mode: 'prepare' }));
+      const postsBefore = hub.posts().length;
       const c = ctx({ name: 'billing-api', mode: 'store' });
       await register(hub, c);
-      expect(hub.posts()).toHaveLength(1);
+      expect(hub.posts()).toHaveLength(postsBefore);
       expect(c.outputs).toMatchObject({ version: '1.0.0', created: false });
     });
 
@@ -662,7 +1054,7 @@ describe('serviceEntity: Hub annotations', () => {
   };
   const url = versionUrl('billing-api', '1.0.0');
 
-  it('names the Hub architecture and version and keeps the file', () => {
+  it('names the Hub architecture and version, and no architecture file', () => {
     const entity = serviceEntity({
       ...opts,
       hub: {
@@ -676,11 +1068,13 @@ describe('serviceEntity: Hub annotations', () => {
       [ANN.namespace]: 'hackathon',
       [ANN.architecture]: 'billing-api',
       [ANN.architectureVersion]: '1.0.0',
-      [ANN.architectureFile]: './architecture.json',
     });
     expect(
       entity.metadata.annotations?.[ANN.architectureNamespace],
     ).toBeUndefined();
+    expect(entity.metadata.annotations).not.toHaveProperty(
+      ANN.architectureFile,
+    );
     expect(entity.metadata.links).toEqual([
       { url, title: 'Architecture in CALM Hub (JSON)' },
     ]);
@@ -701,9 +1095,15 @@ describe('serviceEntity: Hub annotations', () => {
     });
   });
 
-  it('has only the file without a Hub architecture', () => {
-    const entity = serviceEntity(opts);
-    expect(entity.metadata.annotations?.[ANN.architecture]).toBeUndefined();
+  it('has no link without a Hub URL', () => {
+    const entity = serviceEntity({
+      ...opts,
+      hub: {
+        namespace: 'hackathon',
+        architecture: 'billing-api',
+        version: '1.0.0',
+      },
+    });
     expect(entity.metadata.links).toBeUndefined();
   });
 });

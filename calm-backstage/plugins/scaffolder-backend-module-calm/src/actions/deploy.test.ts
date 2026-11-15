@@ -222,6 +222,7 @@ describe('the actions without a cluster', () => {
       logger: { info: jest.fn(), warn: jest.fn() },
       output: jest.fn(),
       workspacePath: os.tmpdir(),
+      task: { id: 'task-test' },
     } as any);
   const localDir = path.join(os.tmpdir(), 'calm-output');
   const dir = path.join(localDir, 'stock-api');
@@ -317,6 +318,7 @@ describe('serviceEntity: Kubernetes annotations', () => {
     patternVersion: '1.0.0',
     bundleName: 'web-service',
     bundleVersion: '3.0.0',
+    hub: { namespace: 'hackathon', architecture: 'x', version: '1.0.0' },
   };
 
   it('names the label value and the namespace for a deployable bundle', () => {
@@ -418,6 +420,7 @@ describe('calm:deploy:k8s: a failed deployment', () => {
     hub?: any;
     namespace?: object;
     failRollout?: string;
+    failApply?: string;
   }) => {
     await fs.writeFile(kubeconfig(), '');
     const c = {
@@ -441,6 +444,9 @@ describe('calm:deploy:k8s: a failed deployment', () => {
         return JSON.stringify({
           items: [{ kind: 'Deployment', metadata: { name: 'web-service' } }],
         });
+      }
+      if (a.startsWith('apply') && opts.failApply) {
+        throw new Error(opts.failApply);
       }
       if (a.includes('rollout status') && opts.failRollout) {
         throw new Error(opts.failRollout);
@@ -474,7 +480,8 @@ describe('calm:deploy:k8s: a failed deployment', () => {
     await expect(result).rejects.toThrow(/timed out waiting/);
     expect(posted).toHaveLength(1);
     expect(posted[0]).toMatchObject({
-      'unique-id': 'orders-task-1',
+      // Not the unique-id a successful retry of the task records.
+      'unique-id': 'orders-task-1-failed',
       // The Service's label does not count: only workloads name the node they run.
       'applies-to': ['web-service'],
       data: {
@@ -586,5 +593,27 @@ describe('calm:deploy:k8s: a failed deployment', () => {
     });
     await expect(result).rejects.toThrow(/belongs to the service "billing"/);
     expect(hub.createDecorator).not.toHaveBeenCalled();
+  });
+
+  it('records nothing when the overlay cannot be written, before any kubectl apply', async () => {
+    // A file where the overlay folder goes.
+    await fs.writeFile(path.join(dir, 'deploy', 'k8s-overlay'), 'not a folder');
+    const { hub } = fakeRecordingHub();
+    const { result, kubectl } = await run({ input: { record }, hub });
+    await expect(result).rejects.toThrow(/k8s-overlay/);
+    expect(kubectl).not.toHaveBeenCalled();
+    expect(hub.createDecorator).not.toHaveBeenCalled();
+  });
+
+  it('records a failed decorator when kubectl apply fails', async () => {
+    const { hub, posted } = fakeRecordingHub();
+    const { result } = await run({
+      input: { record },
+      hub,
+      failApply: 'error: the server rejected the manifest',
+    });
+    await expect(result).rejects.toThrow(/server rejected the manifest/);
+    expect(posted).toHaveLength(1);
+    expect(posted[0].data.status).toBe('failed');
   });
 });

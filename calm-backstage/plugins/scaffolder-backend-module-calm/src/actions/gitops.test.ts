@@ -42,6 +42,7 @@ const ctx = (input: object) =>
     logger: { info: jest.fn(), warn: jest.fn(), error: jest.fn() },
     output: jest.fn(),
     workspacePath: root,
+    task: { id: 'task-test' },
   } as any);
 const outputs = (c: any) =>
   Object.fromEntries(c.output.mock.calls.map((x: any[]) => [x[0], x[1]]));
@@ -168,6 +169,10 @@ function fakeKubectl(opts: {
   remote: string;
   namespace?: any;
   failFlux?: string;
+  /** Fails `kubectl apply -f` of the Flux objects (the apply after the push) with this message. */
+  failApply?: string;
+  /** Fails the server-side apply of the Namespace and Flux service account (before the push) with this message. */
+  failTenantApply?: string;
 }) {
   const calls: string[][] = [];
   /** What each `apply` applied, its arguments before `-f`, and the remote's main at that moment. */
@@ -182,14 +187,24 @@ function fakeKubectl(opts: {
     const a = args.join(' ');
     if (args[0] === 'apply') {
       const f = args.indexOf('-f');
+      const flags = args.slice(1, f);
       applied.push({
         objects: YAML.parseAllDocuments(await fs.readFile(args[f + 1], 'utf-8'))
           .map(d => d.toJSON())
           .filter(Boolean),
-        flags: args.slice(1, f),
-        remoteMain: await git(opts.remote, ['rev-parse', 'main']),
+        flags,
+        // Empty when a test removed the remote to make the push fail.
+        remoteMain: await git(opts.remote, ['rev-parse', 'main']).catch(
+          () => '',
+        ),
         call: calls.length - 1,
       });
+      const failure = flags.includes('--server-side')
+        ? opts.failTenantApply
+        : opts.failApply;
+      if (failure) {
+        throw new Error(failure);
+      }
       return '';
     }
     if (a.startsWith('get namespace')) {
@@ -503,14 +518,21 @@ describe('calm:deploy:gitops: a failed deployment', () => {
     namespace?: object;
     failFlux?: string;
     branch?: string;
+    failApply?: string;
+    failTenantApply?: string;
+    /** Breaks the working copy or the remote before the action runs. */
+    before?: (dir: string, remote: string) => Promise<void>;
   }) => {
     const { remote, dir } = await failing();
     if (opts.branch) {
       await git(dir, ['checkout', '-q', '-b', opts.branch]);
     }
+    await opts.before?.(dir, remote);
     const fake = fakeKubectl({
       remote,
       failFlux: opts.failFlux ?? 'kustomize build failed',
+      failApply: opts.failApply,
+      failTenantApply: opts.failTenantApply,
       namespace: opts.namespace,
     });
     const c = ctx({
@@ -529,7 +551,7 @@ describe('calm:deploy:gitops: a failed deployment', () => {
       hub: opts.hub,
       appBaseUrl: 'http://localhost:3100',
     }).handler(c);
-    return { result, c };
+    return { result, c, remote };
   };
   it('records a failed decorator when Flux does not apply the commit, and rethrows', async () => {
     const { hub, posted } = fakeRecordingHub();
@@ -580,5 +602,80 @@ describe('calm:deploy:gitops: a failed deployment', () => {
     await expect(result).rejects.toThrow(/is on the branch feature, not main/);
     expect(hub.architectures).not.toHaveBeenCalled();
     expect(hub.createDecorator).not.toHaveBeenCalled();
+  });
+
+  it('records nothing when the push is rejected: nothing reached Git or Flux', async () => {
+    const { hub } = fakeRecordingHub();
+    const { result } = await run({
+      input: { record },
+      hub,
+      // The remote is gone, so the push fails.
+      before: async (_dir, remote) => fs.rm(remote, { recursive: true }),
+    });
+    await expect(result).rejects.toThrow(/calm-services\/orders\.git/);
+    expect(hub.architectures).not.toHaveBeenCalled();
+    expect(hub.createDecorator).not.toHaveBeenCalled();
+  });
+
+  it('records nothing when the overlay cannot be written', async () => {
+    const { hub } = fakeRecordingHub();
+    const { result } = await run({
+      input: { record },
+      hub,
+      // A file where the overlay folder goes.
+      before: async dir =>
+        fs.writeFile(path.join(dir, 'deploy', 'k8s-overlay'), 'not a folder'),
+    });
+    await expect(result).rejects.toThrow(/k8s-overlay/);
+    expect(hub.architectures).not.toHaveBeenCalled();
+    expect(hub.createDecorator).not.toHaveBeenCalled();
+  });
+
+  it('records nothing when the commit fails', async () => {
+    const { hub } = fakeRecordingHub();
+    const { result } = await run({
+      input: { record },
+      hub,
+      // Another git process holds the index (the action's git runs without hooks).
+      before: async dir =>
+        fs.writeFile(path.join(dir, '.git', 'index.lock'), ''),
+    });
+    await expect(result).rejects.toThrow(/index\.lock/);
+    expect(hub.architectures).not.toHaveBeenCalled();
+    expect(hub.createDecorator).not.toHaveBeenCalled();
+  });
+
+  it('records nothing when the Namespace and Flux service account cannot be applied: the push has not happened', async () => {
+    const { hub } = fakeRecordingHub();
+    const { result, remote } = await run({
+      input: { record },
+      hub,
+      failTenantApply: 'error: namespaces "calm-orders" is forbidden',
+    });
+    await expect(result).rejects.toThrow(
+      /namespaces "calm-orders" is forbidden/,
+    );
+    expect(await git(remote, ['log', '-1', '--format=%s', 'main'])).not.toBe(
+      'Deploy orders:abc',
+    );
+    expect(hub.architectures).not.toHaveBeenCalled();
+    expect(hub.createDecorator).not.toHaveBeenCalled();
+  });
+
+  it('records a failed decorator when applying the Flux objects fails, right after the push', async () => {
+    const { hub, posted } = fakeRecordingHub();
+    const { result } = await run({
+      input: { record },
+      hub,
+      failApply: 'error: the server could not find the requested resource',
+    });
+    await expect(result).rejects.toThrow(
+      /could not find the requested resource/,
+    );
+    expect(posted).toHaveLength(1);
+    expect(posted[0].data.status).toBe('failed');
+    expect(posted[0].data.notes).toContain(
+      'could not find the requested resource',
+    );
   });
 });

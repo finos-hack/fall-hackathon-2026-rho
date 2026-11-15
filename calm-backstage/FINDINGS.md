@@ -120,7 +120,7 @@ Each is a candidate for a published, supported API.
 - **minikube's docker driver can give the API server a new port on each start.** `k8s/up.sh` rewrites
   `app-config.local.yaml` every time, and Backstage needs a restart after it.
 - **Policies need a CNI that enforces them.** The profile is started with `--cni=calico`.
-- **A NetworkPolicy names the pod's port, not the Service's.** The TLS sidecar (`k8s-deploy` 1.3.0) is reached on
+- **A NetworkPolicy names the pod's port, not the Service's.** The TLS sidecar (`k8s-deploy` 1.3.0 and later) is reached on
   Service port 443, but its policies allow 8443, the port it listens on in the pod.
 - **`nginx-unprivileged` listens on 8080 out of the box** (its `conf.d/default.conf`), the starters' default port. A
   sidecar next to an app on 8080 must replace that folder, as the TLS sidecar's ConfigMap does, or one of them fails
@@ -193,6 +193,10 @@ build of Quarkus 3.33.4 and 3.40.1 (BOM `com.redhat.quarkus.platform:quarkus-bom
   two ids would get the same name or the name is cut. Node names are RFC 1035 labels (a Service name must start with
   a letter, at most 63 characters) and every selector, Service, gateway upstream and host in the environment uses the
   same name; the original id stays in an annotation. Older versions are published and keep the bug.
+- **TLS and the valid names had to meet in a new version.** `k8s-deploy` 1.3.0 (TLS) was copied from 1.2.1, so it kept the
+  invalid-name bug 1.2.2 fixed, and versions are immutable. 1.3.1 is 1.2.2 plus the TLS of 1.3.0, with the certificate,
+  its Secret, the sidecar's ConfigMap, the certificate's DNS name and the gateway's `proxy_pass` / `proxy_ssl_name` all
+  using the converted node name. Use 1.3.1, not 1.3.0, for an architecture whose ids are not valid names.
 - **A valid label value can still be a YAML number.** A service name `2024`, `1.0`, `1e3`, `0x1F` or `2024-01-01`
   written bare as `app.kubernetes.io/part-of` builds with kustomize into a number or a timestamp, but a label value
   must be a string, so the apply fails. `k8s-deploy` 1.2.2 quotes a label value that starts with a digit and keeps every other one bare,
@@ -239,5 +243,22 @@ build of Quarkus 3.33.4 and 3.40.1 (BOM `com.redhat.quarkus.platform:quarkus-bom
     host namespaces, paths or ports) then fails admission.
     Gitea is published on 127.0.0.1:3300, so by default that is anyone on this machine, not the network; with
     `GITEA_BIND=0.0.0.0` (Linux) it is the network again unless a firewall blocks 3300. Seed a random password.
+- **Two tasks must not share a service's working copy.** `calm:upgrade:render`, `calm:upgrade:merge` and
+  `calm:deploy:gitops` reset, clean and switch branches in `output/<name>`, and an upgrade spans render, image build,
+  merge and deploy. A double click on Upgrade, or an upgrade over a `deploy:gitops` rerun, could leave one task on
+  the other's branch. The working copy is now reserved for the task that took it (in memory, by task id): render
+  takes it and keeps it when it changed something, merge takes it again, and the deploy (or any failure, or a render
+  with nothing to change) releases it. Another task gets "is in use by the task ..." at once. A task that dies
+  between steps releases it 10 minutes (`SERVICE_LOCK_TTL_MS`) after its last step, which renews it while it runs
+  (a slow image build does not outlast it), so a failed upgrade can be run again after that time, and at once when
+  it failed in the render, the image build or the merge. The reservation is
+  per backend process, so it assumes one Backstage backend.
+- **CALM Hub only (after part 3).** Services no longer carry `architecture.json`: the card and upgrades read the
+  version their annotations name from CALM Hub. Two consequences:
+  - CALM Hub must be up to view or upgrade a service; the card says CALM Hub did not answer rather than showing a
+    possibly stale copy.
+  - A run whose "Store the architecture in CALM Hub" step fails after the Git push (#15 put the Hub write last, so a
+    failed render leaves nothing in the Hub) leaves a repository whose annotations name a version CALM Hub does not
+    have; its card shows the CALM Hub error. Remove it with `docs/demo/cleanup.sh` and run the Template again.
 - **A `PageBlueprint` gets a sidebar item from the plugin's `title` and `icon` and a `routeRef`**, not from the page's
   own title.

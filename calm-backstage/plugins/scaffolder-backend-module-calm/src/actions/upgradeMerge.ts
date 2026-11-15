@@ -1,5 +1,3 @@
-import path from 'node:path';
-import { resolveSafeChildPath } from '@backstage/backend-plugin-api';
 import { createTemplateAction } from '@backstage/plugin-scaffolder-node';
 import {
   GiteaClient,
@@ -29,6 +27,8 @@ import {
   clusterKubectl,
   writeOverlay,
 } from './deployK8s';
+import { publishedFolder } from './publishedFolder';
+import { withServiceLock } from './serviceLock';
 
 /** The pull request body: what changes, the files, and what happens after the merge. */
 export function pullRequestBody(o: {
@@ -96,97 +96,107 @@ export function createCalmUpgradeMergeAction(options: {
         commit: z => z.string().describe('main after the merge'),
       },
     },
-    async handler(ctx) {
-      const settings = await requireKubernetesDeploy(options.settings);
-      const gitops = options.gitops;
-      if (!gitops) {
-        throw new Error('calm.gitops is not configured');
-      }
-      const { name, branch, image } = ctx.input;
-      const dir = resolveSafeChildPath(
-        options.localDir,
-        path.relative(options.localDir, path.resolve(ctx.input.dir)),
-      );
-      const git = { logger: ctx.logger, signal: ctx.signal };
-      if ((await gitCurrentBranch(dir, git)) !== branch) {
-        throw new Error(`${dir} is not on the branch ${branch}`);
-      }
-      const namespace = deployNamespace(settings.namespacePrefix, name);
-      const kubectl: Kubectl = options.kubectl
-        ? options.kubectl(settings, dir)
-        : clusterKubectl(settings, {
-            cwd: dir,
-            logger: ctx.logger,
-            signal: ctx.signal,
-          });
-      await checkNamespace(kubectl, namespace, name);
-      await writeOverlay(
-        dir,
-        { name, namespace, image },
-        GITOPS_OVERLAY_HEADER,
-        { withNamespace: false },
-      );
-      await gitCommitAll(dir, `Deploy ${image}`, git);
-      const diffStat = await gitDiffStat(dir, gitops.branch, git);
-      await applyObjects(kubectl, fluxTenantObjects({ name, namespace }), {
-        serverSide: true,
-      });
-      const repo = serviceRepository(gitops, name);
-      // The upgrade branch is this action's own: a run that failed after pushing it left an older one there.
-      await gitPush(dir, repo.pushUrl, branch, gitops.auth, {
-        ...git,
-        force: true,
-      });
-
-      const gitea =
-        options.gitea ?? new GiteaClient(gitops.gitUrl, gitops.auth);
-      const summary = ctx.input.summary ?? 'Upgrade';
-      const title = `Upgrade ${name}: ${summary.split('\n').join('; ')}`;
-      const pr =
-        (await gitea.findOpenPullRequest(
-          gitops.servicesOrg,
-          name,
-          branch,
-          gitops.branch,
-        )) ??
-        (await gitea.createPullRequest(gitops.servicesOrg, name, {
-          head: branch,
-          base: gitops.branch,
-          title,
-          body: pullRequestBody({ summary, diffStat, image }),
-        }));
-      ctx.logger.info(`Pull request ${pr.url}`);
-      // Gitea checks whether a new pull request can be merged in the background, and refuses until it knows.
-      for (let attempt = 1; ; attempt++) {
-        try {
-          await gitea.mergePullRequest(
-            gitops.servicesOrg,
-            name,
-            pr.number,
-            title,
-          );
-          break;
-        } catch (e) {
-          if (
-            attempt >= (options.mergeAttempts ?? 6) ||
-            !/returned 405/.test(String(e))
-          ) {
-            throw e;
+    async handler(outer) {
+      await withServiceLock(
+        outer,
+        {
+          dir: publishedFolder(options.localDir, outer.input.dir),
+          keep: () => true,
+        },
+        async ctx => {
+          const settings = await requireKubernetesDeploy(options.settings);
+          const gitops = options.gitops;
+          if (!gitops) {
+            throw new Error('calm.gitops is not configured');
           }
-          ctx.logger.info(`Gitea cannot merge #${pr.number} yet; trying again`);
-          await new Promise(r => setTimeout(r, options.mergeRetryMs ?? 2000));
-        }
-      }
-      ctx.logger.info(`Merged pull request #${pr.number}`);
+          const { name, branch, image } = ctx.input;
+          const dir = publishedFolder(options.localDir, ctx.input.dir);
+          const git = { logger: ctx.logger, signal: ctx.signal };
+          if ((await gitCurrentBranch(dir, git)) !== branch) {
+            throw new Error(`${dir} is not on the branch ${branch}`);
+          }
+          const namespace = deployNamespace(settings.namespacePrefix, name);
+          const kubectl: Kubectl = options.kubectl
+            ? options.kubectl(settings, dir)
+            : clusterKubectl(settings, {
+                cwd: dir,
+                logger: ctx.logger,
+                signal: ctx.signal,
+              });
+          await checkNamespace(kubectl, namespace, name);
+          await writeOverlay(
+            dir,
+            { name, namespace, image },
+            GITOPS_OVERLAY_HEADER,
+            { withNamespace: false },
+          );
+          await gitCommitAll(dir, `Deploy ${image}`, git);
+          const diffStat = await gitDiffStat(dir, gitops.branch, git);
+          await applyObjects(kubectl, fluxTenantObjects({ name, namespace }), {
+            serverSide: true,
+          });
+          const repo = serviceRepository(gitops, name);
+          // The upgrade branch is this action's own: a run that failed after pushing it left an older one there.
+          await gitPush(dir, repo.pushUrl, branch, gitops.auth, {
+            ...git,
+            force: true,
+          });
 
-      await gitCheckoutBranch(dir, gitops.branch, false, git);
-      await gitPull(dir, repo.pushUrl, gitops.branch, gitops.auth, git);
-      await gitDeleteBranch(dir, branch, git);
-      const commit = await gitHead(dir, git);
-      ctx.logger.info(`main is now ${commit}`);
-      ctx.output('prUrl', pr.url);
-      ctx.output('prNumber', pr.number);
-      ctx.output('commit', commit);
+          const gitea =
+            options.gitea ?? new GiteaClient(gitops.gitUrl, gitops.auth);
+          const summary = ctx.input.summary ?? 'Upgrade';
+          const title = `Upgrade ${name}: ${summary.split('\n').join('; ')}`;
+          const pr =
+            (await gitea.findOpenPullRequest(
+              gitops.servicesOrg,
+              name,
+              branch,
+              gitops.branch,
+            )) ??
+            (await gitea.createPullRequest(gitops.servicesOrg, name, {
+              head: branch,
+              base: gitops.branch,
+              title,
+              body: pullRequestBody({ summary, diffStat, image }),
+            }));
+          ctx.logger.info(`Pull request ${pr.url}`);
+          // Gitea checks whether a new pull request can be merged in the background, and refuses until it knows.
+          for (let attempt = 1; ; attempt++) {
+            try {
+              await gitea.mergePullRequest(
+                gitops.servicesOrg,
+                name,
+                pr.number,
+                title,
+              );
+              break;
+            } catch (e) {
+              if (
+                attempt >= (options.mergeAttempts ?? 6) ||
+                !/returned 405/.test(String(e))
+              ) {
+                throw e;
+              }
+              ctx.logger.info(
+                `Gitea cannot merge #${pr.number} yet; trying again`,
+              );
+              await new Promise(r =>
+                setTimeout(r, options.mergeRetryMs ?? 2000),
+              );
+            }
+          }
+          ctx.logger.info(`Merged pull request #${pr.number}`);
+
+          await gitCheckoutBranch(dir, gitops.branch, false, git);
+          await gitPull(dir, repo.pushUrl, gitops.branch, gitops.auth, git);
+          await gitDeleteBranch(dir, branch, git);
+          const commit = await gitHead(dir, git);
+          ctx.logger.info(`main is now ${commit}`);
+          ctx.output('prUrl', pr.url);
+          ctx.output('prNumber', pr.number);
+          ctx.output('commit', commit);
+        },
+      );
     },
   });
 }

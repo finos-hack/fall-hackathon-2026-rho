@@ -230,7 +230,7 @@ function RecordedDeploymentsSection(props: {
 }
 
 /**
- * The CALM architecture of an entity (a Hub architecture, or a service published from a pattern): pattern and version,
+ * The CALM architecture of an entity (a Hub architecture, or a service published from a pattern), read from CALM Hub: pattern and version,
  * the controls it references, node and relationship counts, a Mermaid diagram and, for a service deployed to the
  * local cluster, where it runs, its network policies and the deployments recorded in CALM Hub.
  */
@@ -261,13 +261,9 @@ export function CalmArchitectureCard() {
   return (
     <InfoCard
       title="CALM architecture"
-      subheader={
-        value?.source.type === 'file'
-          ? `From ${annotations[ANN.architectureFile] ?? 'architecture.json'}`
-          : `From CALM Hub${
-              value?.source.version ? `, version ${value.source.version}` : ''
-            }`
-      }
+      subheader={`From CALM Hub${
+        value?.source.version ? `, version ${value.source.version}` : ''
+      }`}
     >
       {loading && <LinearProgress aria-label="Loading the architecture" />}
       {error && <Alert severity="error">{error.message}</Alert>}
@@ -318,14 +314,12 @@ export function CalmArchitectureCard() {
                 <Typography variant="body2">none</Typography>
               )}
             </Box>
-            {value.source.type === 'hub' && (
-              <Box>
-                <Typography variant="overline" display="block">
-                  Source
-                </Typography>
-                <Link to={value.source.url}>CALM Hub (JSON)</Link>
-              </Box>
-            )}
+            <Box>
+              <Typography variant="overline" display="block">
+                Source
+              </Typography>
+              <Link to={value.source.url}>CALM Hub (JSON)</Link>
+            </Box>
           </Box>
           {value.deployment && (
             <Box mb={2}>

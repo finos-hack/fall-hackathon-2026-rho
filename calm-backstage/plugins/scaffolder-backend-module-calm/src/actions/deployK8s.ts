@@ -351,7 +351,7 @@ export function createCalmDeployK8sAction(options: {
             })
             .optional()
             .describe(
-              'The architecture version in CALM Hub (calm:register:hub output). When set and the deployment fails after it started, a deployment decorator with the status failed is recorded there, and the error is thrown as before',
+              'The architecture version in CALM Hub (calm:register:hub output). When set and the deployment fails after it started (from kubectl apply on: the apply, the rollouts), a deployment decorator with the status failed is recorded there, and the error is thrown as before',
             ),
       },
       output: {

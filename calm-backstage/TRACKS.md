@@ -80,9 +80,10 @@ Scope: GitHub publish, dry run, register the architecture in the Hub.
 - Done: the generated architecture is stored in CALM Hub (`calm:register:hub`), the service is built and deployed
   to the local minikube (`calm:image:build`, `calm:deploy:k8s`) with NetworkPolicies from its `connects`
   relationships, and the deployment is recorded as a decorator (`calm:decorate:deployment`). A failed deployment is
-  recorded too: `calm:deploy:k8s` and `calm:deploy:gitops` take `record` and, when the deploy fails after it started,
-  post a `failed` decorator (applies to the nodes the rendered workloads are labelled with, the error in the notes)
-  and rethrow the error.
+  recorded too: `calm:deploy:k8s` and `calm:deploy:gitops` take `record` and, when the deploy fails after it started
+  (from `kubectl apply` on; for gitops once the commit is pushed), post a `failed` decorator (applies to the
+  architecture nodes the rendered workloads name, all its nodes when none does; the error in the notes; unique-id
+  `<name>-<task>-failed`) and rethrow the error.
 - Done: the gateway reaches the service over TLS, as the architecture's HTTPS relationship says. The deployment rules
   `k8s-deploy` 1.3.0 put an nginx sidecar on 8443 in front of the destination of an HTTPS relationship inside the
   cluster, with a certificate cert-manager issues from a self-signed CA in the namespace; the gateway checks it, and
@@ -91,10 +92,20 @@ Scope: GitHub publish, dry run, register the architecture in the Hub.
 - Left:
   - An existing service cannot be redeployed: `calm:register:hub` and `calm:publish:local` refuse a name whose
     folder exists.
-  - The Hub write happens after the render, publish and git publish (`calm:register:hub` in `prepare` mode first, in
-    `store` mode then), so a run that fails there leaves nothing in the Hub. A failed build or deploy still leaves
-    the version, which cannot be deleted (and the failed deploy is recorded on it). `prepare` checks the catalog and
-    the output folder, so a clashing name writes nothing.
+  - The Hub write happens after the render and the publish and before the git publish (`calm:register:hub` in
+    `prepare` mode first, in `store` mode then), so a run that fails in the render or the publish leaves nothing in
+    the Hub. `prepare` checks the catalog and the output folder, so a clashing name writes nothing. `store` stores
+    the prepared file as the version its `$id` names (an identical document at that version is reused, another one
+    fails), and first checks that the published `catalog-info.yaml` names that architecture version (CALM Hub holds the only copy of
+    the architecture). When the store step fails before a
+    version was written (the Hub unreachable or answering an error, the catalog or Hub name taken in between, a
+    different document at that version, a published file that differs) or in the POST itself (the Hub may or may not
+    hold the version then; a rerun with the same document reuses it), nothing is in Git yet and it removes the
+    service folder this run published (`publishedDir`, only `<localDir>/<name>` whose `catalog-info.yaml` names the stored version), so the Template
+    can be run again. A workspace file without a prepared `$id` fails with the folder kept, and so does a failed
+    read-back after a POST that worked (the version exists). A failure after the store (git publish, build, deploy)
+    still leaves the stored version, which cannot be deleted (a rerun with the same document reuses it, and a failed
+    deploy is recorded on it), and the published folder, so a rerun with that name is refused.
   - `calm:image:build`, `calm:deploy:k8s` and `calm:decorate:deployment` have no dry run: in a dry run the
     scaffolder skips the publish step they depend on.
 - `calm:publish:local` still writes `output/<name>/` and `calm:register:local` adds a file location.
