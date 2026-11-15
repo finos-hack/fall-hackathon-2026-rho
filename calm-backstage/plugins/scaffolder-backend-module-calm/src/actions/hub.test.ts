@@ -377,6 +377,119 @@ describe('with a workspace', () => {
     });
   });
 
+  describe('calm:register:hub, prepare and store', () => {
+    const noEntities = { getEntityByRef: jest.fn(async () => undefined) };
+    const auth = { getOwnServiceCredentials: jest.fn(async () => ({})) } as any;
+    const register = (hub: ReturnType<typeof fakeHub>, c: any) =>
+      createCalmRegisterHubAction({
+        hub: hub.client,
+        namespace: 'hackathon',
+        catalog: noEntities,
+        auth,
+        localDir: path.join(workspace, 'output'),
+      }).handler(c);
+
+    it('prepare writes the file with its $id and makes no Hub write', async () => {
+      const hub = fakeHub(base);
+      const c = ctx({ name: 'billing-api', mode: 'prepare' });
+      await register(hub, c);
+      const url = versionUrl('billing-api', '1.0.0');
+      expect(hub.posts()).toEqual([]);
+      expect(await readFile()).toMatchObject({
+        $id: url,
+        title: 'billing-api',
+        metadata: {
+          'calm-backstage': { entity: 'component:default/billing-api' },
+        },
+      });
+      expect(c.outputs).toEqual({
+        namespace: 'hackathon',
+        architecture: 'billing-api',
+        version: '1.0.0',
+        url,
+        created: false,
+      });
+    });
+
+    it('prepare still refuses a service whose folder exists', async () => {
+      const hub = fakeHub(base);
+      await fs.mkdir(path.join(workspace, 'output', 'billing-api'), {
+        recursive: true,
+      });
+      await expect(
+        register(hub, ctx({ name: 'billing-api', mode: 'prepare' })),
+      ).rejects.toThrow(/billing-api already exists/);
+      expect(hub.calls).toEqual([]);
+    });
+
+    it('store after prepare posts the same document', async () => {
+      const hub = fakeHub(base);
+      await register(hub, ctx({ name: 'billing-api', mode: 'prepare' }));
+      const prepared = await readFile();
+      const c = ctx({ name: 'billing-api', mode: 'store' });
+      await register(hub, c);
+      const url = versionUrl('billing-api', '1.0.0');
+      expect(hub.posts()).toEqual([{ method: 'POST', url, body: prepared }]);
+      expect(await readFile()).toEqual(prepared);
+      expect(c.outputs).toMatchObject({ version: '1.0.0', url, created: true });
+    });
+
+    it('store does not refuse because the output folder exists', async () => {
+      const hub = fakeHub(base);
+      await register(hub, ctx({ name: 'billing-api', mode: 'prepare' }));
+      await fs.mkdir(path.join(workspace, 'output', 'billing-api'), {
+        recursive: true,
+      });
+      await register(hub, ctx({ name: 'billing-api', mode: 'store' }));
+      expect(hub.posts()).toHaveLength(1);
+    });
+
+    it('store fails, writing nothing, when the Hub gained a version in between', async () => {
+      const hub = fakeHub(base);
+      await register(hub, ctx({ name: 'billing-api', mode: 'prepare' }));
+      hub.architectures.set(
+        'billing-api',
+        new Map([
+          [
+            '1.0.0',
+            {
+              title: 'Other',
+              nodes: [],
+              metadata: {
+                'calm-backstage': { entity: 'component:default/billing-api' },
+              },
+            },
+          ],
+        ]),
+      );
+      await expect(
+        register(hub, ctx({ name: 'billing-api', mode: 'store' })),
+      ).rejects.toThrow(/Nothing was stored; run the Template again/);
+      expect(hub.posts()).toEqual([]);
+    });
+
+    it('store reuses an identical latest version and posts nothing', async () => {
+      const hub = fakeHub(base);
+      await register(hub, ctx({ name: 'billing-api' }));
+      await fs.writeFile(file(), JSON.stringify(architecture));
+      await register(hub, ctx({ name: 'billing-api', mode: 'prepare' }));
+      const c = ctx({ name: 'billing-api', mode: 'store' });
+      await register(hub, c);
+      expect(hub.posts()).toHaveLength(1);
+      expect(c.outputs).toMatchObject({ version: '1.0.0', created: false });
+    });
+
+    it('store writes nothing in a dry run', async () => {
+      const hub = fakeHub(base);
+      await register(hub, ctx({ name: 'billing-api', mode: 'prepare' }));
+      await register(
+        hub,
+        ctx({ name: 'billing-api', mode: 'store' }, { isDryRun: true }),
+      );
+      expect(hub.posts()).toEqual([]);
+    });
+  });
+
   describe('calm:decorate:deployment', () => {
     const input = {
       hubNamespace: 'hackathon',

@@ -92,6 +92,10 @@ export function chooseVersion(opts: {
  * `calm:register:hub`: stores the workspace architecture in CALM Hub as a version of an architecture named after the
  * service, and writes the version's Hub URL into the file as its `$id`, so what is rendered and published carries it.
  * The stored document also gets a `title` and `description` when it has none, and the service mark in `metadata`.
+ *
+ * `mode` splits it in two, so the Hub write can come after the render and the publish (a Hub version cannot be
+ * deleted, a published folder or repository can): `prepare` makes every check and writes the file with its `$id`,
+ * and `store` (later) writes the prepared file to the Hub. Without `mode` it does both at once.
  */
 export function createCalmRegisterHubAction(options: {
   hub: CalmHubWriteClient;
@@ -106,7 +110,7 @@ export function createCalmRegisterHubAction(options: {
   return createTemplateAction({
     id: 'calm:register:hub',
     description:
-      "Stores the architecture in CALM Hub (namespace calm.publish.hubNamespace) as <name> version <version>, sets its $id to that version's Hub URL, adds a title (the name) and a description when it has none, marks it as the service's in metadata, and writes all of it back to the workspace file. An identical latest version is reused; a different one gets the next patch version, since Hub versions cannot change. A dry run reads the Hub and writes nothing to it.",
+      "Stores the architecture in CALM Hub (namespace calm.publish.hubNamespace) as <name> version <version>, sets its $id to that version's Hub URL, adds a title (the name) and a description when it has none, marks it as the service's in metadata, and writes all of it back to the workspace file. An identical latest version is reused; a different one gets the next patch version, since Hub versions cannot change. A dry run reads the Hub and writes nothing to it. With mode prepare it makes the checks and writes the file but stores nothing; with mode store (after prepare) it stores the prepared file, and fails if the Hub chose another version in between.",
     supportsDryRun: true,
     schema: {
       input: {
@@ -130,6 +134,13 @@ export function createCalmRegisterHubAction(options: {
             .describe(
               `Version to store it as, <major>.<minor>.<patch>. Default ${DEFAULT_HUB_VERSION}`,
             ),
+        mode: z =>
+          z
+            .enum(['prepare', 'store'])
+            .optional()
+            .describe(
+              'prepare: check and write the file, store nothing. store: store the file prepared earlier. Omitted: both',
+            ),
       },
       output: {
         namespace: z => z.string().describe('Hub namespace'),
@@ -145,7 +156,7 @@ export function createCalmRegisterHubAction(options: {
       },
     },
     async handler(ctx) {
-      const { name } = ctx.input;
+      const { name, mode } = ctx.input;
       const wanted = ctx.input.version ?? DEFAULT_HUB_VERSION;
       if (!HUB_NAME.test(name)) {
         throw new Error(
@@ -172,22 +183,25 @@ export function createCalmRegisterHubAction(options: {
       // The Hub architecture belongs to this service: the catalog provider then emits no Component of its own for it.
       const entityRef = `component:default/${name}`;
 
-      // This step runs before calm:publish:local, so it makes publish's name checks first: a name the catalog holds
-      // from elsewhere, or a service folder that exists, would make publish fail after the Hub had a new version.
+      // Without the store mode this step runs before calm:publish:local, so it makes publish's name checks first: a
+      // name the catalog holds from elsewhere, or a service folder that exists, would make publish fail after the Hub
+      // had a new version. The store mode runs after the publish, which made the folder, so it skips the folder check.
       const target = resolveSafeChildPath(options.localDir, name);
       assertClaimable(
         await lookUpClaim(options, entityRef),
         fileLocationRef(path.join(target, CATALOG_INFO_FILE)),
         entityRef,
       );
-      const folderExists = await fs
-        .stat(target)
-        .then(() => true)
-        .catch(() => false);
-      if (folderExists) {
-        throw new Error(
-          `${target} already exists, so the service ${name} has already been created; choose another service name`,
-        );
+      if (mode !== 'store') {
+        const folderExists = await fs
+          .stat(target)
+          .then(() => true)
+          .catch(() => false);
+        if (folderExists) {
+          throw new Error(
+            `${target} already exists, so the service ${name} has already been created; choose another service name`,
+          );
+        }
       }
       const doc = markServiceArchitecture(
         withTitle(withoutId(read), name),
@@ -231,7 +245,20 @@ export function createCalmRegisterHubAction(options: {
       // $schema, $id, title, description, then the rest.
       const stored = withTitle({ ...doc, $id: url }, name);
 
-      if (reuse) {
+      if (mode === 'store' && read.$id !== url) {
+        // The prepared file (and what was rendered and published from it) names another version.
+        throw new Error(
+          `CALM Hub changed since the architecture was prepared: the published files name ${JSON.stringify(
+            read.$id,
+          )} but this would be stored as ${url}. Nothing was stored; run the Template again`,
+        );
+      }
+
+      if (mode === 'prepare') {
+        ctx.logger.info(
+          `Prepared the architecture for CALM Hub as ${namespace}/${name} ${version}: ${url}`,
+        );
+      } else if (reuse) {
         ctx.logger.info(
           `CALM Hub already holds this architecture as ${namespace}/${name} ${version}: ${url}`,
         );
@@ -267,7 +294,7 @@ export function createCalmRegisterHubAction(options: {
       ctx.output('architecture', name);
       ctx.output('version', version);
       ctx.output('url', url);
-      ctx.output('created', !reuse && !ctx.isDryRun);
+      ctx.output('created', mode !== 'prepare' && !reuse && !ctx.isDryRun);
     },
   });
 }

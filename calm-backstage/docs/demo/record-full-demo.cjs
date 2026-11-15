@@ -381,8 +381,9 @@ const CHAPTERS = [
   // The Quarkus service is made with the same Template while this one runs (chapter 4 opens it).
   startTask('create-from-web-service', {
     name: QUARKUS,
-    'datastore-choice': 'PostgreSQL',
-    'add-ons': [],
+    // Decision parameters are named choice-<relationship id>.
+    'choice-datastore-choice': 'PostgreSQL',
+    'choice-add-ons': [],
     bundle: 'quarkus-service@1.0.0',
     deployBundle: 'k8s-deploy@1.1.0',
     deploy: true,
