@@ -4,6 +4,13 @@
 # Differences: compose project name calm-backstage, Hub on host port 8090 (not 8080), MongoDB port not
 # published, base URL set to http://localhost:8090 so $id, $schema and control URLs resolve for the CLI.
 #
+# The Hub and the registry have no authentication, bundles carry JavaScript that runs in the Backstage backend, and
+# Gitea's admin login is in this repository (a push to calm-templates/bundles or calm-services/<name> ends up running
+# in the backend or the cluster). So all three are published on 127.0.0.1 only, not on the machine's network
+# addresses. On Docker Desktop, containers and minikube pods on this machine can still reach them through
+# host.docker.internal / host.minikube.internal. Where minikube runs on Linux, Flux may need Gitea on all interfaces:
+# see GITEA_BIND below.
+#
 # Prepare the release meta-schemas first (git-ignored): hub/copy-schemas.sh
 # Start: yarn hub:up   Seed: yarn hub:seed   Stop: yarn hub:down
 #
@@ -43,7 +50,7 @@ services:
       mongodb:
         condition: service_healthy
     ports:
-      - "8090:8080"
+      - "127.0.0.1:8090:8080"
     environment:
       - CALM_HUB_BASE_URL=http://localhost:8090
       - JAVA_OPTS=-Dquarkus.mongodb.connection-string=mongodb://mongodb:27017 -Dquarkus.profile=no-auth -Dcalm.hub.base-url=http://localhost:8090
@@ -54,21 +61,32 @@ services:
     image: registry:2
     container_name: calm-backstage-registry
     ports:
-      - "5050:5000"
+      - "127.0.0.1:5050:5000"
     volumes:
       - registry-data:/var/lib/registry
     networks:
       - calm-net
 
   # Git server standing in for GitHub: calm-templates (bundle sources) and calm-services/<name> (one repo per created
-  # service, which Flux deploys from). Host port 3300 for the browser and Backstage; pods in the local cluster reach
+  # service, which Flux deploys from). Host port 3300 for the browser and Backstage; Flux in the local cluster reaches
   # it as http://host.minikube.internal:3300. Local development only: the admin user and its password are created by
   # hub/gitea-seed.sh and are in app-config.yaml.
+  #
+  # Published on 127.0.0.1 by default, like the Hub and the registry. With minikube on macOS (Docker Desktop),
+  # host.minikube.internal still reaches a port published on 127.0.0.1 (tested). Where the minikube binary runs on
+  # Linux (a Linux host, or inside WSL, with Docker Engine or Docker Desktop) it is expected to be the gateway of
+  # minikube's Docker network instead, which a 127.0.0.1-only port does not answer (seen inside Docker Desktop's VM; not
+  # tested on a Linux host or in WSL). `yarn k8s:up` warns when Flux cannot reach Gitea. Then put
+  #   GITEA_BIND=0.0.0.0
+  # in hub/.env (git-ignored, read by `yarn hub:up`) and run `yarn hub:up` again. That publishes Gitea on every
+  # interface, as before issue #5, so other machines can reach it with the committed password: use a host firewall to
+  # keep port 3300 off the network. (Binding only the gateway would stop localhost:3300, which Backstage and the seed
+  # scripts use, and Docker Desktop cannot bind that address at all.)
   gitea:
     image: gitea/gitea:1.27.3
     container_name: calm-backstage-gitea
     ports:
-      - "3300:3000"
+      - "${GITEA_BIND:-127.0.0.1}:3300:3000"
     environment:
       - USER_UID=1000
       - USER_GID=1000

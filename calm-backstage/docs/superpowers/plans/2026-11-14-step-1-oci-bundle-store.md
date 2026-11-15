@@ -16,7 +16,8 @@ artifact that a standard client can read.
 - `tar` 6 and 7 are in `yarn.lock`. Depend on a range that resolves to an existing entry (`tar: ^7.5.7`), so nothing
   new is fetched. `.yarnrc.yml` must not change (3-day age gate). Node 26 has global `fetch` and `crypto`.
 - `oras` and `crane` are not installed. Docker is; `docker run --rm ghcr.io/oras-project/oras:v1.2.0` can serve as
-  the standard client for the risk check (pull through `host.docker.internal:5050` with `--plain-http`).
+  the standard client for the risk check (run it on the Compose network `calm-backstage_calm-net` and pull from
+  `registry:5000` with `--plain-http`; see the note under Results about `host.docker.internal`).
 - Backstage is running as a background task of the lead on 3100/7107. **Do not start a second one and do not kill
   it.** Ask the lead (in your report) to restart it; for your own checks use `yarn tsc`, `yarn test`, and the backend
   routes that pick up changes through the dev server's reload.
@@ -68,9 +69,10 @@ artifact that a standard client can read.
    - `yarn tsc`, `yarn test`, `yarn build:backend`, `backstage-cli package lint` in the changed packages.
    - `docker compose -f hub/docker-compose.yml up -d`; `yarn bundles:push` twice (same digests); 
      `curl localhost:5050/v2/_catalog` and `/v2/calm-bundles/web-service/tags/list`.
-   - **Risk check:** `docker run --rm -v <scratch>:/w ghcr.io/oras-project/oras:v1.2.0 pull --plain-http
-     host.docker.internal:5050/calm-bundles/web-service:2.0.0 -o /w` gives `bundle.tar.gz`, and
-     `oras manifest fetch` shows the artifact type. If `oras` cannot read it, stop and report (risk gate).
+   - **Risk check:** `docker run --rm --network calm-backstage_calm-net -v <scratch>:/w
+     ghcr.io/oras-project/oras:v1.2.0 pull --plain-http registry:5000/calm-bundles/web-service:2.0.0 -o /w` gives
+     `bundle.tar.gz`, and `oras manifest fetch` (same network and reference) shows the artifact type. If `oras` cannot
+     read it, stop and report (risk gate).
    - Report to the lead that Backstage needs a restart for the config change; the lead restarts it and checks the
      catalog and a Template run. Do not do the UI check yourself.
 8. **Commits** (Conventional Commits, each with `git commit -s`, no AI attribution, no Co-Authored-By):
@@ -150,6 +152,13 @@ both runs pushed 1.0.0, 2.0.0 and 3.0.0 with the same digests (the two above, an
 `bundles: 3 pushed`, exit 0.
 
 ### Risk check: oras 1.2.0
+
+Note (added later, issue #5): this run pulled through `host.docker.internal:5050`, when the registry was published on
+all interfaces. It is now published on 127.0.0.1 only. Docker Desktop still forwards `host.docker.internal` to it, but
+on Linux that name is not defined by default, and with `--add-host host.docker.internal:host-gateway` it is the
+bridge gateway, which a 127.0.0.1-only port does not answer. The check above now runs oras on the Compose network
+and pulls from `registry:5000`, which does not depend on how the port is published (rerun on Docker Desktop
+2026-11-15 against a throwaway registry: the same `bundle.tar.gz`, 2263 bytes, sha256 `85efd1a6…`, and the same artifact type).
 
 ```
 $ docker run --rm -v <scratch>/oras:/w ghcr.io/oras-project/oras:v1.2.0 pull --plain-http \

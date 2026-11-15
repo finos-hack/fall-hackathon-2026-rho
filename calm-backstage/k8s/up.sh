@@ -43,6 +43,17 @@ node "$ROOT_DIR/k8s/flux-install.cjs" | kc apply --server-side --force-conflicts
 kc -n flux-system rollout status deployment/source-controller --timeout=300s
 kc -n flux-system rollout status deployment/kustomize-controller --timeout=300s
 
+# Gitea is published on 127.0.0.1 by default (hub/docker-compose.yml). Where minikube runs on Linux, Flux is expected
+# not to reach that; check from the node and say what to do. Warnings only: Gitea may simply not be started yet.
+if ! curl -sf -o /dev/null --max-time 5 http://localhost:3300/api/healthz; then
+  echo "k8s:up: Gitea is not answering on localhost:3300; Flux needs it (start it with: yarn hub:up)" >&2
+elif ! minikube -p "$PROFILE" ssh -- \
+  curl -sf -o /dev/null --max-time 5 http://host.minikube.internal:3300/api/healthz 2>/dev/null; then
+  echo "k8s:up: WARNING: the cluster cannot reach Gitea at http://host.minikube.internal:3300 (Flux clones it)." >&2
+  echo "k8s:up: if minikube runs on Linux or WSL, add GITEA_BIND=0.0.0.0 to hub/.env and run yarn hub:up again;" >&2
+  echo "k8s:up: that publishes Gitea on every interface (see the comment above gitea in hub/docker-compose.yml)." >&2
+fi
+
 # cert-manager (pinned release): the deployment rules k8s-deploy 1.3.0 and later issue the certificates for TLS
 # between workloads (the gateway to the service) with its Issuer and Certificate resources.
 CERT_MANAGER_VERSION="v1.16.2"

@@ -144,7 +144,10 @@ build of Quarkus 3.33.4 and 3.40.1 (BOM `com.redhat.quarkus.platform:quarkus-bom
   source and kustomize controllers. Without the notification controller, each controller retries every event five
   times (about 15 s per reconcile) unless `--events-addr` is removed; it is.
 - **Flux in minikube reaches a Compose container through `host.minikube.internal`** and the published port; the two
-  are on different Docker networks. So Gitea must listen on the host's interfaces, not only on loopback.
+  are on different Docker networks. With Docker Desktop on macOS that name is the Docker Desktop host address, which
+  also reaches a port published on 127.0.0.1. Where minikube runs on Linux it is expected to be the gateway of
+  minikube's network, which does not (seen inside Docker Desktop's VM), so there Gitea has to be published on all
+  interfaces (`GITEA_BIND=0.0.0.0`, see `hub/docker-compose.yml`). Binding only the gateway would stop `localhost`.
 - **Ask for a reconcile with the annotation `reconcile.fluxcd.io/requestedAt`**, then wait until the Kustomization is
   Ready with `status.lastAppliedRevision` naming the pushed commit (`main@sha1:<sha>`). Ready alone can still be the
   previous commit.
@@ -196,8 +199,9 @@ build of Quarkus 3.33.4 and 3.40.1 (BOM `com.redhat.quarkus.platform:quarkus-bom
 - **Security, open (local development only):**
   - `/api/calm/app/*` is unauthenticated (a new tab carries no Backstage token) and serves the app on the backend's
     origin, so the app's script is same-origin with Backstage's APIs. Use `user-cookie` auth or a separate origin.
-  - Anyone who can push to a service repository in Gitea (port 3300, fixed admin password) can apply anything
-    through Flux, which runs as cluster-admin. Give each Kustomization a namespaced service account and
-    `targetNamespace`, and seed a random password.
+  - Anyone who can push to a service repository in Gitea (fixed admin password) can apply anything through Flux,
+    which runs as cluster-admin. Gitea is published on 127.0.0.1:3300, so by default that is anyone on this machine,
+    not the network; with `GITEA_BIND=0.0.0.0` (Linux) it is the network again unless a firewall blocks 3300. Give
+    each Kustomization a namespaced service account and `targetNamespace`, and seed a random password.
 - **A `PageBlueprint` gets a sidebar item from the plugin's `title` and `icon` and a `routeRef`**, not from the page's
   own title.
