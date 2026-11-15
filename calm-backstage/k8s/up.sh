@@ -43,6 +43,18 @@ node "$ROOT_DIR/k8s/flux-install.cjs" | kc apply --server-side --force-conflicts
 kc -n flux-system rollout status deployment/source-controller --timeout=300s
 kc -n flux-system rollout status deployment/kustomize-controller --timeout=300s
 
+# Gitea is published on 127.0.0.1 (hub/docker-compose.yml). Where minikube runs on Linux, host.minikube.internal is
+# the gateway of minikube's Docker network, which a 127.0.0.1-only port does not answer. Check from the node and, if
+# Gitea answers here but not there, say which GITEA_BIND to set. A warning only: Gitea may not be started yet.
+if curl -sf -o /dev/null --max-time 5 http://localhost:3300/api/healthz; then
+  if ! minikube -p "$PROFILE" ssh -- curl -sf -o /dev/null --max-time 5 http://host.minikube.internal:3300/api/healthz 2>/dev/null; then
+    HOST_IP="$(minikube -p "$PROFILE" ssh -- grep -m1 host.minikube.internal /etc/hosts | awk '{print $1}' | tr -d '\r' || true)"
+    echo "k8s:up: WARNING: Flux cannot reach Gitea at http://host.minikube.internal:3300 ($HOST_IP)." >&2
+    echo "k8s:up: add this line to $ROOT_DIR/hub/.env and run yarn hub:up again (see hub/docker-compose.yml):" >&2
+    echo "k8s:up:   GITEA_BIND=$HOST_IP" >&2
+  fi
+fi
+
 kc apply -f "$ROOT_DIR/k8s/backstage-reader.yaml"
 
 SERVER="$(kc config view --minify -o jsonpath='{.clusters[0].cluster.server}')"
