@@ -152,8 +152,8 @@ build of Quarkus 3.33.4 and 3.40.1 (BOM `com.redhat.quarkus.platform:quarkus-bom
   one in `flux-system`, not in `targetNamespace`. Each service's Kustomization runs as `calm-<name>`, bound to the
   ClusterRole `admin` in the service's namespace only.
 - **A namespaced service account cannot apply a Namespace**, so the Namespace left the overlay in Git:
-  `calm:deploy:gitops` and `calm:upgrade:merge` apply it, with the service account and its RoleBinding, before they
-  push.
+  `calm:deploy:gitops` and `calm:upgrade:merge` apply it, with the service account, its RoleBinding and the namespace
+  ClusterRole below, before they push.
 - **Removing an object from a pruned Kustomization deletes it.** A service deployed before the change has the
   Namespace in its Kustomization's inventory; the push that drops `namespace.yaml` would delete the namespace and
   everything in it. The Namespace carries `kustomize.toolkit.fluxcd.io/prune: disabled`, applied before that push.
@@ -161,6 +161,10 @@ build of Quarkus 3.33.4 and 3.40.1 (BOM `com.redhat.quarkus.platform:quarkus-bom
   runs, so `calm:upgrade:merge` applies the annotation too. Both apply it server-side under their own field manager
   (`calm-backstage`): Flux takes over the fields owned by kubectl's managers on objects it applies, so an old
   Kustomization still applying `namespace.yaml` would drop an annotation set by a plain `kubectl apply`.
+- **Flux prunes as the impersonated account too, cluster-scoped objects included.** To skip the prune-disabled
+  Namespace it first reads it, as `calm-<name>`, and a RoleBinding cannot grant that (issue #26: the upgrade got a
+  403). A ClusterRole `calm-<name>-namespace` allows `get` on that one Namespace by name; Flux does not write to an
+  object it skips.
 - **GitHub is not a drop-in.** Push-to-create, the pull request API and anonymous reads by Flux are Gitea's. The Git
   host sits behind `GiteaClient`; a GitHub client is a track.
 

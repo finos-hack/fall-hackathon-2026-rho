@@ -312,7 +312,13 @@ describe('calm:deploy:gitops', () => {
     }).handler(c);
     const kinds = fake.applied.map(x => x.objects.map(o => o.kind));
     expect(kinds).toEqual([
-      ['Namespace', 'ServiceAccount', 'RoleBinding'],
+      [
+        'Namespace',
+        'ServiceAccount',
+        'RoleBinding',
+        'ClusterRole',
+        'ClusterRoleBinding',
+      ],
       ['GitRepository', 'Kustomization'],
     ]);
     const [tenant, flux] = fake.applied;

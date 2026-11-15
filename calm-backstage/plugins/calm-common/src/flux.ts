@@ -62,19 +62,26 @@ const FLUX_PRUNE_ANNOTATION = 'kustomize.toolkit.fluxcd.io/prune';
 
 /**
  * What a service's Kustomization needs before Flux can apply it, in apply order: the service's Namespace, the
- * service account `calm-<name>` in `flux-system` (Flux impersonates an account in the Kustomization's own namespace)
- * and a RoleBinding of the built-in ClusterRole `admin` to it in the service's namespace. `admin` covers namespaced
- * objects only, so a push to the service's repository cannot touch other namespaces or cluster-scoped objects.
+ * service account `calm-<name>` in `flux-system` (Flux impersonates an account in the Kustomization's own namespace),
+ * a RoleBinding of the built-in ClusterRole `admin` to it in the service's namespace, and the ClusterRole and
+ * ClusterRoleBinding `calm-<name>-namespace` described below. `admin` covers namespaced objects only, so a push to
+ * the service's repository cannot touch other namespaces or cluster-scoped objects.
  *
  * The service account cannot create a Namespace, so the Namespace is applied here and not from Git. It is marked
  * prune-disabled: a service deployed before this change has it in its Kustomization's inventory, and the push that
  * drops it from the overlay would otherwise make Flux delete the namespace and everything in it.
+ *
+ * Flux prunes that stale inventory entry as the service account too: it reads the Namespace, finds the annotation
+ * and keeps it, without writing to it. A RoleBinding cannot grant access to a cluster-scoped object, so a ClusterRole
+ * `calm-<name>-namespace` allows `get` on this one Namespace (by name) and a ClusterRoleBinding of the same name
+ * grants it to the service account.
  */
 export function fluxTenantObjects(o: {
   name: string;
   namespace: string;
 }): object[] {
   const name = fluxObjectName(o.name);
+  const namespaceRole = `${name}-namespace`;
   const labels = { [CALM_KUBERNETES.serviceLabel]: o.name };
   const ns = namespaceManifest(o.name, o.namespace);
   return [
@@ -98,6 +105,30 @@ export function fluxTenantObjects(o: {
         apiGroup: 'rbac.authorization.k8s.io',
         kind: 'ClusterRole',
         name: 'admin',
+      },
+      subjects: [{ kind: 'ServiceAccount', name, namespace: FLUX_NAMESPACE }],
+    },
+    {
+      apiVersion: 'rbac.authorization.k8s.io/v1',
+      kind: 'ClusterRole',
+      metadata: { name: namespaceRole, labels },
+      rules: [
+        {
+          apiGroups: [''],
+          resources: ['namespaces'],
+          resourceNames: [o.namespace],
+          verbs: ['get'],
+        },
+      ],
+    },
+    {
+      apiVersion: 'rbac.authorization.k8s.io/v1',
+      kind: 'ClusterRoleBinding',
+      metadata: { name: namespaceRole, labels },
+      roleRef: {
+        apiGroup: 'rbac.authorization.k8s.io',
+        kind: 'ClusterRole',
+        name: namespaceRole,
       },
       subjects: [{ kind: 'ServiceAccount', name, namespace: FLUX_NAMESPACE }],
     },

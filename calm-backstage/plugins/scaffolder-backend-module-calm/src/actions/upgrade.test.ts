@@ -433,6 +433,8 @@ describe('calm:upgrade:merge', () => {
       'Namespace',
       'ServiceAccount',
       'RoleBinding',
+      'ClusterRole',
+      'ClusterRoleBinding',
     ]);
     expect(tenant.objects[0].metadata).toMatchObject({
       name: 'calm-orders',

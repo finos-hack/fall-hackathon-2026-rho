@@ -51,11 +51,13 @@ describe('flux', () => {
     });
   });
 
-  it('builds the Namespace, a ServiceAccount in flux-system and a RoleBinding to admin in the namespace, in that order', () => {
-    const [ns, sa, rb] = fluxTenantObjects({
+  it('builds the Namespace, a ServiceAccount in flux-system, a RoleBinding to admin in the namespace and a ClusterRole that reads the namespace, in that order', () => {
+    const objects = fluxTenantObjects({
       name: 'orders',
       namespace: 'calm-orders',
     }) as any[];
+    expect(objects).toHaveLength(5);
+    const [ns, sa, rb, cr, crb] = objects;
     const labels = { 'calm.finos.org/service': 'orders' };
     expect(ns).toEqual({
       apiVersion: 'v1',
@@ -79,6 +81,37 @@ describe('flux', () => {
         apiGroup: 'rbac.authorization.k8s.io',
         kind: 'ClusterRole',
         name: 'admin',
+      },
+      subjects: [
+        {
+          kind: 'ServiceAccount',
+          name: 'calm-orders',
+          namespace: 'flux-system',
+        },
+      ],
+    });
+    // Flux prunes the Namespace a pre-#12 inventory lists as this account: it reads it, sees prune disabled, keeps it.
+    expect(cr).toEqual({
+      apiVersion: 'rbac.authorization.k8s.io/v1',
+      kind: 'ClusterRole',
+      metadata: { name: 'calm-orders-namespace', labels },
+      rules: [
+        {
+          apiGroups: [''],
+          resources: ['namespaces'],
+          resourceNames: ['calm-orders'],
+          verbs: ['get'],
+        },
+      ],
+    });
+    expect(crb).toEqual({
+      apiVersion: 'rbac.authorization.k8s.io/v1',
+      kind: 'ClusterRoleBinding',
+      metadata: { name: 'calm-orders-namespace', labels },
+      roleRef: {
+        apiGroup: 'rbac.authorization.k8s.io',
+        kind: 'ClusterRole',
+        name: 'calm-orders-namespace',
       },
       subjects: [
         {

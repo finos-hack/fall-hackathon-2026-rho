@@ -97,8 +97,47 @@ Scope: GitHub publish, dry run, register the architecture in the Hub.
 - Done (part 3): services are pushed to Gitea and deployed by Flux (`calm:git:publish`, `calm:deploy:gitops`); the
   card shows the Flux status and the commit applied; upgrades go through a merged pull request. Each Kustomization
   applies as its own service account (`calm-<name>` in `flux-system`, bound to the ClusterRole `admin` in the
-  service's namespace only) with `targetNamespace`; `calm:deploy:gitops` applies the Namespace, the service account
-  and the RoleBinding itself, so a push to a service repository can only change objects in the service's
+  service's namespace only) with `targetNamespace`; `calm:deploy:gitops` applies the Namespace, the service account,
+  the RoleBinding and a ClusterRole allowing `get` on that one Namespace (Flux reads it to skip its prune) itself, so
+  a push to a service repository can only change objects in the service's namespace. `admin` there can still run
+  privileged pods: the namespace has no Pod Security admission label yet.
+- Left (part 3): an upgrade overwrites the files the starter rendered (no three-way merge of a developer's edits);
+  a bundle is published from Git by a script, not by a Backstage action; bundles fit patterns by id only.
+- Done: bundles are OCI artifacts in a local registry (`localhost:5050/calm-bundles/<name>:<version>`, pushed with
+  `yarn bundles:push`); the catalog lists them and `calm:template` pulls them by digest. `calm-backstage.json` says
+  which pattern a bundle fits and whether it can be deployed. Bundle fit ignores the pattern version.
+- Left: a registry with TLS and authentication (the client has neither), signed bundles, and bundles from Git or
+  npm.
+- Published services record `calm.finos.org/bundle` and `/bundle-version`, which is enough to show "bundle update
+  available" when a newer bundle fits the same pattern.
+- `calm template` has no `-c` option (control look-ups warn), and dotted output folder names misbehave.
+
+## E. Publish
+
+Scope: GitHub publish, dry run, register the architecture in the Hub.
+
+- Done: the generated architecture is stored in CALM Hub (`calm:register:hub`), the service is built and deployed
+  to the local minikube (`calm:image:build`, `calm:deploy:k8s`) with NetworkPolicies from its `connects`
+  relationships, and the deployment is recorded as a decorator (`calm:decorate:deployment`). A failed deployment is
+  recorded too: `calm:deploy:k8s` and `calm:deploy:gitops` take `record` and, when the deploy fails after it started,
+  post a `failed` decorator (applies to the nodes the rendered workloads are labelled with, the error in the notes)
+  and rethrow the error.
+- Left:
+  - An existing service cannot be redeployed: `calm:register:hub` and `calm:publish:local` refuse a name whose
+    folder exists.
+  - The Hub write happens after the render, publish and git publish (`calm:register:hub` in `prepare` mode first, in
+    `store` mode then), so a run that fails there leaves nothing in the Hub. A failed build or deploy still leaves
+    the version, which cannot be deleted (and the failed deploy is recorded on it once failed deployments are
+    recorded). `prepare` checks the catalog and the output folder, so a clashing name writes nothing.
+  - `calm:image:build`, `calm:deploy:k8s` and `calm:decorate:deployment` have no dry run: in a dry run the
+    scaffolder skips the publish step they depend on.
+  - The gateway forwards plain HTTP although the architecture says HTTPS.
+- `calm:publish:local` still writes `output/<name>/` and `calm:register:local` adds a file location.
+- Done (part 3): services are pushed to Gitea and deployed by Flux (`calm:git:publish`, `calm:deploy:gitops`); the
+  card shows the Flux status and the commit applied; upgrades go through a merged pull request. Each Kustomization
+  applies as its own service account (`calm-<name>` in `flux-system`, bound to the ClusterRole `admin` in the
+  service's namespace only) with `targetNamespace`; `calm:deploy:gitops` applies the Namespace, the service account,
+  the RoleBinding and a ClusterRole allowing `get` on that one Namespace (for Flux's prune) itself, so a push to a service repository can only change objects in the service's
   namespace. `admin` there can still run privileged pods: the namespace has no Pod Security admission label yet.
 - Left (part 3): a GitHub client next to `GiteaClient` (push-to-create, pull requests and anonymous Flux reads are
   Gitea's); `user-cookie` auth or a separate origin for the app proxy (FINDINGS, part 3, Security); a Pod Security
