@@ -23,7 +23,10 @@ export const CALM_ANNOTATIONS = {
   bundleRef: 'calm.finos.org/bundle-ref',
   /** Digest of the bundle's OCI manifest (`sha256:…`): the exact content behind `bundle-ref` at the time. */
   bundleDigest: 'calm.finos.org/bundle-digest',
-  /** On a service created from a pattern: its architecture file, relative to `catalog-info.yaml`. */
+  /**
+   * Legacy: services made before CALM Hub became the only store of architectures named their copy here. Nothing reads
+   * it; an upgrade removes it and the copy.
+   */
   architectureFile: 'calm.finos.org/architecture-file',
   /** Base URL of the CALM Hub the entity was read from. */
   hubUrl: 'calm.finos.org/hub-url',

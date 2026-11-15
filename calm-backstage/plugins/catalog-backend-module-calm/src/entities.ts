@@ -330,7 +330,7 @@ const GIT_TEXT = {
 const hubText = (canDeploy: boolean) => ({
   title: 'CALM Hub',
   content: [
-    'Architecture: `${{ steps["register-hub"].output.namespace }}/${{ steps["register-hub"].output.architecture }}` version ${{ steps["register-hub"].output.version }}, at ${{ steps["register-hub"].output.url }} (the `$id` of the published `architecture.json`).',
+    'Architecture: `${{ steps["register-hub"].output.namespace }}/${{ steps["register-hub"].output.architecture }}` version ${{ steps["register-hub"].output.version }}, at ${{ steps["register-hub"].output.url }}, its only copy.',
     ...(canDeploy
       ? [
           '',
@@ -596,8 +596,8 @@ function publishSteps(
 ): object[] {
   return [
     {
-      // Before the render, so the rendered files and the published architecture.json carry the $id. Makes the checks
-      // and the file, and writes nothing to the Hub: store-hub does that. Its outputs are the ones store-hub gives.
+      // Before the render, so the rendered files carry the $id. Makes the checks and the file, and writes nothing to
+      // the Hub: store-hub does that. Its outputs are the ones store-hub gives.
       id: 'register-hub',
       name: 'Prepare the architecture for CALM Hub',
       action: 'calm:register:hub',
@@ -640,7 +640,6 @@ function publishSteps(
       input: {
         name: '${{ parameters.name }}',
         sourceDir: '${{ steps.template.output.outputDir }}',
-        architecturePath: '${{ steps.fill.output.architecturePath }}',
         namespace: p.namespace,
         patternId: p.id,
         patternVersion: p.version,
@@ -654,7 +653,7 @@ function publishSteps(
         // Set when calm:template pulled the bundle from the registry; empty for a local folder.
         bundleRef: '${{ steps.template.output.bundleRef }}',
         bundleDigest: '${{ steps.template.output.bundleDigest }}',
-        // The Hub annotations, next to architecture-file: the card reads the Hub and falls back to the file.
+        // The Hub annotations: CALM Hub holds the only copy of the architecture, which the card and upgrades read.
         hubNamespace: '${{ steps["register-hub"].output.namespace }}',
         hubArchitecture: '${{ steps["register-hub"].output.architecture }}',
         hubArchitectureVersion: '${{ steps["register-hub"].output.version }}',

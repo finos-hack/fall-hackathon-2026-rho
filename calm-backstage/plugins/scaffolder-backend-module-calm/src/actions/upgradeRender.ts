@@ -9,6 +9,7 @@ import { createTemplateAction } from '@backstage/plugin-scaffolder-node';
 import {
   BundleMeta,
   CALM_ANNOTATIONS as ANN,
+  CalmHubClient,
   UpgradeTargets,
   bundleEntityName,
   serviceBundles,
@@ -27,10 +28,10 @@ import {
   serviceRepository,
 } from '@internal/backstage-plugin-calm-node';
 import YAML from 'yaml';
-import { ARCHITECTURE_FILE, CATALOG_INFO_FILE } from './publishLocal';
+import { CATALOG_INFO_FILE, LEGACY_ARCHITECTURE_FILE } from './publishLocal';
 import { readOverlayImage, BASE_DIR } from './deployK8s';
-import { withServiceLock } from './serviceLock';
 import { CalmTemplateActionOptions, resolveBundle } from './template';
+import { withServiceLock } from './serviceLock';
 
 /** Renders `<name>@<version>` against an architecture into a new folder under `tmp`; returns the files it wrote. */
 export type RenderInto = (
@@ -70,6 +71,12 @@ export function upgradeBranch(t: UpgradeTargets): string {
     : `upgrade/deploy-${t.deploy!.name}-${deploy}`;
 }
 
+/** Where the upgrade writes the architecture it reads from CALM Hub, in the task workspace (the calm CLI needs a file). */
+export const WORKSPACE_ARCHITECTURE = 'architecture.json';
+
+/** The summary line of an upgrade that also removes a service's old architecture copy. */
+export const LEGACY_COPY_REMOVED = `Removes ${LEGACY_ARCHITECTURE_FILE}: the architecture lives only in CALM Hub`;
+
 /** One line per side that changes, for the commit message and the pull request. */
 export function upgradeSummary(t: UpgradeTargets): string[] {
   return [
@@ -82,7 +89,10 @@ export function upgradeSummary(t: UpgradeTargets): string[] {
   ];
 }
 
-/** catalog-info.yaml with the new bundle versions (annotations, dependsOn, the starter's OCI reference). */
+/**
+ * catalog-info.yaml with the new bundle versions (annotations, dependsOn, the starter's OCI reference), and without
+ * the legacy architecture-file annotation: CALM Hub holds the architecture.
+ */
 export function withUpgradedBundles(
   catalogInfo: string,
   t: UpgradeTargets,
@@ -90,6 +100,7 @@ export function withUpgradedBundles(
 ): string {
   const e = YAML.parse(catalogInfo);
   const a = (e.metadata.annotations = e.metadata.annotations ?? {});
+  delete a[ANN.architectureFile];
   const deps: string[] = e.spec?.dependsOn ?? [];
   const swap = (name: string, from: string, to: string) => {
     const old = `resource:default/${bundleEntityName(name, from)}`;
@@ -154,6 +165,8 @@ export function createCalmUpgradeRenderAction(options: {
   /** Bundles in the registry (and local folders) to choose upgrades from. */
   listBundles: () => Promise<BundleMeta[]>;
   renderInto: RenderInto;
+  /** Where the architecture is read from: the exact version the service's annotations name. */
+  hub: Pick<CalmHubClient, 'architecture'>;
 }) {
   return createTemplateAction({
     id: 'calm:upgrade:render',
@@ -186,7 +199,11 @@ export function createCalmUpgradeRenderAction(options: {
         deployBundle: z =>
           z.string().describe('<name>@<version> after the upgrade, or empty'),
         architecturePath: z =>
-          z.string().describe('The architecture, copied into the workspace'),
+          z
+            .string()
+            .describe(
+              'The architecture, read from CALM Hub into the workspace',
+            ),
         hubNamespace: z => z.string(),
         architecture: z => z.string(),
         architectureVersion: z => z.string(),
@@ -254,15 +271,41 @@ export function createCalmUpgradeRenderAction(options: {
           for (const [k, v] of Object.entries(base)) {
             ctx.output(k as any, v);
           }
+          // CALM Hub holds the only copy of the architecture: read the exact version the service was made from.
+          if (
+            !hubNamespace ||
+            !base.architecture ||
+            !base.architectureVersion
+          ) {
+            throw new Error(
+              `${ref} does not name its architecture in CALM Hub (it needs ${ANN.architecture}, ${ANN.architectureVersion} and a namespace); create it again to upgrade it`,
+            );
+          }
+          let architectureDoc: unknown;
+          try {
+            architectureDoc = await options.hub.architecture(
+              hubNamespace,
+              base.architecture,
+              base.architectureVersion,
+            );
+          } catch (e) {
+            throw new Error(
+              `CALM Hub did not give the architecture ${hubNamespace}/${
+                base.architecture
+              } ${base.architectureVersion} of ${ref}: ${
+                (e as Error).message ?? e
+              }`,
+            );
+          }
           const workspaceArchitecture = resolveSafeChildPath(
             ctx.workspacePath,
-            ARCHITECTURE_FILE,
+            WORKSPACE_ARCHITECTURE,
           );
-          await fs.copyFile(
-            path.join(dir, ARCHITECTURE_FILE),
+          await fs.writeFile(
             workspaceArchitecture,
+            `${JSON.stringify(architectureDoc, null, 2)}\n`,
           );
-          ctx.output('architecturePath', ARCHITECTURE_FILE);
+          ctx.output('architecturePath', WORKSPACE_ARCHITECTURE);
 
           const summary = upgradeSummary(wanted);
           if (!summary.length) {
@@ -317,7 +360,7 @@ export function createCalmUpgradeRenderAction(options: {
           const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'calm-upgrade-'));
           let starterRef: { ref?: string; digest?: string } | undefined;
           try {
-            const arch = path.join(dir, ARCHITECTURE_FILE);
+            const arch = workspaceArchitecture;
             if (wanted.starter?.to) {
               const old = await options.renderInto(
                 `${wanted.starter.name}@${wanted.starter.from}`,
@@ -362,6 +405,24 @@ export function createCalmUpgradeRenderAction(options: {
             await fs.rm(tmp, { recursive: true, force: true });
           }
 
+          // A service made before CALM Hub became the only store carries a copy; the upgrade removes it.
+          const legacyCopy = resolveSafeChildPath(
+            dir,
+            LEGACY_ARCHITECTURE_FILE,
+          );
+          const hadLegacyCopy = await fs
+            .stat(legacyCopy)
+            .then(() => true)
+            .catch(() => false);
+          if (hadLegacyCopy) {
+            await fs.rm(legacyCopy);
+            ctx.logger.info(LEGACY_COPY_REMOVED);
+          }
+          const lines = [
+            ...summary,
+            ...(hadLegacyCopy ? [LEGACY_COPY_REMOVED] : []),
+          ];
+
           const catalogInfo = path.join(dir, CATALOG_INFO_FILE);
           await fs.writeFile(
             catalogInfo,
@@ -373,7 +434,7 @@ export function createCalmUpgradeRenderAction(options: {
           );
           const commit = await gitCommitAll(
             dir,
-            [`Upgrade ${name}`, '', ...summary].join('\n'),
+            [`Upgrade ${name}`, '', ...lines].join('\n'),
             git,
           );
           if (!commit) {
@@ -395,7 +456,7 @@ export function createCalmUpgradeRenderAction(options: {
             ctx.output('branch', branch);
             ctx.output('commit', commit);
             ctx.output('shortCommit', commit.slice(0, 12));
-            ctx.output('summary', summary.join('\n'));
+            ctx.output('summary', lines.join('\n'));
           }
           const s = wanted.starter?.to ?? current.starter.version;
           const d = wanted.deploy?.to ?? current.deploy.version;

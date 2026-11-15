@@ -82,6 +82,7 @@ describe('serviceEntity', () => {
     patternVersion: '1.0.0',
     bundleName: 'web-service',
     bundleVersion: '2.0.0',
+    hub: { namespace: 'hackathon', architecture: 'x', version: '1.0.0' },
   };
 
   it('records the bundle reference and digest of a registry bundle', () => {

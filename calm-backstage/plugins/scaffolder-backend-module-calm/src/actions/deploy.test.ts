@@ -318,6 +318,7 @@ describe('serviceEntity: Kubernetes annotations', () => {
     patternVersion: '1.0.0',
     bundleName: 'web-service',
     bundleVersion: '3.0.0',
+    hub: { namespace: 'hackathon', architecture: 'x', version: '1.0.0' },
   };
 
   it('names the label value and the namespace for a deployable bundle', () => {

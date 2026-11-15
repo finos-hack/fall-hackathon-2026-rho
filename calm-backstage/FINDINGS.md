@@ -247,5 +247,12 @@ build of Quarkus 3.33.4 and 3.40.1 (BOM `com.redhat.quarkus.platform:quarkus-bom
   (a slow image build does not outlast it), so a failed upgrade can be run again after that time, and at once when
   it failed in the render, the image build or the merge. The reservation is
   per backend process, so it assumes one Backstage backend.
+- **CALM Hub only (after part 3).** Services no longer carry `architecture.json`: the card and upgrades read the
+  version their annotations name from CALM Hub. Two consequences:
+  - CALM Hub must be up to view or upgrade a service; the card says CALM Hub did not answer rather than showing a
+    possibly stale copy.
+  - A run whose "Store the architecture in CALM Hub" step fails after the Git push (#15 put the Hub write last, so a
+    failed render leaves nothing in the Hub) leaves a repository whose annotations name a version CALM Hub does not
+    have; its card shows the CALM Hub error. Remove it with `docs/demo/cleanup.sh` and run the Template again.
 - **A `PageBlueprint` gets a sidebar item from the plugin's `title` and `icon` and a `routeRef`**, not from the page's
   own title.

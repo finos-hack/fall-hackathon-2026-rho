@@ -25,7 +25,11 @@ import { assertClaimable, fileLocationRef, lookUpClaim } from './catalogClaim';
 /** Owner when the Template gives none: the group the CALM provider's own entities belong to. */
 export const DEFAULT_OWNER = 'group:default/guests';
 export const CATALOG_INFO_FILE = 'catalog-info.yaml';
-export const ARCHITECTURE_FILE = 'architecture.json';
+/**
+ * The architecture copy services published before CALM Hub became the only store carry. Nothing reads it; an upgrade
+ * removes it.
+ */
+export const LEGACY_ARCHITECTURE_FILE = 'architecture.json';
 
 const ENTITY_NAME = /^[A-Za-z0-9]+(?:[-_.][A-Za-z0-9]+)*$/;
 
@@ -48,11 +52,8 @@ export function serviceEntity(opts: {
    * `backstage.io/kubernetes-id` label, and their namespace. The Kubernetes tab reads both.
    */
   kubernetes?: { id: string; namespace: string };
-  /**
-   * The architecture version in CALM Hub (calm:register:hub). The architecture card then reads the Hub, and falls
-   * back to the file, which stays named.
-   */
-  hub?: {
+  /** The architecture version in CALM Hub (calm:register:hub): the only copy of the service's architecture. */
+  hub: {
     namespace: string;
     architecture: string;
     version: string;
@@ -88,16 +89,11 @@ export function serviceEntity(opts: {
               [ANN.deployBundleVersion]: opts.deployBundle.version,
             }
           : {}),
-        [ANN.architectureFile]: `./${ARCHITECTURE_FILE}`,
-        ...(opts.hub
-          ? {
-              [ANN.architecture]: opts.hub.architecture,
-              [ANN.architectureVersion]: opts.hub.version,
-              // The one namespace annotation is the pattern's; the architecture's is named only when it differs.
-              ...(opts.hub.namespace !== opts.namespace
-                ? { [ANN.architectureNamespace]: opts.hub.namespace }
-                : {}),
-            }
+        [ANN.architecture]: opts.hub.architecture,
+        [ANN.architectureVersion]: opts.hub.version,
+        // The one namespace annotation is the pattern's; the architecture's is named only when it differs.
+        ...(opts.hub.namespace !== opts.namespace
+          ? { [ANN.architectureNamespace]: opts.hub.namespace }
           : {}),
         ...(opts.kubernetes
           ? {
@@ -107,7 +103,7 @@ export function serviceEntity(opts: {
           : {}),
       },
       tags: ['calm', 'calm-service'],
-      ...(opts.hub?.url
+      ...(opts.hub.url
         ? {
             links: [
               { url: opts.hub.url, title: 'Architecture in CALM Hub (JSON)' },
@@ -152,7 +148,7 @@ export function createCalmPublishLocalAction(options: {
   return createTemplateAction({
     id: 'calm:publish:local',
     description:
-      'Publishes the rendered service to a local folder (<calm.publish.localDir>/<name>): rendered files, architecture.json and a catalog-info.yaml Component.',
+      'Publishes the rendered service to a local folder (<calm.publish.localDir>/<name>): rendered files and a catalog-info.yaml Component whose annotations point at the architecture in CALM Hub. The architecture itself is not copied: CALM Hub is its only store.',
     schema: {
       input: {
         name: z =>
@@ -167,13 +163,6 @@ export function createCalmPublishLocalAction(options: {
             .optional()
             .describe(
               'Rendered files, relative to the workspace. Default rendered',
-            ),
-        architecturePath: z =>
-          z
-            .string()
-            .optional()
-            .describe(
-              'Architecture file, relative to the workspace. Default architecture.json',
             ),
         namespace: z =>
           z.string().optional().describe('CALM Hub namespace of the pattern'),
@@ -212,22 +201,17 @@ export function createCalmPublishLocalAction(options: {
         hubNamespace: z =>
           z
             .string()
-            .optional()
             .describe(
-              'Hub namespace of the registered architecture (calm:register:hub output namespace)',
+              'Hub namespace of the architecture (calm:register:hub output namespace)',
             ),
         hubArchitecture: z =>
           z
             .string()
-            .optional()
             .describe(
-              'Architecture name in the Hub (calm:register:hub output architecture); with hubNamespace and hubArchitectureVersion, recorded as the calm.finos.org/architecture annotations next to architecture-file',
+              'Architecture name in the Hub (calm:register:hub output architecture); with hubNamespace and hubArchitectureVersion, recorded as the calm.finos.org/architecture annotations',
             ),
         hubArchitectureVersion: z =>
-          z
-            .string()
-            .optional()
-            .describe('Its version (calm:register:hub output version)'),
+          z.string().describe('Its version (calm:register:hub output version)'),
         hubArchitectureUrl: z =>
           z
             .string()
@@ -285,10 +269,6 @@ export function createCalmPublishLocalAction(options: {
         ctx.workspacePath,
         ctx.input.sourceDir ?? 'rendered',
       );
-      const architecturePath = resolveSafeChildPath(
-        ctx.workspacePath,
-        ctx.input.architecturePath ?? ARCHITECTURE_FILE,
-      );
       const rendered = await listFiles(sourceDir);
       if (!rendered.length) {
         throw new Error(
@@ -320,7 +300,7 @@ export function createCalmPublishLocalAction(options: {
         );
       }
       const clash = [...rendered, ...deployRendered].find(
-        f => f === ARCHITECTURE_FILE || f === CATALOG_INFO_FILE,
+        f => f === CATALOG_INFO_FILE,
       );
       if (clash) {
         throw new Error(
@@ -352,17 +332,20 @@ export function createCalmPublishLocalAction(options: {
         }
       }
 
+      // CALM Hub holds the only copy of the architecture: without its address the service would have none.
       const { hubNamespace, hubArchitecture, hubArchitectureVersion } =
         ctx.input;
-      const hub =
-        hubNamespace && hubArchitecture && hubArchitectureVersion
-          ? {
-              namespace: hubNamespace,
-              architecture: hubArchitecture,
-              version: hubArchitectureVersion,
-              url: ctx.input.hubArchitectureUrl || undefined,
-            }
-          : undefined;
+      if (!hubNamespace || !hubArchitecture || !hubArchitectureVersion) {
+        throw new Error(
+          'calm:publish:local needs hubNamespace, hubArchitecture and hubArchitectureVersion (calm:register:hub outputs): CALM Hub is the only store of the architecture',
+        );
+      }
+      const hub = {
+        namespace: hubNamespace,
+        architecture: hubArchitecture,
+        version: hubArchitectureVersion,
+        url: ctx.input.hubArchitectureUrl || undefined,
+      };
 
       await fs.mkdir(options.localDir, { recursive: true });
       const target = resolveSafeChildPath(options.localDir, name);
@@ -402,7 +385,6 @@ export function createCalmPublishLocalAction(options: {
           );
         }
       }
-      await fs.copyFile(architecturePath, path.join(target, ARCHITECTURE_FILE));
       const entity = serviceEntity({
         name,
         owner,

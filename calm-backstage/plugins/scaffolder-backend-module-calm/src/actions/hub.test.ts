@@ -662,7 +662,7 @@ describe('serviceEntity: Hub annotations', () => {
   };
   const url = versionUrl('billing-api', '1.0.0');
 
-  it('names the Hub architecture and version and keeps the file', () => {
+  it('names the Hub architecture and version, and no architecture file', () => {
     const entity = serviceEntity({
       ...opts,
       hub: {
@@ -676,11 +676,13 @@ describe('serviceEntity: Hub annotations', () => {
       [ANN.namespace]: 'hackathon',
       [ANN.architecture]: 'billing-api',
       [ANN.architectureVersion]: '1.0.0',
-      [ANN.architectureFile]: './architecture.json',
     });
     expect(
       entity.metadata.annotations?.[ANN.architectureNamespace],
     ).toBeUndefined();
+    expect(entity.metadata.annotations).not.toHaveProperty(
+      ANN.architectureFile,
+    );
     expect(entity.metadata.links).toEqual([
       { url, title: 'Architecture in CALM Hub (JSON)' },
     ]);
@@ -701,9 +703,15 @@ describe('serviceEntity: Hub annotations', () => {
     });
   });
 
-  it('has only the file without a Hub architecture', () => {
-    const entity = serviceEntity(opts);
-    expect(entity.metadata.annotations?.[ANN.architecture]).toBeUndefined();
+  it('has no link without a Hub URL', () => {
+    const entity = serviceEntity({
+      ...opts,
+      hub: {
+        namespace: 'hackathon',
+        architecture: 'billing-api',
+        version: '1.0.0',
+      },
+    });
     expect(entity.metadata.links).toBeUndefined();
   });
 });
