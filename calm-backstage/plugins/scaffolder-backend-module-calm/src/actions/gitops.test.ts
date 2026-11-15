@@ -167,6 +167,8 @@ function fakeKubectl(opts: {
   remote: string;
   namespace?: any;
   failFlux?: string;
+  /** Fails `kubectl apply -f` of the Flux objects with this message. */
+  failApply?: string;
 }) {
   const calls: string[][] = [];
   const kubectl = async (args: string[]) => {
@@ -174,6 +176,9 @@ function fakeKubectl(opts: {
     const a = args.join(' ');
     if (a.startsWith('get namespace')) {
       return opts.namespace ? JSON.stringify(opts.namespace) : '';
+    }
+    if (a.startsWith('apply -f') && opts.failApply) {
+      throw new Error(opts.failApply);
     }
     if (a.includes('get kustomization')) {
       const sha = await git(opts.remote, ['rev-parse', 'main']);
@@ -410,6 +415,7 @@ describe('calm:deploy:gitops: a failed deployment', () => {
     namespace?: object;
     failFlux?: string;
     branch?: string;
+    failApply?: string;
     /** Breaks the working copy or the remote before the action runs. */
     before?: (dir: string, remote: string) => Promise<void>;
   }) => {
@@ -421,6 +427,7 @@ describe('calm:deploy:gitops: a failed deployment', () => {
     const fake = fakeKubectl({
       remote,
       failFlux: opts.failFlux ?? 'kustomize build failed',
+      failApply: opts.failApply,
       namespace: opts.namespace,
     });
     const c = ctx({
@@ -515,6 +522,7 @@ describe('calm:deploy:gitops: a failed deployment', () => {
         fs.writeFile(path.join(dir, 'deploy', 'k8s-overlay'), 'not a folder'),
     });
     await expect(result).rejects.toThrow(/k8s-overlay/);
+    expect(hub.architectures).not.toHaveBeenCalled();
     expect(hub.createDecorator).not.toHaveBeenCalled();
   });
 
@@ -528,6 +536,24 @@ describe('calm:deploy:gitops: a failed deployment', () => {
         fs.writeFile(path.join(dir, '.git', 'index.lock'), ''),
     });
     await expect(result).rejects.toThrow(/index\.lock/);
+    expect(hub.architectures).not.toHaveBeenCalled();
     expect(hub.createDecorator).not.toHaveBeenCalled();
+  });
+
+  it('records a failed decorator when applying the Flux objects fails, right after the push', async () => {
+    const { hub, posted } = fakeRecordingHub();
+    const { result } = await run({
+      input: { record },
+      hub,
+      failApply: 'error: the server could not find the requested resource',
+    });
+    await expect(result).rejects.toThrow(
+      /could not find the requested resource/,
+    );
+    expect(posted).toHaveLength(1);
+    expect(posted[0].data.status).toBe('failed');
+    expect(posted[0].data.notes).toContain(
+      'could not find the requested resource',
+    );
   });
 });
