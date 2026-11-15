@@ -92,11 +92,14 @@ Scope: GitHub publish, dry run, register the architecture in the Hub.
   - The gateway forwards plain HTTP although the architecture says HTTPS.
 - `calm:publish:local` still writes `output/<name>/` and `calm:register:local` adds a file location.
 - Done (part 3): services are pushed to Gitea and deployed by Flux (`calm:git:publish`, `calm:deploy:gitops`); the
-  card shows the Flux status and the commit applied; upgrades go through a merged pull request.
+  card shows the Flux status and the commit applied; upgrades go through a merged pull request. Each Kustomization
+  applies as its own service account (`calm-<name>` in `flux-system`, bound to the ClusterRole `admin` in the
+  service's namespace only) with `targetNamespace`; `calm:deploy:gitops` applies the Namespace, the service account
+  and the RoleBinding itself, so a push to a service repository can no longer reach other namespaces or
+  cluster-scoped objects.
 - Left (part 3): a GitHub client next to `GiteaClient` (push-to-create, pull requests and anonymous Flux reads are
-  Gitea's); a namespaced service account and `targetNamespace` per Flux Kustomization (Flux runs as cluster-admin, so
-  anyone who can push to Gitea controls the cluster); `user-cookie` auth or a separate origin for the app proxy
-  (FINDINGS, part 3, Security); a failed deploy is still not recorded in the Hub.
+  Gitea's); `user-cookie` auth or a separate origin for the app proxy (FINDINGS, part 3, Security); a failed deploy
+  is still not recorded in the Hub.
 - Swap in `publish:github` + `catalog:register` (url location) for a real repository; no GitHub credentials are set up.
 - `calm:generate`, `calm:fill`, `calm:validate` support dry runs; the template editor's dry run can use them.
 

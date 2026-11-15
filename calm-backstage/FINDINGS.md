@@ -148,6 +148,14 @@ build of Quarkus 3.33.4 and 3.40.1 (BOM `com.redhat.quarkus.platform:quarkus-bom
   what Flux applies. A failed build leaves `main`, Gitea and the cluster untouched.
 - **Gitea creates a repository on the first push** into an organisation (`ENABLE_PUSH_CREATE_ORG`), and refuses to
   merge a new pull request until it has checked it can be merged (405 "try again later"); the merge is retried.
+- **Flux impersonates a service account in the Kustomization's own namespace.** `spec.serviceAccountName` names
+  one in `flux-system`, not in `targetNamespace`. Each service's Kustomization runs as `calm-<name>`, bound to the
+  ClusterRole `admin` in the service's namespace only.
+- **A namespaced service account cannot apply a Namespace**, so the Namespace left the overlay in Git:
+  `calm:deploy:gitops` applies it, with the service account and its RoleBinding, before it pushes.
+- **Removing an object from a pruned Kustomization deletes it.** A service deployed before the change has the
+  Namespace in its Kustomization's inventory; the push that drops `namespace.yaml` would delete the namespace and
+  everything in it. The Namespace carries `kustomize.toolkit.fluxcd.io/prune: disabled`, applied before that push.
 - **GitHub is not a drop-in.** Push-to-create, the pull request API and anonymous reads by Flux are Gitea's. The Git
   host sits behind `GiteaClient`; a GitHub client is a track.
 
@@ -189,8 +197,8 @@ build of Quarkus 3.33.4 and 3.40.1 (BOM `com.redhat.quarkus.platform:quarkus-bom
 - **Security, open (local development only):**
   - `/api/calm/app/*` is unauthenticated (a new tab carries no Backstage token) and serves the app on the backend's
     origin, so the app's script is same-origin with Backstage's APIs. Use `user-cookie` auth or a separate origin.
-  - Anyone who can push to a service repository in Gitea (port 3300, fixed admin password) can apply anything
-    through Flux, which runs as cluster-admin. Give each Kustomization a namespaced service account and
-    `targetNamespace`, and seed a random password.
+  - Anyone who can push to a service repository in Gitea (port 3300, fixed admin password) can change anything in
+    that service's namespace through Flux (each Kustomization runs as a service account bound to `admin` there).
+    Seed a random password.
 - **A `PageBlueprint` gets a sidebar item from the plugin's `title` and `icon` and a `routeRef`**, not from the page's
   own title.
