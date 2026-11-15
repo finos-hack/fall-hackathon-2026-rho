@@ -4,6 +4,7 @@ import { createTemplateAction } from '@backstage/plugin-scaffolder-node';
 import { publishedFolder } from './publishedFolder';
 import {
   CALM_KUBERNETES,
+  CalmHubWriteClient,
   KUBERNETES_ID_LABEL,
   deployNamespace,
 } from '@internal/backstage-plugin-calm-common';
@@ -14,6 +15,7 @@ import {
   runKubectl,
 } from '@internal/backstage-plugin-calm-node';
 import YAML from 'yaml';
+import { recordFailedDeployment } from './recordFailure';
 
 /** The image name the bundle's manifests use; the overlay replaces it with the image built for this service. */
 export const PLACEHOLDER_IMAGE = 'calm-service';
@@ -243,6 +245,12 @@ export function createCalmDeployK8sAction(options: {
   settings?: KubernetesDeploySettings;
   /** Absolute path of `calm.publish.localDir`: only folders inside it are deployed. */
   localDir: string;
+  /** The Hub to record a failed deployment in; without it `record` only logs a warning. */
+  hub?: CalmHubWriteClient;
+  /** `app.baseUrl`: see calm:decorate:deployment. */
+  appBaseUrl?: string;
+  /** For tests: kubectl. */
+  kubectl?: (settings: KubernetesDeploySettings, cwd: string) => Kubectl;
 }) {
   return createTemplateAction({
     id: 'calm:deploy:k8s',
@@ -267,6 +275,18 @@ export function createCalmDeployK8sAction(options: {
             .string()
             .describe(
               'Image for the service, as <name>:<tag> (calm:image:build output image)',
+            ),
+        record: z =>
+          z
+            .object({
+              hubNamespace: z.string(),
+              architecture: z.string(),
+              version: z.string(),
+              architecturePath: z.string().optional(),
+            })
+            .optional()
+            .describe(
+              'The architecture version in CALM Hub (calm:register:hub output). When set and the deployment fails after it started, a deployment decorator with the status failed is recorded there, and the error is thrown as before',
             ),
       },
       output: {
@@ -311,13 +331,16 @@ export function createCalmDeployK8sAction(options: {
 
       const run = { cwd: dir, logger: ctx.logger, signal: ctx.signal };
       const quiet = { ...run, quietStdout: true };
+      const kubectl: Kubectl = options.kubectl
+        ? options.kubectl(settings, dir)
+        : async (args, q) =>
+            (await runKubectl(settings, args, q ? quiet : run)).stdout;
       const existing = (
-        await runKubectl(
-          settings,
+        await kubectl(
           ['get', 'namespace', namespace, '--ignore-not-found', '-o', 'json'],
-          quiet,
+          true,
         )
-      ).stdout.trim();
+      ).trim();
       checkExistingNamespace(
         namespace,
         name,
@@ -327,12 +350,29 @@ export function createCalmDeployK8sAction(options: {
       const args = applyArgs(overlayDir);
       ctx.logger.info(kubectlCommand(settings, args));
       const startTime = new Date().toISOString();
-      await runKubectl(settings, args, run);
-
-      const deployed = await listAndWaitForRollouts(
-        async (a, q) => (await runKubectl(settings, a, q ? quiet : run)).stdout,
-        namespace,
-      );
+      let deployed: Deployed;
+      try {
+        await kubectl(args);
+        deployed = await listAndWaitForRollouts(kubectl, namespace);
+      } catch (error) {
+        if (ctx.input.record) {
+          await recordFailedDeployment({
+            hub: options.hub,
+            appBaseUrl: options.appBaseUrl,
+            record: ctx.input.record,
+            baseDir: path.join(dir, BASE_DIR),
+            workspacePath: ctx.workspacePath,
+            taskId: ctx.task?.id,
+            name,
+            cluster: settings.context,
+            namespace,
+            startTime,
+            error,
+            logger: ctx.logger,
+          });
+        }
+        throw error;
+      }
       ctx.logger.info(
         `Deployed ${name} to ${settings.context} / ${namespace}: ${
           deployed.deployments.length

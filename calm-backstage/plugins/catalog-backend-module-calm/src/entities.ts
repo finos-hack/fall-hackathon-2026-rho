@@ -581,10 +581,12 @@ export function templateEntity(
 }
 
 /**
- * Store the architecture in CALM Hub (which gives it its `$id`), render with the chosen bundle (pulled from the
- * bundle registry, or a local folder), publish to the local output folder, then, for a bundle that renders
- * Kubernetes manifests (`isDeployable`, an expression over the parameters) and with the `deploy` box ticked, build
- * the image, deploy it and record the deployment in the Hub; last, register the new service.
+ * Prepare the architecture for CALM Hub (the checks, and the `$id` it will have), render with the chosen bundle
+ * (pulled from the bundle registry, or a local folder), publish to the local output folder and, with `calm.gitops`,
+ * push it to Git; then store the architecture in the Hub. A Hub version cannot be deleted and a folder or a
+ * repository can, so the write waits until those steps have worked. Then, for a bundle that renders Kubernetes
+ * manifests (`isDeployable`, an expression over the parameters) and with the `deploy` box ticked, build the image,
+ * deploy it and record the deployment in the Hub; last, register the new service.
  */
 function publishSteps(
   p: HubDocument,
@@ -594,13 +596,15 @@ function publishSteps(
 ): object[] {
   return [
     {
-      // Before the render, so the rendered files and the published architecture.json carry the $id.
+      // Before the render, so the rendered files and the published architecture.json carry the $id. Makes the checks
+      // and the file, and writes nothing to the Hub: store-hub does that. Its outputs are the ones store-hub gives.
       id: 'register-hub',
-      name: 'Store the architecture in CALM Hub',
+      name: 'Prepare the architecture for CALM Hub',
       action: 'calm:register:hub',
       input: {
         architecturePath: '${{ steps.fill.output.architecturePath }}',
         name: '${{ parameters.name }}',
+        mode: 'prepare',
       },
     },
     {
@@ -674,6 +678,18 @@ function publishSteps(
           },
         ]
       : []),
+    {
+      // After the render, publish and git publish, so a run that failed in one of them leaves nothing in the Hub.
+      // Fails, storing nothing, if the Hub chose another version than the $id the files carry.
+      id: 'store-hub',
+      name: 'Store the architecture in CALM Hub',
+      action: 'calm:register:hub',
+      input: {
+        architecturePath: '${{ steps.fill.output.architecturePath }}',
+        name: '${{ parameters.name }}',
+        mode: 'store',
+      },
+    },
     ...(isDeployable
       ? [
           {
@@ -706,6 +722,14 @@ function publishSteps(
               dir: '${{ steps.publish.output.path }}',
               name: '${{ parameters.name }}',
               image: '${{ steps.build.output.image }}',
+              // A failed deployment records itself in the Hub: the decorate step below runs only after a success.
+              record: {
+                hubNamespace: '${{ steps["register-hub"].output.namespace }}',
+                architecture:
+                  '${{ steps["register-hub"].output.architecture }}',
+                version: '${{ steps["register-hub"].output.version }}',
+                architecturePath: '${{ steps.fill.output.architecturePath }}',
+              },
             },
           },
           {
@@ -714,9 +738,9 @@ function publishSteps(
             if: `\${{ parameters.deploy and ${isDeployable} }}`,
             action: 'calm:decorate:deployment',
             input: {
-              hubNamespace: '${{ steps["register-hub"].output.namespace }}',
-              architecture: '${{ steps["register-hub"].output.architecture }}',
-              version: '${{ steps["register-hub"].output.version }}',
+              hubNamespace: '${{ steps["store-hub"].output.namespace }}',
+              architecture: '${{ steps["store-hub"].output.architecture }}',
+              version: '${{ steps["store-hub"].output.version }}',
               name: '${{ parameters.name }}',
               cluster: '${{ steps.deploy.output.cluster }}',
               namespace: '${{ steps.deploy.output.namespace }}',
@@ -877,6 +901,13 @@ export function upgradeTemplateEntity(hubUrl: string): Entity {
             name: '${{ steps.render.output.name }}',
             image:
               '${{ steps.build.output.image if steps.render.output.codeChanged else steps.render.output.currentImage }}',
+            // A failed deployment records itself in the Hub: the decorate step below runs only after a success.
+            record: {
+              hubNamespace: '${{ steps.render.output.hubNamespace }}',
+              architecture: '${{ steps.render.output.architecture }}',
+              version: '${{ steps.render.output.architectureVersion }}',
+              architecturePath: '${{ steps.render.output.architecturePath }}',
+            },
           },
         },
         {

@@ -276,3 +276,213 @@ describe('serviceEntity: Kubernetes annotations', () => {
     expect(annotations[K8S.namespace]).toBeUndefined();
   });
 });
+
+/** A Hub that keeps the decorators posted to it, and reads each back the way recordDeployment checks. */
+function fakeRecordingHub(opts: { failPost?: boolean } = {}) {
+  const posted: any[] = [];
+  const hub = {
+    baseUrl: 'http://hub',
+    architectures: jest.fn(async () => [{ customId: 'orders', numericId: 4 }]),
+    createDecorator: jest.fn(async (_ns: string, d: any) => {
+      if (opts.failPost) {
+        throw new Error('hub is down');
+      }
+      posted.push(d);
+      return posted.length;
+    }),
+    listDecorators: jest.fn(async () => posted.map((_, i) => i + 1)),
+    getDecorator: jest.fn(async (_ns: string, id: number) => ({
+      uniqueId: posted[id - 1]['unique-id'],
+    })),
+  };
+  return { hub: hub as any, posted };
+}
+
+const record = {
+  hubNamespace: 'hackathon',
+  architecture: 'orders',
+  version: '1.0.0',
+  architecturePath: 'architecture.json',
+};
+
+describe('calm:deploy:k8s: a failed deployment', () => {
+  let root: string;
+  let localDir: string;
+  let dir: string;
+  beforeEach(async () => {
+    root = await fs.mkdtemp(path.join(os.tmpdir(), 'calm-deploy-fail-'));
+    localDir = path.join(root, 'output');
+    dir = path.join(localDir, 'orders');
+    await fs.mkdir(path.join(dir, 'deploy', 'k8s'), { recursive: true });
+    await fs.writeFile(
+      path.join(dir, 'deploy', 'k8s', 'kustomization.yaml'),
+      'resources: []\n',
+    );
+    await fs.writeFile(
+      path.join(dir, 'deploy', 'k8s', 'workloads.yaml'),
+      [
+        'apiVersion: apps/v1',
+        'kind: Deployment',
+        'metadata:',
+        '  name: web-service',
+        '  labels:',
+        '    calm.finos.org/node: web-service',
+        '---',
+        'apiVersion: v1',
+        'kind: Service',
+        'metadata:',
+        '  name: api-gateway',
+        '  labels:',
+        '    calm.finos.org/node: api-gateway',
+        '',
+      ].join('\n'),
+    );
+    await fs.writeFile(
+      path.join(root, 'architecture.json'),
+      JSON.stringify({
+        nodes: [
+          { 'unique-id': 'web-service' },
+          { 'unique-id': 'api-gateway' },
+          { 'unique-id': 'mongo-database' },
+        ],
+      }),
+    );
+  });
+  afterEach(async () => {
+    await fs.rm(root, { recursive: true, force: true });
+  });
+
+  const kubeconfig = () => path.join(root, 'kubeconfig');
+  const run = async (opts: {
+    input?: object;
+    hub?: any;
+    namespace?: object;
+    failRollout?: string;
+  }) => {
+    await fs.writeFile(kubeconfig(), '');
+    const c = {
+      input: {
+        dir,
+        name: 'orders',
+        image: 'orders:run-1',
+        ...opts.input,
+      },
+      logger: { info: jest.fn(), warn: jest.fn() },
+      output: jest.fn(),
+      workspacePath: root,
+      task: { id: 'task-1' },
+    } as any;
+    const kubectl = jest.fn(async (args: string[]) => {
+      const a = args.join(' ');
+      if (a.startsWith('get namespace')) {
+        return opts.namespace ? JSON.stringify(opts.namespace) : '';
+      }
+      if (a.includes('get deployments')) {
+        return JSON.stringify({
+          items: [{ kind: 'Deployment', metadata: { name: 'web-service' } }],
+        });
+      }
+      if (a.includes('rollout status') && opts.failRollout) {
+        throw new Error(opts.failRollout);
+      }
+      return '';
+    });
+    const result = createCalmDeployK8sAction({
+      settings: {
+        kubeconfig: kubeconfig(),
+        context: 'calm-backstage',
+        minikubeProfile: 'calm-backstage',
+        namespacePrefix: 'calm-',
+      },
+      localDir,
+      hub: opts.hub,
+      appBaseUrl: 'http://localhost:3100',
+      kubectl: () => kubectl,
+    }).handler(c);
+    return { result, c, kubectl };
+  };
+  const rollout =
+    'error: timed out waiting for the condition on deployments/web-service\nsecond line';
+
+  it('records a failed decorator, applying to the labelled nodes, and rethrows the deploy error', async () => {
+    const { hub, posted } = fakeRecordingHub();
+    const { result, c } = await run({
+      input: { record },
+      hub,
+      failRollout: rollout,
+    });
+    await expect(result).rejects.toThrow(/timed out waiting/);
+    expect(posted).toHaveLength(1);
+    expect(posted[0]).toMatchObject({
+      'unique-id': 'orders-task-1',
+      // The Service's label does not count: only workloads name the node they run.
+      'applies-to': ['web-service'],
+      data: {
+        status: 'failed',
+        'start-time': expect.any(String),
+        'end-time': expect.any(String),
+      },
+    });
+    const notes: string = posted[0].data.notes;
+    expect(notes).toContain('timed out waiting for the condition');
+    expect(notes).not.toContain('\n');
+    // The lines of the error are joined, so the notes stay one line.
+    expect(notes).toContain('web-service second line');
+    expect(c.output).not.toHaveBeenCalledWith('endTime', expect.anything());
+  });
+
+  it('applies to every architecture node when no workload names one', async () => {
+    await fs.writeFile(
+      path.join(dir, 'deploy', 'k8s', 'workloads.yaml'),
+      'apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: x\n',
+    );
+    const { hub, posted } = fakeRecordingHub();
+    const { result } = await run({
+      input: { record },
+      hub,
+      failRollout: rollout,
+    });
+    await expect(result).rejects.toThrow(/timed out waiting/);
+    expect(posted[0]['applies-to']).toEqual([
+      'web-service',
+      'api-gateway',
+      'mongo-database',
+    ]);
+  });
+
+  it('calls no Hub without record', async () => {
+    const { hub } = fakeRecordingHub();
+    const { result } = await run({ hub, failRollout: rollout });
+    await expect(result).rejects.toThrow(/timed out waiting/);
+    expect(hub.createDecorator).not.toHaveBeenCalled();
+    expect(hub.architectures).not.toHaveBeenCalled();
+  });
+
+  it('rejects with the deploy error and warns when recording fails', async () => {
+    const { hub } = fakeRecordingHub({ failPost: true });
+    const { result, c } = await run({
+      input: { record },
+      hub,
+      failRollout: rollout,
+    });
+    await expect(result).rejects.toThrow(/timed out waiting/);
+    expect(c.logger.warn).toHaveBeenCalledWith(
+      expect.stringMatching(
+        /Could not record the failed deployment.*hub is down/,
+      ),
+    );
+  });
+
+  it('records nothing when it fails before the deployment started', async () => {
+    const { hub } = fakeRecordingHub();
+    const { result } = await run({
+      input: { record },
+      hub,
+      namespace: {
+        metadata: { labels: { 'calm.finos.org/service': 'billing' } },
+      },
+    });
+    await expect(result).rejects.toThrow(/belongs to the service "billing"/);
+    expect(hub.createDecorator).not.toHaveBeenCalled();
+  });
+});
