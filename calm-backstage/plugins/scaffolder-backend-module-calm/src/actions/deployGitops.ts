@@ -208,6 +208,14 @@ export function createCalmDeployGitopsAction(options: {
         name,
         existing ? JSON.parse(existing) : undefined,
       );
+      // Checked before the try: on the wrong branch nothing is deployed, so no failed deployment is recorded.
+      const git = { logger: ctx.logger, signal: ctx.signal };
+      const branch = await gitCurrentBranch(dir, git);
+      if (branch !== gitops.branch) {
+        throw new Error(
+          `${dir} is on the branch ${branch}, not ${gitops.branch}: Flux deploys ${gitops.branch}`,
+        );
+      }
 
       const startTime = new Date().toISOString();
       const fluxName = fluxObjectName(name);
@@ -215,13 +223,6 @@ export function createCalmDeployGitopsAction(options: {
       let repo: ReturnType<typeof serviceRepository>;
       let deployed: Deployed;
       try {
-        const git = { logger: ctx.logger, signal: ctx.signal };
-        const branch = await gitCurrentBranch(dir, git);
-        if (branch !== gitops.branch) {
-          throw new Error(
-            `${dir} is on the branch ${branch}, not ${gitops.branch}: Flux deploys ${gitops.branch}`,
-          );
-        }
         await writeOverlay(
           dir,
           { name, namespace, image },

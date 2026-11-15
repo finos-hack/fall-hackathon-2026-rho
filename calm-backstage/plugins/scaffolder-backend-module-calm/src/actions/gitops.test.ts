@@ -409,8 +409,12 @@ describe('calm:deploy:gitops: a failed deployment', () => {
     hub?: any;
     namespace?: object;
     failFlux?: string;
+    branch?: string;
   }) => {
     const { remote, dir } = await failing();
+    if (opts.branch) {
+      await git(dir, ['checkout', '-q', '-b', opts.branch]);
+    }
     const fake = fakeKubectl({
       remote,
       failFlux: opts.failFlux ?? 'kustomize build failed',
@@ -474,6 +478,14 @@ describe('calm:deploy:gitops: a failed deployment', () => {
       },
     });
     await expect(result).rejects.toThrow(/belongs to the service "billing"/);
+    expect(hub.createDecorator).not.toHaveBeenCalled();
+  });
+
+  it('records nothing when the working copy is on another branch', async () => {
+    const { hub } = fakeRecordingHub();
+    const { result } = await run({ input: { record }, hub, branch: 'feature' });
+    await expect(result).rejects.toThrow(/is on the branch feature, not main/);
+    expect(hub.architectures).not.toHaveBeenCalled();
     expect(hub.createDecorator).not.toHaveBeenCalled();
   });
 });
