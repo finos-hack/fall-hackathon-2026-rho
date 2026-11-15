@@ -233,7 +233,8 @@ build of Quarkus 3.33.4 and 3.40.1 (BOM `com.redhat.quarkus.platform:quarkus-bom
     the namespace enforces Pod Security `baseline`, so not privileged or host-access pods).
     A Kustomization without `serviceAccountName` is applied as `flux-system/default`, which has no permissions
     (kustomize-controller runs with `--default-service-account=default`), so a service deployed before #12 stops
-    reconciling, its workloads keep running, until it is redeployed. Pod Security `baseline` is enforced on a
+    reconciling until it is redeployed (its workloads keep running). Redeploy it before `docs/demo/cleanup.sh` too:
+    Flux cannot prune it as that account. Pod Security `baseline` is enforced on a
     pre-existing service namespace the next time the service is deployed; a workload that needs more (privileged,
     host namespaces, paths or ports) then fails admission.
     Gitea is published on 127.0.0.1:3300, so by default that is anyone on this machine, not the network; with
