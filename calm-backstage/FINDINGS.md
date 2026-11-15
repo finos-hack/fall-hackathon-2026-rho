@@ -215,5 +215,14 @@ build of Quarkus 3.33.4 and 3.40.1 (BOM `com.redhat.quarkus.platform:quarkus-bom
     which runs as cluster-admin. Gitea is published on 127.0.0.1:3300, so by default that is anyone on this machine,
     not the network; with `GITEA_BIND=0.0.0.0` (Linux) it is the network again unless a firewall blocks 3300. Give
     each Kustomization a namespaced service account and `targetNamespace`, and seed a random password.
+- **Two tasks must not share a service's working copy.** `calm:upgrade:render`, `calm:upgrade:merge` and
+  `calm:deploy:gitops` reset, clean and switch branches in `output/<name>`, and an upgrade spans render, image build,
+  merge and deploy. A double click on Upgrade, or an upgrade over a `deploy:gitops` rerun, could leave one task on
+  the other's branch. The working copy is now reserved for the task that took it (in memory, by task id): render
+  takes it and keeps it when it changed something, merge takes it again, and the deploy (or any failure, or a render
+  with nothing to change) releases it. Another task gets "is in use by the task ..." at once. A task that dies
+  between steps releases it at the latest after 10 minutes (`SERVICE_LOCK_TTL_MS`), so a failed upgrade can be run
+  again after that time, and at once when it failed in the render, the image build or the merge. The reservation is
+  per backend process, so it assumes one Backstage backend.
 - **A `PageBlueprint` gets a sidebar item from the plugin's `title` and `icon` and a `routeRef`**, not from the page's
   own title.

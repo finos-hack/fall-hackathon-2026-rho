@@ -155,6 +155,32 @@ const renderAction = (bundles: ReturnType<typeof meta>[]) =>
   });
 
 describe('calm:upgrade:render', () => {
+  it('refuses a second upgrade of the same service while the first is between its render and its deploy', async () => {
+    const { dir } = await service();
+    const bundles = [
+      meta('node-service', '1.0.0', 'starter'),
+      meta('k8s-deploy', '1.0.0', 'deployment'),
+      meta('k8s-deploy', '1.1.0', 'deployment'),
+    ];
+    const input = {
+      entityRef: 'component:default/orders',
+      upgradeCode: true,
+      upgradeDeploy: true,
+    };
+    const first = { ...ctx(input), task: { id: 'task-a' } };
+    await renderAction(bundles).handler(first);
+    expect(first.outputs.changed).toBe(true);
+    const branch = await git(dir, ['rev-parse', '--abbrev-ref', 'HEAD']);
+
+    const second = { ...ctx(input), task: { id: 'task-b' } };
+    await expect(renderAction(bundles).handler(second)).rejects.toThrow(
+      /in use by the task task-a/,
+    );
+    // The first task's branch and files were not touched.
+    expect(await git(dir, ['rev-parse', '--abbrev-ref', 'HEAD'])).toBe(branch);
+    expect(await git(dir, ['status', '--porcelain'])).toBe('');
+  });
+
   it('re-renders deploy/k8s only for a deployment upgrade and keeps src/', async () => {
     const { dir, remote } = await service();
     const before = await git(remote, ['rev-parse', 'main']);

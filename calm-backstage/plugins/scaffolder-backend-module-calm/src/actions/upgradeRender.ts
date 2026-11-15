@@ -29,6 +29,7 @@ import {
 import YAML from 'yaml';
 import { ARCHITECTURE_FILE, CATALOG_INFO_FILE } from './publishLocal';
 import { readOverlayImage, BASE_DIR } from './deployK8s';
+import { withServiceLock } from './serviceLock';
 import { CalmTemplateActionOptions, resolveBundle } from './template';
 
 /** Renders `<name>@<version>` against an architecture into a new folder under `tmp`; returns the files it wrote. */
@@ -191,211 +192,227 @@ export function createCalmUpgradeRenderAction(options: {
         architectureVersion: z => z.string(),
       },
     },
-    async handler(ctx) {
-      if (!options.gitops) {
-        throw new Error(
-          'calm.gitops is not configured: only services in Git can be upgraded',
-        );
-      }
-      const ref = stringifyEntityRef(parseEntityRef(ctx.input.entityRef));
-      const entity = await options.catalog.getEntityByRef(ref, {
-        credentials: await ctx.getInitiatorCredentials(),
-      });
-      if (!entity) {
-        throw new Error(`${ref} is not in the catalog`);
-      }
-      const name = entity.metadata.name;
-      const a = entity.metadata.annotations ?? {};
-      const current = serviceBundles(a);
-      if (!a[ANN.gitops] || !current.pattern || !current.starter) {
-        throw new Error(
-          `${ref} is not a CALM service in Git (it needs ${ANN.gitops}, ${ANN.pattern} and ${ANN.bundle}); create it again with a starter to upgrade it`,
-        );
-      }
-      if (!current.deploy) {
-        throw new Error(
-          `${ref} was made with the full bundle ${current.starter.name} ${current.starter.version}, which has no separate deployment rules; create it again with a starter to upgrade it`,
-        );
-      }
-      const dir = resolveSafeChildPath(options.localDir, name);
-      const targets = upgradeTargets(
-        current,
-        await options.listBundles(),
-        current.pattern,
-      );
-      const wanted: UpgradeTargets = {
-        ...(ctx.input.upgradeCode !== false && targets.starter?.to
-          ? { starter: targets.starter }
-          : {}),
-        ...(ctx.input.upgradeDeploy !== false && targets.deploy?.to
-          ? { deploy: targets.deploy }
-          : {}),
-      };
-      const hubNamespace =
-        a[ANN.architectureNamespace] ?? a[ANN.namespace] ?? '';
-      const git = { logger: ctx.logger, signal: ctx.signal };
-      const base = {
-        name,
-        dir,
-        hubNamespace,
-        architecture: a[ANN.architecture] ?? '',
-        architectureVersion: a[ANN.architectureVersion] ?? '',
-        currentImage: '',
-      };
-      for (const [k, v] of Object.entries(base)) {
-        ctx.output(k as any, v);
-      }
-      const workspaceArchitecture = resolveSafeChildPath(
-        ctx.workspacePath,
-        ARCHITECTURE_FILE,
-      );
-      await fs.copyFile(
-        path.join(dir, ARCHITECTURE_FILE),
-        workspaceArchitecture,
-      );
-      ctx.output('architecturePath', ARCHITECTURE_FILE);
-
-      const summary = upgradeSummary(wanted);
-      if (!summary.length) {
-        ctx.logger.info(
-          `${name} is up to date: starter ${current.starter.name} ${current.starter.version}, deployment rules ${current.deploy.name} ${current.deploy.version}`,
-        );
-        ctx.output('changed', false);
-        ctx.output('codeChanged', false);
-        ctx.output('branch', '');
-        ctx.output('commit', '');
-        ctx.output('shortCommit', '');
-        ctx.output('summary', 'Already up to date.');
-        ctx.output(
-          'starter',
-          `${current.starter.name}@${current.starter.version}`,
-        );
-        ctx.output(
-          'deployBundle',
-          `${current.deploy.name}@${current.deploy.version}`,
-        );
-        return;
-      }
-
-      // A clean main, up to date with the repository. Uncommitted work on main is the developer's: refuse rather
-      // than discard it. A half-done upgrade branch from a failed run is discarded.
-      const branchNow = await gitCurrentBranch(dir, git);
-      const dirty = Boolean(await gitRun(dir, ['status', '--porcelain'], git));
-      if (dirty && !branchNow.startsWith('upgrade/')) {
-        throw new Error(
-          `${dir} has uncommitted changes on ${branchNow}; commit or remove them before upgrading`,
-        );
-      }
-      await gitReset(dir, git);
-      if (branchNow !== options.gitops.branch) {
-        await gitCheckoutBranch(dir, options.gitops.branch, false, git);
-      }
-      const repo = serviceRepository(options.gitops, name);
-      await gitPull(
-        dir,
-        repo.pushUrl,
-        options.gitops.branch,
-        options.gitops.auth,
-        git,
-      );
-      const currentImage = await readOverlayImage(dir);
-      if (!currentImage) {
-        throw new Error(
-          `${name} has never been deployed (no image in deploy/k8s-overlay); deploy it before upgrading`,
-        );
-      }
-      ctx.output('currentImage', currentImage);
-      const branch = upgradeBranch(wanted);
-      await gitDeleteBranch(dir, branch, git);
-      await gitCheckoutBranch(dir, branch, true, git);
-
-      const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'calm-upgrade-'));
-      let starterRef: { ref?: string; digest?: string } | undefined;
-      try {
-        const arch = path.join(dir, ARCHITECTURE_FILE);
-        if (wanted.starter?.to) {
-          const old = await options.renderInto(
-            `${wanted.starter.name}@${wanted.starter.from}`,
-            arch,
-            path.join(tmp, 'old'),
-            ctx.logger,
-          );
-          const now = await options.renderInto(
-            `${wanted.starter.name}@${wanted.starter.to}`,
-            arch,
-            path.join(tmp, 'new'),
-            ctx.logger,
-          );
-          starterRef = now;
-          for (const f of old.files.filter(x => !now.files.includes(x))) {
-            await fs.rm(resolveSafeChildPath(dir, f), { force: true });
+    // The working copy is reserved from here to the end of the upgrade (its deploy releases it), or until the task
+    // fails or finds nothing to change.
+    async handler(outer) {
+      await withServiceLock(
+        outer,
+        {
+          dir: resolveSafeChildPath(
+            options.localDir,
+            parseEntityRef(outer.input.entityRef).name,
+          ),
+          keep: o => o.changed === true,
+        },
+        async ctx => {
+          if (!options.gitops) {
+            throw new Error(
+              'calm.gitops is not configured: only services in Git can be upgraded',
+            );
           }
-          await copyFiles(path.join(tmp, 'new'), now.files, dir);
-          ctx.logger.info(
-            `Re-rendered the code with ${wanted.starter.name} ${
-              wanted.starter.to
-            }: ${now.files.join(', ')}`,
-          );
-        }
-        if (wanted.deploy?.to) {
-          const now = await options.renderInto(
-            `${wanted.deploy.name}@${wanted.deploy.to}`,
-            arch,
-            path.join(tmp, 'deploy'),
-            ctx.logger,
-          );
-          await fs.rm(path.join(dir, BASE_DIR), {
-            recursive: true,
-            force: true,
+          const ref = stringifyEntityRef(parseEntityRef(ctx.input.entityRef));
+          const entity = await options.catalog.getEntityByRef(ref, {
+            credentials: await ctx.getInitiatorCredentials(),
           });
-          await copyFiles(path.join(tmp, 'deploy'), now.files, dir);
-          ctx.logger.info(
-            `Re-rendered ${BASE_DIR} with ${wanted.deploy.name} ${wanted.deploy.to}`,
+          if (!entity) {
+            throw new Error(`${ref} is not in the catalog`);
+          }
+          const name = entity.metadata.name;
+          const a = entity.metadata.annotations ?? {};
+          const current = serviceBundles(a);
+          if (!a[ANN.gitops] || !current.pattern || !current.starter) {
+            throw new Error(
+              `${ref} is not a CALM service in Git (it needs ${ANN.gitops}, ${ANN.pattern} and ${ANN.bundle}); create it again with a starter to upgrade it`,
+            );
+          }
+          if (!current.deploy) {
+            throw new Error(
+              `${ref} was made with the full bundle ${current.starter.name} ${current.starter.version}, which has no separate deployment rules; create it again with a starter to upgrade it`,
+            );
+          }
+          const dir = resolveSafeChildPath(options.localDir, name);
+          const targets = upgradeTargets(
+            current,
+            await options.listBundles(),
+            current.pattern,
           );
-        }
-      } finally {
-        await fs.rm(tmp, { recursive: true, force: true });
-      }
+          const wanted: UpgradeTargets = {
+            ...(ctx.input.upgradeCode !== false && targets.starter?.to
+              ? { starter: targets.starter }
+              : {}),
+            ...(ctx.input.upgradeDeploy !== false && targets.deploy?.to
+              ? { deploy: targets.deploy }
+              : {}),
+          };
+          const hubNamespace =
+            a[ANN.architectureNamespace] ?? a[ANN.namespace] ?? '';
+          const git = { logger: ctx.logger, signal: ctx.signal };
+          const base = {
+            name,
+            dir,
+            hubNamespace,
+            architecture: a[ANN.architecture] ?? '',
+            architectureVersion: a[ANN.architectureVersion] ?? '',
+            currentImage: '',
+          };
+          for (const [k, v] of Object.entries(base)) {
+            ctx.output(k as any, v);
+          }
+          const workspaceArchitecture = resolveSafeChildPath(
+            ctx.workspacePath,
+            ARCHITECTURE_FILE,
+          );
+          await fs.copyFile(
+            path.join(dir, ARCHITECTURE_FILE),
+            workspaceArchitecture,
+          );
+          ctx.output('architecturePath', ARCHITECTURE_FILE);
 
-      const catalogInfo = path.join(dir, CATALOG_INFO_FILE);
-      await fs.writeFile(
-        catalogInfo,
-        withUpgradedBundles(
-          await fs.readFile(catalogInfo, 'utf-8'),
-          wanted,
-          starterRef,
-        ),
+          const summary = upgradeSummary(wanted);
+          if (!summary.length) {
+            ctx.logger.info(
+              `${name} is up to date: starter ${current.starter.name} ${current.starter.version}, deployment rules ${current.deploy.name} ${current.deploy.version}`,
+            );
+            ctx.output('changed', false);
+            ctx.output('codeChanged', false);
+            ctx.output('branch', '');
+            ctx.output('commit', '');
+            ctx.output('shortCommit', '');
+            ctx.output('summary', 'Already up to date.');
+            ctx.output(
+              'starter',
+              `${current.starter.name}@${current.starter.version}`,
+            );
+            ctx.output(
+              'deployBundle',
+              `${current.deploy.name}@${current.deploy.version}`,
+            );
+            return;
+          }
+
+          // A clean main, up to date with the repository. Uncommitted work on main is the developer's: refuse rather
+          // than discard it. A half-done upgrade branch from a failed run is discarded.
+          const branchNow = await gitCurrentBranch(dir, git);
+          const dirty = Boolean(
+            await gitRun(dir, ['status', '--porcelain'], git),
+          );
+          if (dirty && !branchNow.startsWith('upgrade/')) {
+            throw new Error(
+              `${dir} has uncommitted changes on ${branchNow}; commit or remove them before upgrading`,
+            );
+          }
+          await gitReset(dir, git);
+          if (branchNow !== options.gitops.branch) {
+            await gitCheckoutBranch(dir, options.gitops.branch, false, git);
+          }
+          const repo = serviceRepository(options.gitops, name);
+          await gitPull(
+            dir,
+            repo.pushUrl,
+            options.gitops.branch,
+            options.gitops.auth,
+            git,
+          );
+          const currentImage = await readOverlayImage(dir);
+          if (!currentImage) {
+            throw new Error(
+              `${name} has never been deployed (no image in deploy/k8s-overlay); deploy it before upgrading`,
+            );
+          }
+          ctx.output('currentImage', currentImage);
+          const branch = upgradeBranch(wanted);
+          await gitDeleteBranch(dir, branch, git);
+          await gitCheckoutBranch(dir, branch, true, git);
+
+          const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'calm-upgrade-'));
+          let starterRef: { ref?: string; digest?: string } | undefined;
+          try {
+            const arch = path.join(dir, ARCHITECTURE_FILE);
+            if (wanted.starter?.to) {
+              const old = await options.renderInto(
+                `${wanted.starter.name}@${wanted.starter.from}`,
+                arch,
+                path.join(tmp, 'old'),
+                ctx.logger,
+              );
+              const now = await options.renderInto(
+                `${wanted.starter.name}@${wanted.starter.to}`,
+                arch,
+                path.join(tmp, 'new'),
+                ctx.logger,
+              );
+              starterRef = now;
+              for (const f of old.files.filter(x => !now.files.includes(x))) {
+                await fs.rm(resolveSafeChildPath(dir, f), { force: true });
+              }
+              await copyFiles(path.join(tmp, 'new'), now.files, dir);
+              ctx.logger.info(
+                `Re-rendered the code with ${wanted.starter.name} ${
+                  wanted.starter.to
+                }: ${now.files.join(', ')}`,
+              );
+            }
+            if (wanted.deploy?.to) {
+              const now = await options.renderInto(
+                `${wanted.deploy.name}@${wanted.deploy.to}`,
+                arch,
+                path.join(tmp, 'deploy'),
+                ctx.logger,
+              );
+              await fs.rm(path.join(dir, BASE_DIR), {
+                recursive: true,
+                force: true,
+              });
+              await copyFiles(path.join(tmp, 'deploy'), now.files, dir);
+              ctx.logger.info(
+                `Re-rendered ${BASE_DIR} with ${wanted.deploy.name} ${wanted.deploy.to}`,
+              );
+            }
+          } finally {
+            await fs.rm(tmp, { recursive: true, force: true });
+          }
+
+          const catalogInfo = path.join(dir, CATALOG_INFO_FILE);
+          await fs.writeFile(
+            catalogInfo,
+            withUpgradedBundles(
+              await fs.readFile(catalogInfo, 'utf-8'),
+              wanted,
+              starterRef,
+            ),
+          );
+          const commit = await gitCommitAll(
+            dir,
+            [`Upgrade ${name}`, '', ...summary].join('\n'),
+            git,
+          );
+          if (!commit) {
+            // The new versions render the same files: nothing to merge.
+            await gitCheckoutBranch(dir, options.gitops.branch, false, git);
+            await gitDeleteBranch(dir, branch, git);
+            ctx.logger.info(
+              'The new versions render the same files; nothing to upgrade',
+            );
+            ctx.output('changed', false);
+            ctx.output('codeChanged', false);
+            ctx.output('branch', '');
+            ctx.output('commit', '');
+            ctx.output('shortCommit', '');
+            ctx.output('summary', 'The newer versions render the same files.');
+          } else {
+            ctx.output('changed', true);
+            ctx.output('codeChanged', Boolean(wanted.starter?.to));
+            ctx.output('branch', branch);
+            ctx.output('commit', commit);
+            ctx.output('shortCommit', commit.slice(0, 12));
+            ctx.output('summary', summary.join('\n'));
+          }
+          const s = wanted.starter?.to ?? current.starter.version;
+          const d = wanted.deploy?.to ?? current.deploy.version;
+          ctx.output('starter', `${current.starter.name}@${s}`);
+          ctx.output('deployBundle', `${current.deploy.name}@${d}`);
+        },
       );
-      const commit = await gitCommitAll(
-        dir,
-        [`Upgrade ${name}`, '', ...summary].join('\n'),
-        git,
-      );
-      if (!commit) {
-        // The new versions render the same files: nothing to merge.
-        await gitCheckoutBranch(dir, options.gitops.branch, false, git);
-        await gitDeleteBranch(dir, branch, git);
-        ctx.logger.info(
-          'The new versions render the same files; nothing to upgrade',
-        );
-        ctx.output('changed', false);
-        ctx.output('codeChanged', false);
-        ctx.output('branch', '');
-        ctx.output('commit', '');
-        ctx.output('shortCommit', '');
-        ctx.output('summary', 'The newer versions render the same files.');
-      } else {
-        ctx.output('changed', true);
-        ctx.output('codeChanged', Boolean(wanted.starter?.to));
-        ctx.output('branch', branch);
-        ctx.output('commit', commit);
-        ctx.output('shortCommit', commit.slice(0, 12));
-        ctx.output('summary', summary.join('\n'));
-      }
-      const s = wanted.starter?.to ?? current.starter.version;
-      const d = wanted.deploy?.to ?? current.deploy.version;
-      ctx.output('starter', `${current.starter.name}@${s}`);
-      ctx.output('deployBundle', `${current.deploy.name}@${d}`);
     },
   });
 }
