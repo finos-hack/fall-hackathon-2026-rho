@@ -157,6 +157,8 @@ export const scaffolderModuleCalm = createBackendModule({
               return [...local, ...fromRegistry];
             },
             renderInto: defaultRenderInto({ bundles, registry, cacheDir }),
+            // The architecture an upgrade renders from: CALM Hub is its only store.
+            hub,
           }),
           createCalmUpgradeMergeAction({
             gitops,

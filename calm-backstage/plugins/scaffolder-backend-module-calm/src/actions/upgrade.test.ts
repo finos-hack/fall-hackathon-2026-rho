@@ -10,6 +10,7 @@ import {
   gitPush,
 } from '@internal/backstage-plugin-calm-node';
 import {
+  LEGACY_COPY_REMOVED,
   createCalmUpgradeRenderAction,
   upgradeBranch,
   withUpgradedBundles,
@@ -93,8 +94,17 @@ const meta = (name: string, version: string, kind: string) =>
     patterns: [{ namespace: 'hackathon', patternId: 'web-service' }],
   });
 
+/** The architecture files the bundles were rendered against, in order. */
+let renderedFrom: string[] = [];
+beforeEach(() => {
+  renderedFrom = [];
+});
+
 /** Each bundle version renders files whose content names it; node-service 1.1.0 drops src/old.js. */
-const renderInto = async (bundle: string, _arch: string, outDir: string) => {
+const renderInto = async (bundle: string, arch: string, outDir: string) => {
+  if (arch) {
+    renderedFrom.push(arch);
+  }
   let files: Record<string, string> = {
     'src/server.js': `// ${bundle}\n`,
     Dockerfile: 'FROM node\n',
@@ -118,8 +128,13 @@ const renderInto = async (bundle: string, _arch: string, outDir: string) => {
   };
 };
 
-/** A working copy pushed to a bare remote, as calm:git:publish leaves it, after a deploy. */
-async function service(): Promise<{ dir: string; remote: string }> {
+/**
+ * A working copy pushed to a bare remote, as calm:git:publish leaves it, after a deploy. `legacyCopy`: as a service
+ * made before CALM Hub became the only store, with architecture.json and the architecture-file annotation.
+ */
+async function service(
+  legacyCopy = false,
+): Promise<{ dir: string; remote: string }> {
   const remote = path.join(remoteBase, 'calm-services', 'orders.git');
   await fs.mkdir(remote, { recursive: true });
   await git(remote, ['init', '-q', '--bare', '-b', 'main']);
@@ -127,11 +142,22 @@ async function service(): Promise<{ dir: string; remote: string }> {
   await renderInto('node-service@1.0.0', '', dir);
   await renderInto('k8s-deploy@1.0.0', '', dir);
   await fs.writeFile(path.join(dir, 'src', 'mine.js'), 'developer code\n');
-  await fs.writeFile(path.join(dir, 'architecture.json'), '{}');
-  await fs.writeFile(
-    path.join(dir, 'catalog-info.yaml'),
-    YAML.stringify(entity),
-  );
+  if (legacyCopy) {
+    await fs.writeFile(path.join(dir, 'architecture.json'), '{"stale":true}');
+  }
+  const info = legacyCopy
+    ? {
+        ...entity,
+        metadata: {
+          ...entity.metadata,
+          annotations: {
+            ...annotations,
+            'calm.finos.org/architecture-file': './architecture.json',
+          },
+        },
+      }
+    : entity;
+  await fs.writeFile(path.join(dir, 'catalog-info.yaml'), YAML.stringify(info));
   await fs.mkdir(path.join(dir, 'deploy', 'k8s-overlay'), { recursive: true });
   await fs.writeFile(
     path.join(dir, 'deploy', 'k8s-overlay', 'kustomization.yaml'),
@@ -145,13 +171,25 @@ async function service(): Promise<{ dir: string; remote: string }> {
   return { dir, remote };
 }
 
-const renderAction = (bundles: ReturnType<typeof meta>[]) =>
+/** CALM Hub's copy of the architecture: names its coordinates, so a test sees which version was read. */
+const hubDoc = (namespace: string, id: string, version: string) => ({
+  $id: `${namespace}/${id}/${version}`,
+});
+
+const renderAction = (
+  bundles: ReturnType<typeof meta>[],
+  opts: {
+    hub?: (namespace: string, id: string, version: string) => Promise<any>;
+    entity?: any;
+  } = {},
+) =>
   createCalmUpgradeRenderAction({
-    catalog: { getEntityByRef: async () => entity } as any,
+    catalog: { getEntityByRef: async () => opts.entity ?? entity } as any,
     gitops: gitops(),
     localDir,
     listBundles: async () => bundles,
     renderInto,
+    hub: { architecture: opts.hub ?? (async (n, i, v) => hubDoc(n, i, v)) },
   });
 
 describe('calm:upgrade:render', () => {
@@ -197,9 +235,44 @@ describe('calm:upgrade:render', () => {
       'upgrade/deploy-k8s-deploy-1.1.0',
     );
     expect(await git(remote, ['rev-parse', 'main'])).toBe(before);
+    // The architecture came from CALM Hub, at the version the annotations name, and the render read that file.
     expect(
-      await fs.readFile(path.join(workspace, 'architecture.json'), 'utf-8'),
-    ).toBe('{}');
+      JSON.parse(
+        await fs.readFile(path.join(workspace, 'architecture.json'), 'utf-8'),
+      ),
+    ).toEqual(hubDoc('hackathon', 'orders', '1.0.0'));
+    expect(c.outputs.architecturePath).toBe('architecture.json');
+    expect(renderedFrom).toEqual([path.join(workspace, 'architecture.json')]);
+    await expect(
+      fs.stat(path.join(dir, 'architecture.json')),
+    ).rejects.toThrow();
+  });
+
+  it('removes a service’s old architecture.json and its annotation on the upgrade branch', async () => {
+    const { dir } = await service(true);
+    const c = ctx({ entityRef: 'component:default/orders' });
+    await renderAction([
+      meta('node-service', '1.0.0', 'starter'),
+      meta('k8s-deploy', '1.0.0', 'deployment'),
+      meta('k8s-deploy', '1.1.0', 'deployment'),
+    ]).handler(c);
+    expect(c.outputs.summary).toBe(
+      `Deployment rules: k8s-deploy 1.0.0 → 1.1.0\n${LEGACY_COPY_REMOVED}`,
+    );
+    await expect(
+      fs.stat(path.join(dir, 'architecture.json')),
+    ).rejects.toThrow();
+    const info = YAML.parse(
+      await fs.readFile(path.join(dir, 'catalog-info.yaml'), 'utf-8'),
+    );
+    expect(info.metadata.annotations).not.toHaveProperty(
+      'calm.finos.org/architecture-file',
+    );
+    expect(await git(dir, ['log', '-1', '--format=%B'])).toContain(
+      LEGACY_COPY_REMOVED,
+    );
+    // Rendered from CALM Hub's copy, not the stale file.
+    expect(renderedFrom).toEqual([path.join(workspace, 'architecture.json')]);
   });
 
   it('replaces the old starter’s files on a code upgrade and keeps files the developer added', async () => {
@@ -328,6 +401,53 @@ describe('calm:upgrade:merge', () => {
 });
 
 describe('calm:upgrade:render refusals', () => {
+  it('fails when CALM Hub does not give the architecture, and changes nothing', async () => {
+    const { dir } = await service(true);
+    const head = await git(dir, ['rev-parse', 'HEAD']);
+    await expect(
+      renderAction(
+        [
+          meta('node-service', '1.0.0', 'starter'),
+          meta('k8s-deploy', '1.0.0', 'deployment'),
+          meta('k8s-deploy', '1.1.0', 'deployment'),
+        ],
+        {
+          hub: async () => {
+            throw new Error('404 Not Found');
+          },
+        },
+      ).handler(ctx({ entityRef: 'component:default/orders' })),
+    ).rejects.toThrow(
+      /CALM Hub did not give the architecture hackathon\/orders 1\.0\.0 of component:default\/orders: 404 Not Found/,
+    );
+    expect(await git(dir, ['rev-parse', 'HEAD'])).toBe(head);
+    expect(await git(dir, ['branch', '--list'])).toBe('* main');
+    expect(renderedFrom).toEqual([]);
+  });
+
+  it('refuses a service that does not name its architecture in CALM Hub', async () => {
+    await service(true);
+    const {
+      'calm.finos.org/architecture': _id,
+      'calm.finos.org/architecture-version': _v,
+      ...rest
+    } = annotations;
+    await expect(
+      renderAction(
+        [
+          meta('node-service', '1.0.0', 'starter'),
+          meta('k8s-deploy', '1.1.0', 'deployment'),
+        ],
+        {
+          entity: {
+            ...entity,
+            metadata: { ...entity.metadata, annotations: rest },
+          },
+        },
+      ).handler(ctx({ entityRef: 'component:default/orders' })),
+    ).rejects.toThrow(/does not name its architecture in CALM Hub/);
+  });
+
   it('refuses uncommitted work on main instead of discarding it', async () => {
     const { dir } = await service();
     await fs.writeFile(path.join(dir, 'src', 'mine.js'), 'unsaved edit\n');
