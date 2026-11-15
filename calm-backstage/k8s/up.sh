@@ -2,7 +2,7 @@
 # Starts the local Kubernetes cluster for calm-backstage and tells Backstage how to read it.
 #
 # - minikube profile "calm-backstage" (docker driver, Calico so NetworkPolicies are enforced, 6 GiB and 4 CPUs
-#   for the Java starters' builds), with Flux's source and kustomize controllers.
+#   for the Java starters' builds), with Flux's source and kustomize controllers and cert-manager.
 # - Its kubeconfig goes to <repo>/.kube/config (git-ignored). Your own ~/.kube/config, its current context and any
 #   other minikube profiles are not touched.
 # - A read-only service account lets the Backstage Kubernetes plugin list workloads. Its token, the API server URL
@@ -53,6 +53,15 @@ elif ! minikube -p "$PROFILE" ssh -- \
   echo "k8s:up: if minikube runs on Linux or WSL, add GITEA_BIND=0.0.0.0 to hub/.env and run yarn hub:up again;" >&2
   echo "k8s:up: that publishes Gitea on every interface (see the comment above gitea in hub/docker-compose.yml)." >&2
 fi
+
+# cert-manager (pinned release): the deployment rules k8s-deploy 1.3.0 and later issue the certificates for TLS
+# between workloads (the gateway to the service) with its Issuer and Certificate resources.
+CERT_MANAGER_VERSION="v1.16.2"
+echo "k8s:up: installing cert-manager $CERT_MANAGER_VERSION"
+kc apply -f "https://github.com/cert-manager/cert-manager/releases/download/$CERT_MANAGER_VERSION/cert-manager.yaml" >/dev/null
+kc -n cert-manager rollout status deployment/cert-manager --timeout=300s
+kc -n cert-manager rollout status deployment/cert-manager-cainjector --timeout=300s
+kc -n cert-manager rollout status deployment/cert-manager-webhook --timeout=300s
 
 kc apply -f "$ROOT_DIR/k8s/backstage-reader.yaml"
 

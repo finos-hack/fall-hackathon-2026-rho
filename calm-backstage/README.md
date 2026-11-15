@@ -90,9 +90,10 @@ app-config.local.yaml --config <that file>`. Both share the Hub, the registry, G
    consumes through a [Nisshi](https://nisshi.io) broker, with PostgreSQL or SQLite storage. Its page sends events and
    shows them coming back.
 10. **Upgrade**: create a service on `spring-boot-service@1.0.0` and `k8s-deploy@1.0.0`. The card then says 1.1.0 and
-    1.2.1 are available; **Upgrade** runs the `calm-upgrade` Template: re-render on a branch, build, open and merge a
+    1.3.0 are available; **Upgrade** runs the `calm-upgrade` Template: re-render on a branch, build, open and merge a
     pull request in Gitea, Flux applies the merge commit, CALM Hub records the deployment. The app page then shows
-    Spring Boot 4.1.2 and `k8s-deploy@1.2.1`.
+    Spring Boot 4.1.2 and `k8s-deploy@1.3.0`. `k8s-deploy` 1.3.0 needs cert-manager: run `yarn k8s:up` again on a
+    cluster created before it.
 
 To change a bundle, add a new version folder in Gitea's `calm-templates/bundles` (or in `bundles/`) and run
 `node hub/push-bundles.cjs --from-git` (or `yarn bundles:push`). A published version never changes: changed content
