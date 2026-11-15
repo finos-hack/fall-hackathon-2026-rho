@@ -107,7 +107,9 @@ export default class WebServiceTransformer {
 
         const service = byId(APP_NODE);
         const gateway = byId(GATEWAY_NODE);
-        const serviceName = service?.metadata?.['service-name'] ?? APP_NODE;
+        // An empty or blank service name counts as none (since 3.0.1).
+        const named = service?.metadata?.['service-name'];
+        const serviceName = typeof named === 'string' && named.trim() ? named : APP_NODE;
         const owner = service?.metadata?.owner ?? 'unknown';
         const servicePort = archPort(service) ?? 8080;
 

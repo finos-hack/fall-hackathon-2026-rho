@@ -166,6 +166,11 @@ build of Quarkus 3.33.4 and 3.40.1 (BOM `com.redhat.quarkus.platform:quarkus-bom
   two ids would get the same name or the name is cut. Node names are RFC 1035 labels (a Service name must start with
   a letter, at most 63 characters) and every selector, Service, gateway upstream and host in the environment uses the
   same name; the original id stays in an annotation. Older versions are published and keep the bug.
+- **A valid label value can still be a YAML number.** A service name `2024`, `1.0`, `1e3`, `0x1F` or `2024-01-01`
+  written bare as `app.kubernetes.io/part-of` builds with kustomize into a number or a timestamp, but a label value
+  must be a string, so the apply fails. `k8s-deploy` 1.2.2 quotes a label value that starts with a digit and keeps every other one bare,
+  so renders of service names that start with a letter stay byte-identical to 1.2.1. An empty service name renders
+  as null, so 1.2.2 and `web-service` 3.0.1 treat an empty or blank one as none.
 - **Deployment rules must apply over their own older versions, not only to a new namespace.** 1.2.0 set
   `strategy: Recreate` on backing services. A new deployment took it; an upgrade from 1.0.0 did not: Kubernetes
   refuses Recreate while the Deployment holds `rollingUpdate` settings, and server-side apply (Flux) cannot remove

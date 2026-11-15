@@ -114,8 +114,13 @@ const YAML_WORD = /^(true|True|TRUE|false|False|FALSE|null|Null|NULL)$/;
 const NODE_NAME_MAX = 63;
 const DNS_1035_LABEL = /^[a-z]([-a-z0-9]*[a-z0-9])?$/;
 const isNodeName = id => id.length <= NODE_NAME_MAX && DNS_1035_LABEL.test(id) && !YAML_WORD.test(id);
-// A label value: at most 63 characters, alphanumeric at both ends, `-`, `_` and `.` between.
-const isLabelValue = v => v.length <= 63 && /^(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])?$/.test(v) && !YAML_WORD.test(v);
+// A label value: at most 63 characters, alphanumeric at both ends, `-`, `_` and `.` between. Not empty: an empty value
+// renders as null.
+const isLabelValue = v => v.length <= 63 && /^[A-Za-z0-9]([-A-Za-z0-9_.]*[A-Za-z0-9])?$/.test(v) && !YAML_WORD.test(v);
+// A label value that starts with a digit may read as a number or a date (`2024`, `1.0`, `1e3`, `0x1F`, `2024-01-01`),
+// so it is written quoted. Any other label value is written bare, as before 1.2.2: a valid one that starts with a letter
+// is a string, and kustomize quotes the YAML 1.1 words (`on`, `yes`) itself.
+const labelYaml = v => (/^[0-9]/.test(String(v)) ? JSON.stringify(String(v)) : String(v));
 
 const twice = q => q.replace(/^(\d+)(.*)$/, (_, n, unit) => `${Number(n) * 2}${unit}`);
 
@@ -124,6 +129,8 @@ export default class K8sDeployTransformer {
         return {
             // JSON for a value. A JSON string is also a valid YAML string. Use with a triple-stash: {{{json value}}}.
             json: value => JSON.stringify(value, null, 2),
+            // A label value as YAML: quoted when it would not read as a string. Use with a triple-stash.
+            label: labelYaml,
         };
     }
 
@@ -141,7 +148,9 @@ export default class K8sDeployTransformer {
         const app = nodes.find(n => n['node-type'] === 'service');
         const appNode = app?.['unique-id'] ?? 'web-service';
         const gateway = byId(GATEWAY_NODE);
-        const serviceName = app?.metadata?.['service-name'] ?? appNode;
+        // An empty or blank service name counts as none.
+        const named = app?.metadata?.['service-name'];
+        const serviceName = typeof named === 'string' && named.trim() ? named : appNode;
         const owner = app?.metadata?.owner ?? 'unknown';
         const topic = app?.metadata?.topic;
         const servicePort = archPort(app) ?? 8080;
@@ -269,7 +278,8 @@ export default class K8sDeployTransformer {
             document: {
                 title: data.title ?? serviceName,
                 serviceName,
-                // The app.kubernetes.io/part-of label: the service name, converted when it is not a label value.
+                // The app.kubernetes.io/part-of label: the service name, converted when it is not a label value. The
+                // template writes it with the `label` helper.
                 partOf: kubernetesNames([serviceName], { max: 63, valid: isLabelValue })(serviceName),
                 owner,
                 servicePort,
