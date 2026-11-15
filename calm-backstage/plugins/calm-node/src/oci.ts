@@ -245,13 +245,19 @@ async function pushBlob(ref: OciRef, data: Buffer): Promise<OciDescriptor> {
   return { mediaType: '', digest, size: data.length };
 }
 
+/** The manifest URL of a tag. */
+function manifestUrl(ref: OciRef): string {
+  return `${ref.baseUrl}/v2/${ref.repository}/manifests/${ref.tag}`;
+}
+
+/** The Accept header for reading a manifest; the GET and the HEAD send the same one, so they see the same manifest. */
+const MANIFEST_ACCEPT = { Accept: OCI_MANIFEST_MEDIA_TYPE };
+
 async function readManifest(
   ref: OciRef,
 ): Promise<{ digest: string; manifest: OciManifest }> {
-  const url = `${ref.baseUrl}/v2/${ref.repository}/manifests/${ref.tag}`;
-  const res = await expect('GET', url, {
-    headers: { Accept: OCI_MANIFEST_MEDIA_TYPE },
-  });
+  const url = manifestUrl(ref);
+  const res = await expect('GET', url, { headers: MANIFEST_ACCEPT });
   const raw = Buffer.from(await res.arrayBuffer());
   const digest = sha256Digest(raw);
   const header = res.headers.get('docker-content-digest');
@@ -442,7 +448,7 @@ export async function pushBundle(opts: {
   // The digest is of these exact bytes.
   const body = Buffer.from(JSON.stringify(manifest), 'utf8');
   const digest = sha256Digest(body);
-  const url = `${ref.baseUrl}/v2/${ref.repository}/manifests/${ref.tag}`;
+  const url = manifestUrl(ref);
   const res = await expect(
     'PUT',
     url,
@@ -563,6 +569,30 @@ export async function readBundleManifest(
 /** The manifest digest of a bundle in the registry, without reading its blobs. */
 export async function resolveBundleDigest(ref: string): Promise<string> {
   return (await readManifest(parseRef(ref))).digest;
+}
+
+/**
+ * The manifest digest the registry gives for a bundle's tag on a HEAD request (its `Docker-Content-Digest`), with
+ * the same Accept header as the manifest GET; `undefined` when the registry answers 404 (no manifest under that
+ * tag). A 200 without the header falls back to a GET of the manifest. Any other answer throws.
+ */
+export async function headBundleDigest(
+  ref: string,
+): Promise<string | undefined> {
+  const parsed = parseRef(ref);
+  const res = await expect(
+    'HEAD',
+    manifestUrl(parsed),
+    { headers: MANIFEST_ACCEPT },
+    [200, 404],
+  );
+  if (res.status === 404) {
+    return undefined;
+  }
+  return (
+    res.headers.get('docker-content-digest') ??
+    (await readManifest(parsed)).digest
+  );
 }
 
 async function exists(p: string): Promise<boolean> {

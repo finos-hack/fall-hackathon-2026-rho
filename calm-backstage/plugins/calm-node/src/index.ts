@@ -56,6 +56,7 @@ export {
   bundleRef,
   checkBundle,
   extractBundle,
+  headBundleDigest,
   listRepositories,
   listTags,
   packBundle,
