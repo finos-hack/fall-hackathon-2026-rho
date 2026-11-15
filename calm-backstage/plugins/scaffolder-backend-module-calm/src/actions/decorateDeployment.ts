@@ -1,5 +1,8 @@
 import fs from 'node:fs/promises';
-import { resolveSafeChildPath } from '@backstage/backend-plugin-api';
+import {
+  LoggerService,
+  resolveSafeChildPath,
+} from '@backstage/backend-plugin-api';
 import { createTemplateAction } from '@backstage/plugin-scaffolder-node';
 import {
   CalmHubWriteClient,
@@ -21,6 +24,132 @@ export function deployedNodes(
     : [];
   const ids = new Set(nodes.map(n => n?.['unique-id']));
   return workloads.filter(w => ids.has(w));
+}
+
+/** What `recordDeployment` writes to the Hub: the inputs of `calm:decorate:deployment`, plus where the run is. */
+export interface DeploymentRecord {
+  hubNamespace: string;
+  architecture: string;
+  version: string;
+  name: string;
+  cluster: string;
+  namespace: string;
+  workloads: string[];
+  architecturePath?: string;
+  startTime: string;
+  endTime?: string;
+  status?: DeploymentStatus;
+  gitRepo?: string;
+  gitCommit?: string;
+  /** Replaces the default notes (which deployed where). */
+  notes?: string;
+  /** The task's workspace, which `architecturePath` is relative to. */
+  workspacePath: string;
+  /** Makes the decorator's unique-id; the time when the action runs outside a task. */
+  taskId?: string;
+}
+
+/**
+ * Writes one deployment decorator to CALM Hub and reads it back the way the architecture card does. Throws when no
+ * workload is a node of the architecture, or when the Hub does not return what it stored.
+ */
+export async function recordDeployment(
+  hub: CalmHubWriteClient,
+  appBaseUrl: string,
+  input: DeploymentRecord,
+  logger: LoggerService,
+): Promise<{ id: number; uniqueId: string; target: string; url: string }> {
+  const { hubNamespace, architecture, version, name, cluster, namespace } =
+    input;
+  const status: DeploymentStatus = input.status ?? 'completed';
+  const target = architectureVersionPath(hubNamespace, architecture, version);
+
+  const file = resolveSafeChildPath(
+    input.workspacePath,
+    input.architecturePath ?? 'architecture.json',
+  );
+  const doc = JSON.parse(await fs.readFile(file, 'utf-8'));
+  const appliesTo = deployedNodes(input.workloads, doc);
+  const notNodes = input.workloads.filter(w => !appliesTo.includes(w));
+  if (notNodes.length) {
+    logger.warn(
+      `Not nodes of the architecture, so left out of applies-to: ${notNodes.join(
+        ', ',
+      )}`,
+    );
+  }
+  if (!appliesTo.length) {
+    throw new Error(
+      `None of the workloads (${input.workloads.join(
+        ', ',
+      )}) is a node of the architecture, so there is nothing for the decorator to apply to`,
+    );
+  }
+
+  // CALM Hub's UI finds an architecture's decorators by its numeric id, so name that target as well.
+  const numericId = (await hub.architectures(hubNamespace)).find(
+    a => a.customId === architecture,
+  )?.numericId;
+  if (numericId === undefined) {
+    logger.warn(
+      `CALM Hub lists no numeric id for ${hubNamespace}/${architecture}, so its Deployments tab will not show this deployment`,
+    );
+  }
+  const extraTargets =
+    numericId === undefined
+      ? []
+      : [architectureVersionUiTarget(hubNamespace, numericId, version)];
+
+  // One decorator per run: the task id, or the time when the action runs outside a task.
+  const uniqueId = `${name}-${input.taskId ?? Date.now()}`;
+  const decorator = deploymentDecorator({
+    uniqueId,
+    target,
+    extraTargets,
+    appliesTo,
+    status,
+    startTime: input.startTime,
+    endTime: input.endTime,
+    details:
+      input.gitRepo && input.gitCommit
+        ? `${input.gitRepo}/commit/${input.gitCommit}`
+        : `${appBaseUrl.replace(
+            /\/+$/,
+            '',
+          )}/catalog/default/component/${encodeURIComponent(name)}`,
+    // The workloads are in applies-to.
+    notes:
+      input.notes ??
+      (input.gitRepo && input.gitCommit
+        ? `Deployed by Flux from ${input.gitRepo} at ${input.gitCommit.slice(
+            0,
+            12,
+          )} to the cluster ${cluster}, namespace ${namespace}.`
+        : `Deployed by Backstage to the cluster ${cluster}, namespace ${namespace}.`),
+  });
+  const id = await hub.createDecorator(hubNamespace, decorator);
+  // Read it back the way the architecture card does: by the target filter, then by id.
+  const found = await hub.listDecorators(hubNamespace, {
+    target,
+    type: DEPLOYMENT_DECORATOR_TYPE,
+  });
+  const back = await hub.getDecorator(hubNamespace, id);
+  if (!found.includes(id) || back.uniqueId !== uniqueId) {
+    throw new Error(
+      `CALM Hub stored the decorator ${id}, but it is not read back for the target ${target} (found ${JSON.stringify(
+        found,
+      )}, unique-id ${JSON.stringify(back.uniqueId)})`,
+    );
+  }
+  const url = `${hub.baseUrl}/api/calm/namespaces/${encodeURIComponent(
+    hubNamespace,
+  )}/decorators/${id}`;
+  logger.info(
+    `Recorded the deployment in CALM Hub as decorator ${id} (${uniqueId}) on ${target}, applies to ${appliesTo.join(
+      ', ',
+    )}: ${url}`,
+  );
+  return { id, uniqueId, target, url };
 }
 
 /**
@@ -116,105 +245,20 @@ export function createCalmDecorateDeploymentAction(options: {
       },
     },
     async handler(ctx) {
-      const { hubNamespace, architecture, version, name, cluster, namespace } =
-        ctx.input;
-      const status: DeploymentStatus = ctx.input.status ?? 'completed';
-      const target = architectureVersionPath(
-        hubNamespace,
-        architecture,
-        version,
+      const result = await recordDeployment(
+        hub,
+        options.appBaseUrl,
+        {
+          ...ctx.input,
+          workspacePath: ctx.workspacePath,
+          taskId: ctx.task?.id,
+        },
+        ctx.logger,
       );
-
-      const file = resolveSafeChildPath(
-        ctx.workspacePath,
-        ctx.input.architecturePath ?? 'architecture.json',
-      );
-      const doc = JSON.parse(await fs.readFile(file, 'utf-8'));
-      const appliesTo = deployedNodes(ctx.input.workloads, doc);
-      const notNodes = ctx.input.workloads.filter(w => !appliesTo.includes(w));
-      if (notNodes.length) {
-        ctx.logger.warn(
-          `Not nodes of the architecture, so left out of applies-to: ${notNodes.join(
-            ', ',
-          )}`,
-        );
-      }
-      if (!appliesTo.length) {
-        throw new Error(
-          `None of the workloads (${ctx.input.workloads.join(
-            ', ',
-          )}) is a node of the architecture, so there is nothing for the decorator to apply to`,
-        );
-      }
-
-      // CALM Hub's UI finds an architecture's decorators by its numeric id, so name that target as well.
-      const numericId = (await hub.architectures(hubNamespace)).find(
-        a => a.customId === architecture,
-      )?.numericId;
-      if (numericId === undefined) {
-        ctx.logger.warn(
-          `CALM Hub lists no numeric id for ${hubNamespace}/${architecture}, so its Deployments tab will not show this deployment`,
-        );
-      }
-      const extraTargets =
-        numericId === undefined
-          ? []
-          : [architectureVersionUiTarget(hubNamespace, numericId, version)];
-
-      // One decorator per run: the task id, or the time when the action runs outside a task.
-      const uniqueId = `${name}-${ctx.task?.id ?? Date.now()}`;
-      const decorator = deploymentDecorator({
-        uniqueId,
-        target,
-        extraTargets,
-        appliesTo,
-        status,
-        startTime: ctx.input.startTime,
-        endTime: ctx.input.endTime,
-        details:
-          ctx.input.gitRepo && ctx.input.gitCommit
-            ? `${ctx.input.gitRepo}/commit/${ctx.input.gitCommit}`
-            : `${options.appBaseUrl.replace(
-                /\/+$/,
-                '',
-              )}/catalog/default/component/${encodeURIComponent(name)}`,
-        // The workloads are in applies-to.
-        notes:
-          ctx.input.gitRepo && ctx.input.gitCommit
-            ? `Deployed by Flux from ${
-                ctx.input.gitRepo
-              } at ${ctx.input.gitCommit.slice(
-                0,
-                12,
-              )} to the cluster ${cluster}, namespace ${namespace}.`
-            : `Deployed by Backstage to the cluster ${cluster}, namespace ${namespace}.`,
-      });
-      ctx.output('uniqueId', uniqueId);
-      ctx.output('target', target);
-      const id = await hub.createDecorator(hubNamespace, decorator);
-      // Read it back the way the architecture card does: by the target filter, then by id.
-      const found = await hub.listDecorators(hubNamespace, {
-        target,
-        type: DEPLOYMENT_DECORATOR_TYPE,
-      });
-      const back = await hub.getDecorator(hubNamespace, id);
-      if (!found.includes(id) || back.uniqueId !== uniqueId) {
-        throw new Error(
-          `CALM Hub stored the decorator ${id}, but it is not read back for the target ${target} (found ${JSON.stringify(
-            found,
-          )}, unique-id ${JSON.stringify(back.uniqueId)})`,
-        );
-      }
-      const url = `${hub.baseUrl}/api/calm/namespaces/${encodeURIComponent(
-        hubNamespace,
-      )}/decorators/${id}`;
-      ctx.logger.info(
-        `Recorded the deployment in CALM Hub as decorator ${id} (${uniqueId}) on ${target}, applies to ${appliesTo.join(
-          ', ',
-        )}: ${url}`,
-      );
-      ctx.output('id', id);
-      ctx.output('url', url);
+      ctx.output('uniqueId', result.uniqueId);
+      ctx.output('target', result.target);
+      ctx.output('id', result.id);
+      ctx.output('url', result.url);
     },
   });
 }
