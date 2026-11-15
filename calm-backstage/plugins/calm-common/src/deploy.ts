@@ -23,6 +23,24 @@ export const CALM_KUBERNETES = {
   protocolAnnotation: 'calm.finos.org/protocol',
 } as const;
 
+/** The Namespace of a service: found again by the Kubernetes plugin's label, and marked as made for this service. */
+export function namespaceManifest(
+  name: string,
+  namespace: string,
+): { apiVersion: 'v1'; kind: 'Namespace'; metadata: Record<string, unknown> } {
+  return {
+    apiVersion: 'v1',
+    kind: 'Namespace',
+    metadata: {
+      name: namespace,
+      labels: {
+        [KUBERNETES_ID_LABEL]: name,
+        [CALM_KUBERNETES.serviceLabel]: name,
+      },
+    },
+  };
+}
+
 const DNS_LABEL = /^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/;
 
 /** True for a Kubernetes DNS label: lower-case letters, digits and hyphens, alphanumeric at both ends, at most 63. */

@@ -317,11 +317,29 @@ describe('calm:upgrade:merge', () => {
     expect(await git(dir, ['rev-parse', '--abbrev-ref', 'HEAD'])).toBe('main');
     expect(m.outputs.commit).toBe(await git(remote, ['rev-parse', 'main']));
     expect(await git(dir, ['branch', '--list'])).toBe('* main');
+    // Flux's service account cannot apply a Namespace: calm:deploy:gitops applies it, not the overlay.
+    expect(
+      await git(remote, [
+        'ls-tree',
+        '--name-only',
+        'main',
+        'deploy/k8s-overlay/',
+      ]),
+    ).toBe('deploy/k8s-overlay/kustomization.yaml');
+    expect(
+      YAML.parse(
+        await git(remote, [
+          'show',
+          'main:deploy/k8s-overlay/kustomization.yaml',
+        ]),
+      ).resources,
+    ).toEqual(['../k8s']);
     // The overlay on main is what calm:deploy:gitops writes for the same image: it will make no further commit.
     await writeOverlay(
       dir,
       { name: 'orders', namespace: 'calm-orders', image: 'orders:abc' },
       GITOPS_OVERLAY_HEADER,
+      { withNamespace: false },
     );
     expect(await git(dir, ['status', '--porcelain'])).toBe('');
   });

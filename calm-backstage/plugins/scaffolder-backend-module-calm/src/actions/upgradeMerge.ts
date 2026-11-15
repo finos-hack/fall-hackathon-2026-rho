@@ -101,6 +101,7 @@ export function createCalmUpgradeMergeAction(options: {
         dir,
         { name, namespace: deployNamespace(prefix, name), image },
         GITOPS_OVERLAY_HEADER,
+        { withNamespace: false },
       );
       await gitCommitAll(dir, `Deploy ${image}`, git);
       const diffStat = await gitDiffStat(dir, gitops.branch, git);

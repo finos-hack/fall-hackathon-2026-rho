@@ -3,6 +3,8 @@
  * local cluster (source- and kustomize-controller, installed by `yarn k8s:up`).
  */
 
+import { CALM_KUBERNETES, namespaceManifest } from './deploy';
+
 export const FLUX_NAMESPACE = 'flux-system';
 /** The folder of a service's repository that Flux applies. */
 export const GITOPS_PATH = './deploy/k8s-overlay';
@@ -16,15 +18,20 @@ export const fluxObjectName = (service: string) => `calm-${service}`;
 export const gitopsAnnotationValue = (service: string) =>
   `${FLUX_NAMESPACE}/${fluxObjectName(service)}`;
 
-/** A `GitRepository` and a `Kustomization` that apply `path` of `repoUrl` at `branch`, pruning what is removed. */
+/**
+ * A `GitRepository` and a `Kustomization` that apply `path` of `repoUrl` at `branch` into `namespace`, pruning what is
+ * removed. The Kustomization applies as the service account `calm-<name>` that `fluxTenantObjects` creates, not as
+ * the kustomize-controller's own cluster-admin account.
+ */
 export function fluxObjects(o: {
   name: string;
+  namespace: string;
   repoUrl: string;
   branch: string;
   path?: string;
 }): object[] {
   const name = fluxObjectName(o.name);
-  const labels = { 'calm.finos.org/service': o.name };
+  const labels = { [CALM_KUBERNETES.serviceLabel]: o.name };
   return [
     {
       apiVersion: 'source.toolkit.fluxcd.io/v1',
@@ -43,7 +50,56 @@ export function fluxObjects(o: {
         wait: false,
         timeout: '3m',
         sourceRef: { kind: 'GitRepository', name },
+        serviceAccountName: name,
+        targetNamespace: o.namespace,
       },
+    },
+  ];
+}
+
+/** Flux annotation that keeps an object when it leaves a pruned Kustomization's inventory. */
+const FLUX_PRUNE_ANNOTATION = 'kustomize.toolkit.fluxcd.io/prune';
+
+/**
+ * What a service's Kustomization needs before Flux can apply it, in apply order: the service's Namespace, the
+ * service account `calm-<name>` in `flux-system` (Flux impersonates an account in the Kustomization's own namespace)
+ * and a RoleBinding of the built-in ClusterRole `admin` to it in the service's namespace. `admin` covers namespaced
+ * objects only, so a push to the service's repository cannot touch other namespaces or cluster-scoped objects.
+ *
+ * The service account cannot create a Namespace, so the Namespace is applied here and not from Git. It is marked
+ * prune-disabled: a service deployed before this change has it in its Kustomization's inventory, and the push that
+ * drops it from the overlay would otherwise make Flux delete the namespace and everything in it.
+ */
+export function fluxTenantObjects(o: {
+  name: string;
+  namespace: string;
+}): object[] {
+  const name = fluxObjectName(o.name);
+  const labels = { [CALM_KUBERNETES.serviceLabel]: o.name };
+  const ns = namespaceManifest(o.name, o.namespace);
+  return [
+    {
+      ...ns,
+      metadata: {
+        ...ns.metadata,
+        annotations: { [FLUX_PRUNE_ANNOTATION]: 'disabled' },
+      },
+    },
+    {
+      apiVersion: 'v1',
+      kind: 'ServiceAccount',
+      metadata: { name, namespace: FLUX_NAMESPACE, labels },
+    },
+    {
+      apiVersion: 'rbac.authorization.k8s.io/v1',
+      kind: 'RoleBinding',
+      metadata: { name, namespace: o.namespace, labels },
+      roleRef: {
+        apiGroup: 'rbac.authorization.k8s.io',
+        kind: 'ClusterRole',
+        name: 'admin',
+      },
+      subjects: [{ kind: 'ServiceAccount', name, namespace: FLUX_NAMESPACE }],
     },
   ];
 }

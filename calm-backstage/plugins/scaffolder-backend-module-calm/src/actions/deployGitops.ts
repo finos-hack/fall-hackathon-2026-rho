@@ -10,6 +10,7 @@ import {
   deployNamespace,
   fluxObjectName,
   fluxObjects,
+  fluxTenantObjects,
   readFluxStatus,
   revisionHasCommit,
 } from '@internal/backstage-plugin-calm-common';
@@ -101,10 +102,29 @@ export async function waitForKustomization(
   }
 }
 
+/** Applies `objects` with `kubectl apply -f` from a temporary file: they are cluster state, not part of the repository. */
+async function applyObjects(
+  kubectl: Kubectl,
+  objects: object[],
+): Promise<void> {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'calm-flux-'));
+  try {
+    const file = path.join(tmp, 'objects.yaml');
+    await fs.writeFile(
+      file,
+      objects.map(o => `---\n${YAML.stringify(o)}`).join(''),
+    );
+    await kubectl(['apply', '-f', file]);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+}
+
 /**
  * `calm:deploy:gitops`: deploys a service through Git. Writes the overlay (namespace and image) in the working copy,
- * commits and pushes it when it changed, makes sure Flux has a GitRepository and Kustomization for the service, asks
- * them to reconcile now, waits until Flux has applied that commit, then waits for the rollouts.
+ * commits it when it changed, applies the Namespace and the service account Flux applies the overlay as, pushes,
+ * makes sure Flux has a GitRepository and Kustomization for the service, asks them to reconcile now, waits until
+ * Flux has applied that commit, then waits for the rollouts.
  */
 export function createCalmDeployGitopsAction(options: {
   settings?: KubernetesDeploySettings;
@@ -201,6 +221,7 @@ export function createCalmDeployGitopsAction(options: {
         dir,
         { name, namespace, image },
         GITOPS_OVERLAY_HEADER,
+        { withNamespace: false },
       );
       // From now on the service is deployed from Git: the catalog and the upgrade Template find it by this.
       const catalogInfo = path.join(dir, CATALOG_INFO_FILE);
@@ -217,23 +238,21 @@ export function createCalmDeployGitopsAction(options: {
           ? `Committed the overlay for ${image}: ${commit}`
           : `The overlay already deploys ${image}; deploying ${commit}`,
       );
+      // Before the push: the pushed overlay no longer holds the Namespace, and for a service deployed before that
+      // change, Flux would prune it unless it is already marked prune-disabled.
+      await applyObjects(kubectl, fluxTenantObjects({ name, namespace }));
       const repo = serviceRepository(gitops, name);
       await gitPush(dir, repo.pushUrl, gitops.branch, gitops.auth, git);
 
-      // The Flux objects are cluster state, not part of the service's repository.
-      const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'calm-flux-'));
-      try {
-        const file = path.join(tmp, 'flux.yaml');
-        await fs.writeFile(
-          file,
-          fluxObjects({ name, repoUrl: repo.clusterUrl, branch: gitops.branch })
-            .map(o => `---\n${YAML.stringify(o)}`)
-            .join(''),
-        );
-        await kubectl(['apply', '-f', file]);
-      } finally {
-        await fs.rm(tmp, { recursive: true, force: true });
-      }
+      await applyObjects(
+        kubectl,
+        fluxObjects({
+          name,
+          namespace,
+          repoUrl: repo.clusterUrl,
+          branch: gitops.branch,
+        }),
+      );
       const fluxName = fluxObjectName(name);
       await kubectl([
         '-n',

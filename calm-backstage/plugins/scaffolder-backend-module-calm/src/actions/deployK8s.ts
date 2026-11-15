@@ -6,6 +6,7 @@ import {
   CALM_KUBERNETES,
   KUBERNETES_ID_LABEL,
   deployNamespace,
+  namespaceManifest,
 } from '@internal/backstage-plugin-calm-common';
 import {
   KubernetesDeploySettings,
@@ -38,37 +39,25 @@ export function parseImage(image: string): { newName: string; newTag: string } {
   return { newName, newTag };
 }
 
-/** The Namespace of a service: found again by the Kubernetes plugin's label, and marked as made for this service. */
-export function namespaceManifest(name: string, namespace: string): object {
-  return {
-    apiVersion: 'v1',
-    kind: 'Namespace',
-    metadata: {
-      name: namespace,
-      labels: {
-        [KUBERNETES_ID_LABEL]: name,
-        [CALM_KUBERNETES.serviceLabel]: name,
-      },
-    },
-  };
-}
-
 /**
  * The overlay over the bundle's kustomize base: the namespace, the image built for this service in place of the
  * bundle's placeholder, and the `backstage.io/kubernetes-id` label on every object and pod template (not on
- * selectors, so the bundle's own selectors and NetworkPolicy peers stay as rendered).
+ * selectors, so the bundle's own selectors and NetworkPolicy peers stay as rendered). It lists the Namespace object
+ * (`namespace.yaml`) unless `withNamespace` is false.
  */
 export function overlayKustomization(opts: {
   name: string;
   namespace: string;
   image: string;
+  withNamespace?: boolean;
 }): object {
   const { newName, newTag } = parseImage(opts.image);
+  const base = `../${path.posix.basename(BASE_DIR)}`;
   return {
     apiVersion: 'kustomize.config.k8s.io/v1beta1',
     kind: 'Kustomization',
     namespace: opts.namespace,
-    resources: [NAMESPACE_FILE, `../${path.posix.basename(BASE_DIR)}`],
+    resources: opts.withNamespace === false ? [base] : [NAMESPACE_FILE, base],
     images: [{ name: PLACEHOLDER_IMAGE, newName, newTag }],
     labels: [
       { pairs: { [KUBERNETES_ID_LABEL]: opts.name }, includeTemplates: true },
@@ -124,22 +113,32 @@ export async function requireBase(dir: string): Promise<void> {
 
 /**
  * Writes `deploy/k8s-overlay` (the namespace and the kustomization over the bundle's base) in a published folder and
- * returns its path. `header` is the comment line at the top of the kustomization.
+ * returns its path. `header` is the comment line at the top of the kustomization. With `withNamespace: false` the
+ * overlay leaves the Namespace out and a `namespace.yaml` an earlier deploy wrote is deleted: Flux applies the
+ * overlay as a service account that cannot create Namespaces, so `calm:deploy:gitops` applies it instead.
  */
 export async function writeOverlay(
   dir: string,
   opts: { name: string; namespace: string; image: string },
   header: string,
+  { withNamespace = true }: { withNamespace?: boolean } = {},
 ): Promise<string> {
   const overlayDir = path.join(dir, OVERLAY_DIR);
   await fs.mkdir(overlayDir, { recursive: true });
-  await fs.writeFile(
-    path.join(overlayDir, NAMESPACE_FILE),
-    YAML.stringify(namespaceManifest(opts.name, opts.namespace)),
-  );
+  const namespaceFile = path.join(overlayDir, NAMESPACE_FILE);
+  if (withNamespace) {
+    await fs.writeFile(
+      namespaceFile,
+      YAML.stringify(namespaceManifest(opts.name, opts.namespace)),
+    );
+  } else {
+    await fs.rm(namespaceFile, { force: true });
+  }
   await fs.writeFile(
     path.join(overlayDir, 'kustomization.yaml'),
-    `${header}\n${YAML.stringify(overlayKustomization(opts))}`,
+    `${header}\n${YAML.stringify(
+      overlayKustomization({ ...opts, withNamespace }),
+    )}`,
   );
   return overlayDir;
 }
