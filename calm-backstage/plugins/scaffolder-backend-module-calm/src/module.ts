@@ -121,7 +121,12 @@ export const scaffolderModuleCalm = createBackendModule({
           }),
           createCalmClusterCheckAction({ settings: kubernetes }),
           createCalmImageBuildAction({ settings: kubernetes, localDir }),
-          createCalmDeployK8sAction({ settings: kubernetes, localDir }),
+          createCalmDeployK8sAction({
+            settings: kubernetes,
+            localDir,
+            hub,
+            appBaseUrl: config.getString('app.baseUrl'),
+          }),
           createCalmDecorateDeploymentAction({
             hub,
             appBaseUrl: config.getString('app.baseUrl'),
@@ -163,6 +168,8 @@ export const scaffolderModuleCalm = createBackendModule({
             settings: kubernetes,
             gitops,
             localDir,
+            hub,
+            appBaseUrl: config.getString('app.baseUrl'),
           }),
           createCalmRegisterLocalAction({ catalog, auth, localDir }),
         );

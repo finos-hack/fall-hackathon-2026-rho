@@ -706,6 +706,14 @@ function publishSteps(
               dir: '${{ steps.publish.output.path }}',
               name: '${{ parameters.name }}',
               image: '${{ steps.build.output.image }}',
+              // A failed deployment records itself in the Hub: the decorate step below runs only after a success.
+              record: {
+                hubNamespace: '${{ steps["register-hub"].output.namespace }}',
+                architecture:
+                  '${{ steps["register-hub"].output.architecture }}',
+                version: '${{ steps["register-hub"].output.version }}',
+                architecturePath: '${{ steps.fill.output.architecturePath }}',
+              },
             },
           },
           {
@@ -877,6 +885,13 @@ export function upgradeTemplateEntity(hubUrl: string): Entity {
             name: '${{ steps.render.output.name }}',
             image:
               '${{ steps.build.output.image if steps.render.output.codeChanged else steps.render.output.currentImage }}',
+            // A failed deployment records itself in the Hub: the decorate step below runs only after a success.
+            record: {
+              hubNamespace: '${{ steps.render.output.hubNamespace }}',
+              architecture: '${{ steps.render.output.architecture }}',
+              version: '${{ steps.render.output.architectureVersion }}',
+              architecturePath: '${{ steps.render.output.architecturePath }}',
+            },
           },
         },
         {
