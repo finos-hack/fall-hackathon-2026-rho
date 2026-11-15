@@ -1,0 +1,79 @@
+# Deployment rules for {{serviceName}}
+
+Rendered by **{{rules.name}} {{rules.version}}** from the CALM architecture alone. The starter in the folder above
+renders the code; these rules decide how it runs. Upgrading the rules re-renders this folder only.
+
+{{#if hardening}}
+These rules add resource limits, liveness probes, no service-account tokens in pods and the
+`app.kubernetes.io/*` labels.
+{{else}}
+These rules set resource requests and readiness probes. Version 1.1.0 adds limits, liveness probes and more.
+{{/if}}
+
+## The starter contract
+
+The app container (`{{appName}}`) runs the image built from the starter's `Dockerfile` (called `calm-service` here; the
+overlay names the image built for the service). It must listen on `$PORT` ({{servicePort}}) and answer `GET /health`.
+It is told:
+
+| Variable | Value |
+|---|---|
+{{#each workloads}}
+{{#if isApp}}
+{{#each env}}
+| `{{name}}` | `{{{value}}}` |
+{{/each}}
+{{/if}}
+{{/each}}
+
+## Nodes in the cluster
+
+| Name | Node | Technology | Image | Service port | Pod port |
+|---|---|---|---|---|---|
+{{#each workloads}}
+| `{{k8sName}}` | {{name}} | {{{technology}}} | `{{image}}` | {{servicePort}} | {{containerPort}} |
+{{/each}}
+{{#if renamedWorkloads.length}}
+
+These nodes' unique-ids are not valid Kubernetes names, so they run under a converted name: lower case, other
+characters as `-`, `x-` in front when it would not start with a letter, and a short hash when two ids would get the
+same name, the id is too long or it is a word YAML reads as a boolean or null. Their objects keep the unique-id in the
+`calm.finos.org/unique-id` annotation.
+
+| Node unique-id | Name |
+|---|---|
+{{#each renamedWorkloads}}
+| `{{id}}` | `{{k8sName}}` |
+{{/each}}
+{{/if}}
+
+The gateway's external address in the architecture is `{{gatewayHost}}:{{gatewayPort}}`. Inside the cluster it is
+`{{gatewayNode}}:{{gatewayServicePort}}`.
+
+## Connections
+
+Every pod is denied all traffic except DNS and these relationships.
+
+| Relationship | Source | Destination | Protocol | Pod port | Network policy |
+|---|---|---|---|---|---|
+{{#each connects}}
+| `{{id}}` | `{{source}}` | `{{destination}}` | {{protocol}} | {{port}} | {{rendered}} |
+{{/each}}
+{{#if renamedPolicies.length}}
+
+These relationships' unique-ids are not valid Kubernetes names, so their policies are named after a converted id (as
+above, with `-egress` or `-ingress` added). The policies keep the unique-id in the `calm.finos.org/relationship`
+annotation.
+
+| Relationship | Policies named |
+|---|---|
+{{#each renamedPolicies}}
+| `{{relationship}}` | `{{prefix}}-…` |
+{{/each}}
+{{/if}}
+
+## Provenance
+
+- Architecture: {{architectureId}}
+- Pattern: {{patternId}}
+- Deployment rules: {{rules.name}} {{rules.version}}

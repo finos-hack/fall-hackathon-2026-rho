@@ -1010,6 +1010,16 @@ describe('deployedNodes', () => {
     ).toEqual(['api-gateway', 'web-service']);
     expect(deployedNodes(['web-service'], {})).toEqual([]);
   });
+
+  it('lists a node once when two Deployments were rendered from it', () => {
+    // E.g. a converted name gained a hash and the Deployment with the earlier name remains (calm:deploy:k8s does not
+    // prune; Flux prunes on its next reconcile).
+    expect(
+      deployedNodes(['Orders_API', 'Orders_API', 'api-gateway'], {
+        nodes: [{ 'unique-id': 'Orders_API' }, { 'unique-id': 'api-gateway' }],
+      }),
+    ).toEqual(['Orders_API', 'api-gateway']);
+  });
 });
 
 describe('serviceEntity: Hub annotations', () => {

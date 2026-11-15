@@ -488,7 +488,7 @@ describe('templateEntity: CALM Hub', () => {
         name: '${{ parameters.name }}',
         cluster: '${{ steps.deploy.output.cluster }}',
         namespace: '${{ steps.deploy.output.namespace }}',
-        workloads: '${{ steps.deploy.output.deployments }}',
+        workloads: '${{ steps.deploy.output.nodes }}',
         startTime: '${{ steps.deploy.output.startTime }}',
         endTime: '${{ steps.deploy.output.endTime }}',
         status: 'completed',

@@ -21,6 +21,7 @@ let root: string;
 let localDir: string;
 let remoteBase: string;
 let workspace: string;
+let kubeconfig: string;
 
 beforeEach(async () => {
   root = await fs.mkdtemp(path.join(os.tmpdir(), 'calm-upgrade-'));
@@ -29,6 +30,8 @@ beforeEach(async () => {
   workspace = path.join(root, 'ws');
   await fs.mkdir(path.join(remoteBase, 'calm-services'), { recursive: true });
   await fs.mkdir(workspace);
+  kubeconfig = path.join(root, 'kubeconfig');
+  await fs.writeFile(kubeconfig, '');
 });
 afterEach(async () => {
   await fs.rm(root, { recursive: true, force: true });
@@ -42,6 +45,40 @@ const gitops = () => ({
   branch: 'main',
   auth: { username: 'calm', password: 'pw' },
 });
+const settings = () => ({
+  kubeconfig,
+  context: 'calm-backstage',
+  minikubeProfile: 'calm-backstage',
+  namespacePrefix: 'calm-',
+});
+
+/** A kubectl standing in for the cluster: records what each `apply` applied, its arguments before `-f`, and the remote's branches then. */
+function fakeKubectl(remote: string, namespace?: any) {
+  const applied: { objects: any[]; flags: string[]; remoteBranches: string }[] =
+    [];
+  const kubectl = async (args: string[]) => {
+    if (args[0] === 'get' && args[1] === 'namespace') {
+      return namespace ? JSON.stringify(namespace) : '';
+    }
+    if (args[0] === 'apply') {
+      const f = args.indexOf('-f');
+      applied.push({
+        objects: YAML.parseAllDocuments(await fs.readFile(args[f + 1], 'utf-8'))
+          .map(d => d.toJSON())
+          .filter(Boolean),
+        flags: args.slice(1, f),
+        remoteBranches: await git(remote, [
+          'for-each-ref',
+          '--format=%(refname:short) %(objectname)',
+          'refs/heads',
+        ]),
+      });
+    }
+    return '';
+  };
+  return { applied, kubectl };
+}
+
 const ctx = (input: object) => {
   const outputs: Record<string, any> = {};
   return {
@@ -300,8 +337,10 @@ describe('calm:upgrade:merge', () => {
     });
     await createCalmUpgradeMergeAction({
       gitops: gitops(),
+      settings: settings(),
       localDir,
       gitea,
+      kubectl: () => fakeKubectl(remote).kubectl,
       mergeRetryMs: 1,
     }).handler(m);
     expect(calls[0][3]).toMatchObject({
@@ -317,13 +356,137 @@ describe('calm:upgrade:merge', () => {
     expect(await git(dir, ['rev-parse', '--abbrev-ref', 'HEAD'])).toBe('main');
     expect(m.outputs.commit).toBe(await git(remote, ['rev-parse', 'main']));
     expect(await git(dir, ['branch', '--list'])).toBe('* main');
+    // Flux's service account cannot apply a Namespace: calm:deploy:gitops applies it, not the overlay.
+    expect(
+      await git(remote, [
+        'ls-tree',
+        '--name-only',
+        'main',
+        'deploy/k8s-overlay/',
+      ]),
+    ).toBe('deploy/k8s-overlay/kustomization.yaml');
+    expect(
+      YAML.parse(
+        await git(remote, [
+          'show',
+          'main:deploy/k8s-overlay/kustomization.yaml',
+        ]),
+      ).resources,
+    ).toEqual(['../k8s']);
     // The overlay on main is what calm:deploy:gitops writes for the same image: it will make no further commit.
     await writeOverlay(
       dir,
       { name: 'orders', namespace: 'calm-orders', image: 'orders:abc' },
       GITOPS_OVERLAY_HEADER,
+      { withNamespace: false },
     );
     expect(await git(dir, ['status', '--porcelain'])).toBe('');
+  });
+
+  it('applies the prune-disabled namespace and the Flux service account before it pushes the branch that drops namespace.yaml and merges', async () => {
+    const { dir, remote } = await service();
+    // Deployed before Flux had a service account: the overlay on main holds the Namespace.
+    await writeOverlay(
+      dir,
+      { name: 'orders', namespace: 'calm-orders', image: 'orders:abc' },
+      GITOPS_OVERLAY_HEADER,
+    );
+    await gitCommitAll(dir, 'Deploy orders:abc');
+    await gitPush(dir, `file://${remote}`, 'main');
+    const before = await git(remote, ['rev-parse', 'main']);
+    const r = ctx({ entityRef: 'component:default/orders' });
+    await renderAction([
+      meta('node-service', '1.0.0', 'starter'),
+      meta('k8s-deploy', '1.0.0', 'deployment'),
+      meta('k8s-deploy', '1.1.0', 'deployment'),
+    ]).handler(r);
+    const fake = fakeKubectl(remote);
+    const gitea = {
+      findOpenPullRequest: async () => undefined,
+      createPullRequest: async () => ({ number: 7, url: 'u' }),
+      mergePullRequest: async () => {
+        await git(remote, [
+          'update-ref',
+          'refs/heads/main',
+          await git(remote, ['rev-parse', r.outputs.branch]),
+        ]);
+      },
+    } as any;
+    await createCalmUpgradeMergeAction({
+      gitops: gitops(),
+      settings: settings(),
+      localDir,
+      gitea,
+      kubectl: () => fake.kubectl,
+    }).handler(
+      ctx({
+        dir,
+        name: 'orders',
+        branch: r.outputs.branch,
+        image: 'orders:def',
+        summary: 's',
+      }),
+    );
+    expect(fake.applied).toHaveLength(1);
+    const [tenant] = fake.applied;
+    expect(tenant.objects.map(o => o.kind)).toEqual([
+      'Namespace',
+      'ServiceAccount',
+      'RoleBinding',
+      'ClusterRole',
+      'ClusterRoleBinding',
+    ]);
+    expect(tenant.objects[0].metadata).toMatchObject({
+      name: 'calm-orders',
+      annotations: { 'kustomize.toolkit.fluxcd.io/prune': 'disabled' },
+    });
+    // Server-side apply under its own field manager: Flux takes over fields owned by kubectl's managers.
+    expect(tenant.flags).toEqual([
+      '--server-side',
+      '--field-manager=calm-backstage',
+      '--force-conflicts',
+    ]);
+    // Applied while the remote held only the old main: before the branch was pushed and merged.
+    expect(tenant.remoteBranches).toBe(`main ${before}`);
+    expect(
+      await git(remote, [
+        'ls-tree',
+        '--name-only',
+        'main',
+        'deploy/k8s-overlay/',
+      ]),
+    ).toBe('deploy/k8s-overlay/kustomization.yaml');
+  });
+
+  it('refuses a namespace owned by another service before it pushes', async () => {
+    const { dir, remote } = await service();
+    const r = ctx({ entityRef: 'component:default/orders' });
+    await renderAction([
+      meta('node-service', '1.0.0', 'starter'),
+      meta('k8s-deploy', '1.0.0', 'deployment'),
+      meta('k8s-deploy', '1.1.0', 'deployment'),
+    ]).handler(r);
+    const fake = fakeKubectl(remote, {
+      metadata: { labels: { 'calm.finos.org/service': 'billing' } },
+    });
+    await expect(
+      createCalmUpgradeMergeAction({
+        gitops: gitops(),
+        settings: settings(),
+        localDir,
+        gitea: {} as any,
+        kubectl: () => fake.kubectl,
+      }).handler(
+        ctx({
+          dir,
+          name: 'orders',
+          branch: r.outputs.branch,
+          image: 'orders:def',
+        }),
+      ),
+    ).rejects.toThrow(/belongs to the service "billing"/);
+    expect(fake.applied).toEqual([]);
+    expect(await git(remote, ['branch', '--list'])).toBe('* main');
   });
 });
 
@@ -375,8 +538,10 @@ describe('calm:upgrade:render refusals', () => {
     await expect(
       createCalmUpgradeMergeAction({
         gitops: gitops(),
+        settings: settings(),
         localDir,
         gitea: failing,
+        kubectl: () => fakeKubectl(remote).kubectl,
       }).handler(
         ctx({
           dir,
@@ -409,8 +574,10 @@ describe('calm:upgrade:render refusals', () => {
     });
     await createCalmUpgradeMergeAction({
       gitops: gitops(),
+      settings: settings(),
       localDir,
       gitea: ok,
+      kubectl: () => fakeKubectl(remote).kubectl,
     }).handler(m);
     expect(m.outputs.prUrl).toBe('u');
     expect(

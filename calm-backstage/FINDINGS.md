@@ -144,7 +144,10 @@ build of Quarkus 3.33.4 and 3.40.1 (BOM `com.redhat.quarkus.platform:quarkus-bom
   source and kustomize controllers. Without the notification controller, each controller retries every event five
   times (about 15 s per reconcile) unless `--events-addr` is removed; it is.
 - **Flux in minikube reaches a Compose container through `host.minikube.internal`** and the published port; the two
-  are on different Docker networks. So Gitea must listen on the host's interfaces, not only on loopback.
+  are on different Docker networks. With Docker Desktop on macOS that name is the Docker Desktop host address, which
+  also reaches a port published on 127.0.0.1. Where minikube runs on Linux it is expected to be the gateway of
+  minikube's network, which does not (seen inside Docker Desktop's VM), so there Gitea has to be published on all
+  interfaces (`GITEA_BIND=0.0.0.0`, see `hub/docker-compose.yml`). Binding only the gateway would stop `localhost`.
 - **Ask for a reconcile with the annotation `reconcile.fluxcd.io/requestedAt`**, then wait until the Kustomization is
   Ready with `status.lastAppliedRevision` naming the pushed commit (`main@sha1:<sha>`). Ready alone can still be the
   previous commit.
@@ -155,6 +158,23 @@ build of Quarkus 3.33.4 and 3.40.1 (BOM `com.redhat.quarkus.platform:quarkus-bom
   what Flux applies. A failed build leaves `main`, Gitea and the cluster untouched.
 - **Gitea creates a repository on the first push** into an organisation (`ENABLE_PUSH_CREATE_ORG`), and refuses to
   merge a new pull request until it has checked it can be merged (405 "try again later"); the merge is retried.
+- **Flux impersonates a service account in the Kustomization's own namespace.** `spec.serviceAccountName` names
+  one in `flux-system`, not in `targetNamespace`. Each service's Kustomization runs as `calm-<name>`, bound to the
+  ClusterRole `admin` in the service's namespace only.
+- **A namespaced service account cannot apply a Namespace**, so the Namespace left the overlay in Git:
+  `calm:deploy:gitops` and `calm:upgrade:merge` apply it, with the service account, its RoleBinding and the namespace
+  ClusterRole below, before they push.
+- **Removing an object from a pruned Kustomization deletes it.** A service deployed before the change has the
+  Namespace in its Kustomization's inventory; the push that drops `namespace.yaml` would delete the namespace and
+  everything in it. The Namespace carries `kustomize.toolkit.fluxcd.io/prune: disabled`, applied before that push.
+  An upgrade is the risky path: the old Kustomization can reconcile the merge commit before `calm:deploy:gitops`
+  runs, so `calm:upgrade:merge` applies the annotation too. Both apply it server-side under their own field manager
+  (`calm-backstage`): Flux takes over the fields owned by kubectl's managers on objects it applies, so an old
+  Kustomization still applying `namespace.yaml` would drop an annotation set by a plain `kubectl apply`.
+- **Flux prunes as the impersonated account too, cluster-scoped objects included.** To skip the prune-disabled
+  Namespace it first reads it, as `calm-<name>`, and a RoleBinding cannot grant that (issue #26: the upgrade got a
+  403). A ClusterRole `calm-<name>-namespace` allows `get` on that one Namespace by name; Flux does not write to an
+  object it skips.
 - **GitHub is not a drop-in.** Push-to-create, the pull request API and anonymous reads by Flux are Gitea's. The Git
   host sits behind `GiteaClient`; a GitHub client is a track.
 
@@ -166,6 +186,18 @@ build of Quarkus 3.33.4 and 3.40.1 (BOM `com.redhat.quarkus.platform:quarkus-bom
 - **A published version never changes, so a fix is a new version.** `k8s-deploy` 1.2.0 and `nisshi-stream-app`
   1.0.1 exist because 1.0.0/1.1.0 were already published when a bug was found, and 1.2.1 because 1.2.0 had one too;
   `push-bundles` refuses changed content before anything reaches Gitea.
+- **A CALM unique-id is not a Kubernetes name.** It may hold upper case, `_` and other characters; a NetworkPolicy
+  named `web_service_to_DB-egress` fails `kubectl apply` after the image is built and the Hub version written.
+  `web-service` 3.0.1 and `k8s-deploy` 1.2.2 use an id that is already a valid name as it is (so they rename nothing
+  the versions before them rendered) and convert any other: lower case, other characters as `-`, a short hash when
+  two ids would get the same name or the name is cut. Node names are RFC 1035 labels (a Service name must start with
+  a letter, at most 63 characters) and every selector, Service, gateway upstream and host in the environment uses the
+  same name; the original id stays in an annotation. Older versions are published and keep the bug.
+- **A valid label value can still be a YAML number.** A service name `2024`, `1.0`, `1e3`, `0x1F` or `2024-01-01`
+  written bare as `app.kubernetes.io/part-of` builds with kustomize into a number or a timestamp, but a label value
+  must be a string, so the apply fails. `k8s-deploy` 1.2.2 quotes a label value that starts with a digit and keeps every other one bare,
+  so renders of service names that start with a letter stay byte-identical to 1.2.1. An empty service name renders
+  as null, so 1.2.2 and `web-service` 3.0.1 treat an empty or blank one as none.
 - **Deployment rules must apply over their own older versions, not only to a new namespace.** 1.2.0 set
   `strategy: Recreate` on backing services. A new deployment took it; an upgrade from 1.0.0 did not: Kubernetes
   refuses Recreate while the Deployment holds `rollingUpdate` settings, and server-side apply (Flux) cannot remove
@@ -196,8 +228,10 @@ build of Quarkus 3.33.4 and 3.40.1 (BOM `com.redhat.quarkus.platform:quarkus-bom
 - **Security, open (local development only):**
   - `/api/calm/app/*` is unauthenticated (a new tab carries no Backstage token) and serves the app on the backend's
     origin, so the app's script is same-origin with Backstage's APIs. Use `user-cookie` auth or a separate origin.
-  - Anyone who can push to a service repository in Gitea (port 3300, fixed admin password) can apply anything
-    through Flux, which runs as cluster-admin. Give each Kustomization a namespaced service account and
-    `targetNamespace`, and seed a random password.
+  - Anyone who can push to a service repository in Gitea (port 3300, fixed admin password) can change anything in
+    that service's namespace through Flux (each Kustomization runs as a service account bound to `admin` there;
+    the namespace enforces Pod Security `baseline`, so not privileged or host-access pods). Gitea is published on
+    127.0.0.1:3300, so by default that is anyone on this machine, not the network; with `GITEA_BIND=0.0.0.0` (Linux)
+    it is the network again unless a firewall blocks 3300. Seed a random password.
 - **A `PageBlueprint` gets a sidebar item from the plugin's `title` and `icon` and a `routeRef`**, not from the page's
   own title.

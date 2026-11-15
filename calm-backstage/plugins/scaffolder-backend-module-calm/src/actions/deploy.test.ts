@@ -1,15 +1,20 @@
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { KUBERNETES_ANNOTATIONS as K8S } from '@internal/backstage-plugin-calm-common';
+import YAML from 'yaml';
 import {
+  KUBERNETES_ANNOTATIONS as K8S,
+  namespaceManifest,
+} from '@internal/backstage-plugin-calm-common';
+import {
+  GITOPS_OVERLAY_HEADER,
   applyArgs,
   checkExistingNamespace,
   createCalmDeployK8sAction,
-  namespaceManifest,
   overlayKustomization,
   parseImage,
   summariseObjects,
+  writeOverlay,
 } from './deployK8s';
 import { createCalmClusterCheckAction } from './clusterCheck';
 import { createCalmImageBuildAction, imageReference } from './imageBuild';
@@ -80,6 +85,48 @@ describe('overlay', () => {
   });
 });
 
+describe('writeOverlay', () => {
+  const opts = {
+    name: 'stock-api',
+    namespace: 'calm-stock-api',
+    image: 'stock-api:run-1',
+  };
+  let dir: string;
+  beforeEach(async () => {
+    dir = await fs.mkdtemp(path.join(os.tmpdir(), 'calm-overlay-'));
+  });
+  afterEach(async () => {
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+  const read = async (overlayDir: string) => ({
+    files: (await fs.readdir(overlayDir)).sort(),
+    kustomization: YAML.parse(
+      await fs.readFile(path.join(overlayDir, 'kustomization.yaml'), 'utf-8'),
+    ),
+  });
+
+  it('keeps the Namespace in the overlay kubectl applies', async () => {
+    const overlay = await read(await writeOverlay(dir, opts, '# kubectl'));
+    expect(overlay.files).toEqual(['kustomization.yaml', 'namespace.yaml']);
+    expect(overlay.kustomization.resources).toEqual([
+      'namespace.yaml',
+      '../k8s',
+    ]);
+  });
+
+  it('leaves the Namespace out of the overlay Flux applies, and removes one an earlier deploy wrote', async () => {
+    await writeOverlay(dir, opts, '# kubectl');
+    const overlay = await read(
+      await writeOverlay(dir, opts, GITOPS_OVERLAY_HEADER, {
+        withNamespace: false,
+      }),
+    );
+    expect(overlay.files).toEqual(['kustomization.yaml']);
+    expect(overlay.kustomization.resources).toEqual(['../k8s']);
+    expect(overlay.kustomization.namespace).toBe('calm-stock-api');
+  });
+});
+
 describe('namespace guard', () => {
   const ns = (labels?: Record<string, string>) => ({
     kind: 'Namespace',
@@ -131,6 +178,21 @@ describe('summariseObjects', () => {
       summariseObjects([
         { kind: 'Deployment', metadata: { name: 'web-service' } },
         { kind: 'Deployment', metadata: { name: 'api-gateway' } },
+        {
+          kind: 'Deployment',
+          metadata: {
+            name: 'orders-api',
+            annotations: { 'calm.finos.org/unique-id': 'Orders_API' },
+          },
+        },
+        // The same node under an earlier converted name, which remains until it is pruned: listed once in nodes.
+        {
+          kind: 'Deployment',
+          metadata: {
+            name: 'orders-api-1x2y3z',
+            annotations: { 'calm.finos.org/unique-id': 'Orders_API' },
+          },
+        },
         { kind: 'NetworkPolicy', metadata: { name: 'default-deny' } },
         {
           kind: 'Service',
@@ -140,7 +202,13 @@ describe('summariseObjects', () => {
         { kind: 'ConfigMap', metadata: { name: 'gateway-config' } },
       ]),
     ).toEqual({
-      deployments: ['api-gateway', 'web-service'],
+      deployments: [
+        'api-gateway',
+        'orders-api',
+        'orders-api-1x2y3z',
+        'web-service',
+      ],
+      nodes: ['Orders_API', 'api-gateway', 'web-service'],
       networkPolicies: ['default-deny'],
       services: ['api-gateway:80'],
     });
@@ -421,6 +489,48 @@ describe('calm:deploy:k8s: a failed deployment', () => {
     // The lines of the error are joined, so the notes stay one line.
     expect(notes).toContain('web-service second line');
     expect(c.output).not.toHaveBeenCalledWith('endTime', expect.anything());
+  });
+
+  it('applies to the unique-id of a workload with a converted name', async () => {
+    await fs.writeFile(
+      path.join(dir, 'deploy', 'k8s', 'workloads.yaml'),
+      [
+        'apiVersion: apps/v1',
+        'kind: Deployment',
+        'metadata:',
+        '  name: web-service-ab12cd',
+        '  annotations:',
+        '    calm.finos.org/unique-id: Web_Service',
+        '  labels:',
+        '    calm.finos.org/node: web-service-ab12cd',
+        '---',
+        'apiVersion: apps/v1',
+        'kind: StatefulSet',
+        'metadata:',
+        '  name: mongo-database',
+        '  labels:',
+        '    calm.finos.org/node: mongo-database',
+        '',
+      ].join('\n'),
+    );
+    await fs.writeFile(
+      path.join(root, 'architecture.json'),
+      JSON.stringify({
+        nodes: [
+          { 'unique-id': 'Web_Service' },
+          { 'unique-id': 'mongo-database' },
+        ],
+      }),
+    );
+    const { hub, posted } = fakeRecordingHub();
+    const { result } = await run({
+      input: { record },
+      hub,
+      failRollout: rollout,
+    });
+    await expect(result).rejects.toThrow(/timed out waiting/);
+    expect(posted).toHaveLength(1);
+    expect(posted[0]['applies-to']).toEqual(['Web_Service', 'mongo-database']);
   });
 
   it('applies to every architecture node when no workload names one', async () => {

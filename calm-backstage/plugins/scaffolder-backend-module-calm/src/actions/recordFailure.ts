@@ -1,13 +1,14 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { LoggerService } from '@backstage/backend-plugin-api';
-import { CalmHubWriteClient } from '@internal/backstage-plugin-calm-common';
+import {
+  CalmHubWriteClient,
+  workloadNode,
+} from '@internal/backstage-plugin-calm-common';
 import YAML from 'yaml';
 import { recordDeployment } from './decorateDeployment';
 
-/** The label the bundles put on a workload: the `unique-id` of the architecture node it was rendered from. */
-const NODE_LABEL = 'calm.finos.org/node';
-/** The workload kinds whose `calm.finos.org/node` label names the architecture node they run. */
+/** The workload kinds that name the architecture node they run (see `workloadNode`). */
 const WORKLOAD_KINDS = ['Deployment', 'StatefulSet', 'DaemonSet'];
 const MAX_NOTE_ERROR = 300;
 
@@ -20,8 +21,9 @@ export interface FailureRecordTarget {
 }
 
 /**
- * The `calm.finos.org/node` labels of the workloads in the YAML files of `baseDir`: the architecture nodes the
- * bundle rendered. Empty when the folder or the labels are missing.
+ * The architecture nodes the bundle rendered: for each workload in the YAML files of `baseDir`, its
+ * `calm.finos.org/unique-id` annotation, else its `calm.finos.org/node` label. Empty when the folder or the labels are
+ * missing.
  */
 export async function labelledNodes(baseDir: string): Promise<string[]> {
   const files = (await fs.readdir(baseDir).catch(() => [])).filter(f =>
@@ -34,11 +36,9 @@ export async function labelledNodes(baseDir: string): Promise<string[]> {
       if (!WORKLOAD_KINDS.includes(doc?.kind)) {
         continue;
       }
-      const label =
-        doc.metadata?.labels?.[NODE_LABEL] ??
-        doc.spec?.template?.metadata?.labels?.[NODE_LABEL];
-      if (typeof label === 'string') {
-        nodes.add(label);
+      const node = workloadNode(doc);
+      if (node !== undefined) {
+        nodes.add(node);
       }
     }
   }
