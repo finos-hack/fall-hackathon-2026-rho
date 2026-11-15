@@ -73,6 +73,9 @@ const publishInput = {
   patternId: 'web-service',
   patternVersion: '1.0.0',
   bundle: 'web-service@1.0.0',
+  hubNamespace: 'hackathon',
+  hubArchitecture: 'orders',
+  hubArchitectureVersion: '1.0.0',
 };
 
 describe('calm:publish:local', () => {
@@ -146,11 +149,8 @@ describe('calm:publish:local', () => {
     await action.handler(ctx);
 
     const files = await fs.readdir(path.join(localDir, 'orders-service'));
-    expect(files.sort()).toEqual([
-      'README.md',
-      'architecture.json',
-      'catalog-info.yaml',
-    ]);
+    // No architecture.json: CALM Hub holds the architecture.
+    expect(files.sort()).toEqual(['README.md', 'catalog-info.yaml']);
     expect(ctx.output).toHaveBeenCalledWith(
       'entityRef',
       'component:default/orders-service',

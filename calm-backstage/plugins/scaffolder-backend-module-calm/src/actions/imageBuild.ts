@@ -1,5 +1,6 @@
 import { createTemplateAction } from '@backstage/plugin-scaffolder-node';
 import { publishedFolder } from './publishedFolder';
+import { withServiceLock } from './serviceLock';
 import { isDnsLabel } from '@internal/backstage-plugin-calm-common';
 import {
   KubernetesDeploySettings,
@@ -70,22 +71,31 @@ export function createCalmImageBuildAction(options: {
         image: z => z.string().describe('The image built, as <name>:<tag>'),
       },
     },
-    async handler(ctx) {
-      const settings = await requireKubernetesDeploy(options.settings);
-      const image = imageReference(ctx.input.name, ctx.input.tag);
-      const dir = publishedFolder(options.localDir, ctx.input.dir);
-      ctx.logger.info(
-        `KUBECONFIG=${settings.kubeconfig} minikube -p ${settings.minikubeProfile} image build -t ${image} ${dir}`,
+    async handler(outer) {
+      await withServiceLock(
+        outer,
+        {
+          dir: publishedFolder(options.localDir, outer.input.dir),
+          acquire: false,
+        },
+        async ctx => {
+          const settings = await requireKubernetesDeploy(options.settings);
+          const image = imageReference(ctx.input.name, ctx.input.tag);
+          const dir = publishedFolder(options.localDir, ctx.input.dir);
+          ctx.logger.info(
+            `KUBECONFIG=${settings.kubeconfig} minikube -p ${settings.minikubeProfile} image build -t ${image} ${dir}`,
+          );
+          await runMinikube(settings, ['image', 'build', '-t', image, dir], {
+            cwd: dir,
+            logger: ctx.logger,
+            signal: ctx.signal,
+          });
+          ctx.logger.info(
+            `Built ${image} into the minikube profile ${settings.minikubeProfile}`,
+          );
+          ctx.output('image', image);
+        },
       );
-      await runMinikube(settings, ['image', 'build', '-t', image, dir], {
-        cwd: dir,
-        logger: ctx.logger,
-        signal: ctx.signal,
-      });
-      ctx.logger.info(
-        `Built ${image} into the minikube profile ${settings.minikubeProfile}`,
-      );
-      ctx.output('image', image);
     },
   });
 }

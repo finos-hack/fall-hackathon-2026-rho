@@ -330,7 +330,7 @@ const GIT_TEXT = {
 const hubText = (canDeploy: boolean) => ({
   title: 'CALM Hub',
   content: [
-    'Architecture: `${{ steps["register-hub"].output.namespace }}/${{ steps["register-hub"].output.architecture }}` version ${{ steps["register-hub"].output.version }}, at ${{ steps["register-hub"].output.url }} (the `$id` of the published `architecture.json`).',
+    'Architecture: `${{ steps["store-hub"].output.namespace }}/${{ steps["store-hub"].output.architecture }}` version ${{ steps["store-hub"].output.version }}, at ${{ steps["store-hub"].output.url }}, its only copy.',
     ...(canDeploy
       ? [
           '',
@@ -582,11 +582,13 @@ export function templateEntity(
 
 /**
  * Prepare the architecture for CALM Hub (the checks, and the `$id` it will have), render with the chosen bundle
- * (pulled from the bundle registry, or a local folder), publish to the local output folder and, with `calm.gitops`,
- * push it to Git; then store the architecture in the Hub. A Hub version cannot be deleted and a folder or a
- * repository can, so the write waits until those steps have worked. Then, for a bundle that renders Kubernetes
- * manifests (`isDeployable`, an expression over the parameters) and with the `deploy` box ticked, build the image,
- * deploy it and record the deployment in the Hub; last, register the new service.
+ * (pulled from the bundle registry, or a local folder) and publish to the local output folder; then store the
+ * architecture in the Hub and, with `calm.gitops`, push the service to Git. A Hub version cannot be deleted, so the
+ * write waits until the render and the publish have worked; it comes before the Git push, so a failed store leaves
+ * nothing in Git, and the store removes the folder this run published, so the Template can be run again. Then, for
+ * a bundle that renders Kubernetes manifests (`isDeployable`, an expression over the parameters) and with the
+ * `deploy` box ticked, build the image, deploy it and record the deployment in the Hub; last, register the new
+ * service.
  */
 function publishSteps(
   p: HubDocument,
@@ -596,8 +598,8 @@ function publishSteps(
 ): object[] {
   return [
     {
-      // Before the render, so the rendered files and the published architecture.json carry the $id. Makes the checks
-      // and the file, and writes nothing to the Hub: store-hub does that. Its outputs are the ones store-hub gives.
+      // Before the render, so the rendered files carry the $id. Makes the checks and the file, and writes nothing to
+      // the Hub: store-hub does that. Its outputs are the ones store-hub gives.
       id: 'register-hub',
       name: 'Prepare the architecture for CALM Hub',
       action: 'calm:register:hub',
@@ -640,7 +642,6 @@ function publishSteps(
       input: {
         name: '${{ parameters.name }}',
         sourceDir: '${{ steps.template.output.outputDir }}',
-        architecturePath: '${{ steps.fill.output.architecturePath }}',
         namespace: p.namespace,
         patternId: p.id,
         patternVersion: p.version,
@@ -654,13 +655,27 @@ function publishSteps(
         // Set when calm:template pulled the bundle from the registry; empty for a local folder.
         bundleRef: '${{ steps.template.output.bundleRef }}',
         bundleDigest: '${{ steps.template.output.bundleDigest }}',
-        // The Hub annotations, next to architecture-file: the card reads the Hub and falls back to the file.
+        // The Hub annotations: CALM Hub holds the only copy of the architecture, which the card and upgrades read.
         hubNamespace: '${{ steps["register-hub"].output.namespace }}',
         hubArchitecture: '${{ steps["register-hub"].output.architecture }}',
         hubArchitectureVersion: '${{ steps["register-hub"].output.version }}',
         hubArchitectureUrl: '${{ steps["register-hub"].output.url }}',
         // Adds the Kubernetes annotations to catalog-info.yaml, whether or not the service is then deployed.
         ...(isDeployable ? { deployable: `\${{ ${isDeployable} }}` } : {}),
+      },
+    },
+    {
+      // After the render and the publish, so a run that failed in one of them leaves nothing in the Hub; before the
+      // git publish, so a failed store leaves nothing in Git. Stores the version the published files' $id names;
+      // when that fails, it removes the folder this run published, so the Template can be run again.
+      id: 'store-hub',
+      name: 'Store the architecture in CALM Hub',
+      action: 'calm:register:hub',
+      input: {
+        architecturePath: '${{ steps.fill.output.architecturePath }}',
+        name: '${{ parameters.name }}',
+        mode: 'store',
+        publishedDir: '${{ steps.publish.output.path }}',
       },
     },
     ...(gitops
@@ -678,18 +693,6 @@ function publishSteps(
           },
         ]
       : []),
-    {
-      // After the render, publish and git publish, so a run that failed in one of them leaves nothing in the Hub.
-      // Fails, storing nothing, if the Hub chose another version than the $id the files carry.
-      id: 'store-hub',
-      name: 'Store the architecture in CALM Hub',
-      action: 'calm:register:hub',
-      input: {
-        architecturePath: '${{ steps.fill.output.architecturePath }}',
-        name: '${{ parameters.name }}',
-        mode: 'store',
-      },
-    },
     ...(isDeployable
       ? [
           {
