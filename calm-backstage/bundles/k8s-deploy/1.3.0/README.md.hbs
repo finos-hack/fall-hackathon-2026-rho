@@ -1,0 +1,71 @@
+# Deployment rules for {{serviceName}}
+
+Rendered by **{{rules.name}} {{rules.version}}** from the CALM architecture alone. The starter in the folder above
+renders the code; these rules decide how it runs. Upgrading the rules re-renders this folder only.
+
+{{#if hardening}}
+These rules add resource limits, liveness probes, no service-account tokens in pods and the
+`app.kubernetes.io/*` labels.
+{{else}}
+These rules set resource requests and readiness probes. Version 1.1.0 adds limits, liveness probes and more.
+{{/if}}
+
+## The starter contract
+
+The app container (`{{appNode}}`) runs the image built from the starter's `Dockerfile` (called `calm-service` here; the
+overlay names the image built for the service). It must listen on `$PORT` ({{servicePort}}) and answer `GET /health`.
+It is told:
+
+| Variable | Value |
+|---|---|
+{{#each workloads}}
+{{#if isApp}}
+{{#each env}}
+| `{{name}}` | `{{{value}}}` |
+{{/each}}
+{{/if}}
+{{/each}}
+
+## Nodes in the cluster
+
+| Name | Node | Technology | Image | Service port | Pod port |
+|---|---|---|---|---|---|
+{{#each workloads}}
+| `{{id}}` | {{name}} | {{{technology}}} | `{{image}}` | {{servicePort}} | {{containerPort}} |
+{{/each}}
+
+The gateway's external address in the architecture is `{{gatewayHost}}:{{gatewayPort}}`. Inside the cluster it is
+`{{gatewayNode}}:{{gatewayServicePort}}`.
+
+## Connections
+
+Every pod is denied all traffic except DNS and these relationships.
+
+| Relationship | Source | Destination | Protocol | Pod port | Network policy |
+|---|---|---|---|---|---|
+{{#each connects}}
+| `{{id}}` | `{{source}}` | `{{destination}}` | {{protocol}} | {{port}} | {{rendered}} |
+{{/each}}
+{{#if tlsWorkloads.length}}
+
+## TLS
+
+An HTTPS relationship between two nodes in the cluster is TLS. cert-manager issues a self-signed CA in the namespace
+and, from it, a certificate for each destination's Service name (`tls.yaml`). The destination runs an nginx sidecar
+(`tls-proxy`) that serves it on {{tls.containerPort}} (Service port {{tls.servicePort}}) and forwards to its container over
+localhost; the network policies allow {{tls.containerPort}}, not the plain port. The source mounts the CA certificate at
+`{{tls.caDir}}/ca.crt`{{#if gatewayTls}}, and the gateway checks the service's certificate with it{{/if}}. The cluster needs
+cert-manager (`yarn k8s:up` installs it).
+
+| Node | Certificate secret |
+|---|---|
+{{#each tlsWorkloads}}
+| `{{id}}` | `{{tls.secretName}}` |
+{{/each}}
+{{/if}}
+
+## Provenance
+
+- Architecture: {{architectureId}}
+- Pattern: {{patternId}}
+- Deployment rules: {{rules.name}} {{rules.version}}
