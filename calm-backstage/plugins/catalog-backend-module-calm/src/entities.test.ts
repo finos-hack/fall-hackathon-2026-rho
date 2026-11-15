@@ -388,7 +388,7 @@ describe('upgrade Template', () => {
 });
 
 describe('templateEntity: Git and Flux', () => {
-  it('pushes the service to Git after publishing, tags the image with the commit and deploys with Flux', () => {
+  it('pushes the service to Git after publishing and storing in the Hub, tags the image with the commit and deploys with Flux', () => {
     const t = template([bundle('3.0.0', 'kubernetes')], { gitops: true });
     expect(t.stepIds).toEqual([
       'check-cluster',
@@ -398,8 +398,8 @@ describe('templateEntity: Git and Flux', () => {
       'register-hub',
       'template',
       'publish',
-      'git-publish',
       'store-hub',
+      'git-publish',
       'build',
       'deploy',
       'decorate',
@@ -442,7 +442,7 @@ describe('templateEntity: Git and Flux', () => {
 });
 
 describe('templateEntity: CALM Hub', () => {
-  it('prepares the architecture before the render, stores it after the publish, and publishes with the Hub annotations', () => {
+  it('prepares the architecture before the render, stores it after the publish and before the git publish, and publishes with the Hub annotations', () => {
     const t = template([bundle('2.0.0')]);
     expect(t.step('register-hub')).toMatchObject({
       action: 'calm:register:hub',
@@ -459,9 +459,17 @@ describe('templateEntity: CALM Hub', () => {
         architecturePath: '${{ steps.fill.output.architecturePath }}',
         name: '${{ parameters.name }}',
         mode: 'store',
+        // Removed when the store fails, so the Template can be run again.
+        publishedDir: '${{ steps.publish.output.path }}',
       },
     });
     expect(t.step('store-hub').if).toBeUndefined();
+    // The output text reports what store-hub stored.
+    const hubContent = t.spec.output.text.find(
+      (x: any) => x.title === 'CALM Hub',
+    ).content;
+    expect(hubContent).toContain('steps["store-hub"].output.version');
+    expect(hubContent).not.toContain('register-hub');
     expect(t.step('publish').input).toMatchObject({
       hubNamespace: '${{ steps["register-hub"].output.namespace }}',
       hubArchitecture: '${{ steps["register-hub"].output.architecture }}',
