@@ -443,3 +443,136 @@ describe('waitForKustomization', () => {
     expect(s.appliedRevision).toBe(`main@sha1:${sha}`);
   });
 });
+
+/** A Hub that keeps the decorators posted to it, and reads each back the way recordDeployment checks. */
+function fakeRecordingHub(opts: { failPost?: boolean } = {}) {
+  const posted: any[] = [];
+  const hub = {
+    baseUrl: 'http://hub',
+    architectures: jest.fn(async () => [{ customId: 'orders', numericId: 4 }]),
+    createDecorator: jest.fn(async (_ns: string, d: any) => {
+      if (opts.failPost) {
+        throw new Error('hub is down');
+      }
+      posted.push(d);
+      return posted.length;
+    }),
+    listDecorators: jest.fn(async () => posted.map((_, i) => i + 1)),
+    getDecorator: jest.fn(async (_ns: string, id: number) => ({
+      uniqueId: posted[id - 1]['unique-id'],
+    })),
+  };
+  return { hub: hub as any, posted };
+}
+
+const record = {
+  hubNamespace: 'hackathon',
+  architecture: 'orders',
+  version: '1.0.0',
+  architecturePath: 'architecture.json',
+};
+
+describe('calm:deploy:gitops: a failed deployment', () => {
+  const failing = async () => {
+    const remote = await bare('orders');
+    const dir = await service('orders');
+    await createCalmGitPublishAction({ settings: gitops(), localDir }).handler(
+      ctx({ dir, name: 'orders' }),
+    );
+    await fs.writeFile(
+      path.join(dir, 'deploy', 'k8s', 'workloads.yaml'),
+      'apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: web-service\n  labels:\n    calm.finos.org/node: web-service\n',
+    );
+    await fs.writeFile(
+      path.join(root, 'architecture.json'),
+      JSON.stringify({
+        nodes: [{ 'unique-id': 'web-service' }, { 'unique-id': 'mongo' }],
+      }),
+    );
+    return { remote, dir };
+  };
+  const run = async (opts: {
+    input?: object;
+    hub?: any;
+    namespace?: object;
+    failFlux?: string;
+    branch?: string;
+  }) => {
+    const { remote, dir } = await failing();
+    if (opts.branch) {
+      await git(dir, ['checkout', '-q', '-b', opts.branch]);
+    }
+    const fake = fakeKubectl({
+      remote,
+      failFlux: opts.failFlux ?? 'kustomize build failed',
+      namespace: opts.namespace,
+    });
+    const c = ctx({
+      dir,
+      name: 'orders',
+      image: 'orders:abc',
+      ...opts.input,
+    });
+    c.task = { id: 'task-1' };
+    const result = createCalmDeployGitopsAction({
+      settings: settings(),
+      gitops: gitops(),
+      localDir,
+      kubectl: () => fake.kubectl,
+      wait: { pollMs: 1, timeoutMs: 20 },
+      hub: opts.hub,
+      appBaseUrl: 'http://localhost:3100',
+    }).handler(c);
+    return { result, c };
+  };
+  it('records a failed decorator when Flux does not apply the commit, and rethrows', async () => {
+    const { hub, posted } = fakeRecordingHub();
+    const { result } = await run({ input: { record }, hub });
+    await expect(result).rejects.toThrow(/kustomize build failed/);
+    expect(posted).toHaveLength(1);
+    expect(posted[0]).toMatchObject({
+      'applies-to': ['web-service'],
+      data: { status: 'failed', 'start-time': expect.any(String) },
+    });
+    expect(posted[0].data.notes).toContain('kustomize build failed');
+  });
+
+  it('calls no Hub without record', async () => {
+    const { hub } = fakeRecordingHub();
+    const { result } = await run({ hub });
+    await expect(result).rejects.toThrow(/kustomize build failed/);
+    expect(hub.createDecorator).not.toHaveBeenCalled();
+  });
+
+  it('rejects with the deploy error and warns when recording fails', async () => {
+    const { hub } = fakeRecordingHub({ failPost: true });
+    const { result, c } = await run({ input: { record }, hub });
+    await expect(result).rejects.toThrow(/kustomize build failed/);
+    expect(c.logger.warn).toHaveBeenCalledWith(
+      expect.stringMatching(
+        /Could not record the failed deployment.*hub is down/,
+      ),
+    );
+  });
+
+  it('records nothing when the namespace belongs to another service', async () => {
+    const { hub } = fakeRecordingHub();
+    const { result } = await run({
+      input: { record },
+      hub,
+      namespace: {
+        metadata: { labels: { 'calm.finos.org/service': 'billing' } },
+      },
+    });
+    await expect(result).rejects.toThrow(/belongs to the service "billing"/);
+    expect(hub.createDecorator).not.toHaveBeenCalled();
+  });
+
+  it('records nothing when the working copy is on another branch', async () => {
+    const { hub } = fakeRecordingHub();
+    const { result } = await run({ input: { record }, hub, branch: 'feature' });
+    await expect(result).rejects.toThrow(/is on the branch feature, not main/);
+    expect(hub.architectures).not.toHaveBeenCalled();
+    expect(hub.createDecorator).not.toHaveBeenCalled();
+  });
+});
