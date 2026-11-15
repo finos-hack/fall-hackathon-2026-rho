@@ -120,7 +120,7 @@ Each is a candidate for a published, supported API.
 - **minikube's docker driver can give the API server a new port on each start.** `k8s/up.sh` rewrites
   `app-config.local.yaml` every time, and Backstage needs a restart after it.
 - **Policies need a CNI that enforces them.** The profile is started with `--cni=calico`.
-- **A NetworkPolicy names the pod's port, not the Service's.** The TLS sidecar (`k8s-deploy` 1.3.0) is reached on
+- **A NetworkPolicy names the pod's port, not the Service's.** The TLS sidecar (`k8s-deploy` 1.3.0 and later) is reached on
   Service port 443, but its policies allow 8443, the port it listens on in the pod.
 - **`nginx-unprivileged` listens on 8080 out of the box** (its `conf.d/default.conf`), the starters' default port. A
   sidecar next to an app on 8080 must replace that folder, as the TLS sidecar's ConfigMap does, or one of them fails
@@ -176,6 +176,10 @@ build of Quarkus 3.33.4 and 3.40.1 (BOM `com.redhat.quarkus.platform:quarkus-bom
   two ids would get the same name or the name is cut. Node names are RFC 1035 labels (a Service name must start with
   a letter, at most 63 characters) and every selector, Service, gateway upstream and host in the environment uses the
   same name; the original id stays in an annotation. Older versions are published and keep the bug.
+- **TLS and the valid names had to meet in a new version.** `k8s-deploy` 1.3.0 (TLS) was copied from 1.2.1, so it kept the
+  invalid-name bug 1.2.2 fixed, and versions are immutable. 1.3.1 is 1.2.2 plus the TLS of 1.3.0, with the certificate,
+  its Secret, the sidecar's ConfigMap, the certificate's DNS name and the gateway's `proxy_pass` / `proxy_ssl_name` all
+  using the converted node name. Use 1.3.1, not 1.3.0, for an architecture whose ids are not valid names.
 - **A valid label value can still be a YAML number.** A service name `2024`, `1.0`, `1e3`, `0x1F` or `2024-01-01`
   written bare as `app.kubernetes.io/part-of` builds with kustomize into a number or a timestamp, but a label value
   must be a string, so the apply fails. `k8s-deploy` 1.2.2 quotes a label value that starts with a digit and keeps every other one bare,

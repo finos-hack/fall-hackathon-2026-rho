@@ -58,7 +58,7 @@ const CHAPTERS = [
   ],
   [
     'Upgrade code and deployment rules',
-    'Spring Boot 4.0.9 → 4.1.2 and k8s-deploy 1.0.0 → 1.3.0 through a pull request',
+    'Spring Boot 4.0.9 → 4.1.2 and k8s-deploy 1.0.0 → 1.3.1 through a pull request',
   ],
   [
     'Who uses what',
@@ -539,7 +539,7 @@ const CHAPTERS = [
   await go(`/catalog/default/component/${SPRING}`, svgIn);
   await scrollTo(page.getByTestId('calm-versions'));
   await caption(
-    'New versions fit the pattern: Spring Boot 4.1.2 and deployment rules 1.3.0',
+    'New versions fit the pattern: Spring Boot 4.1.2 and deployment rules 1.3.1',
   );
   await pause(5000);
   await page.getByTestId('calm-versions').getByText('Upgrade').click();
@@ -580,7 +580,7 @@ const CHAPTERS = [
   await pause(4000);
   await openApp();
   await caption(
-    'Now running Spring Boot 4.1.2 under the deployment rules k8s-deploy 1.3.0',
+    'Now running Spring Boot 4.1.2 under the deployment rules k8s-deploy 1.3.1',
   );
   await pause(6000);
 
@@ -589,7 +589,7 @@ const CHAPTERS = [
   await go('/calm-templates', () =>
     page.getByTestId('calm-explorer-bundles').waitFor(),
   );
-  await page.getByText('k8s-deploy 1.3.0').first().click();
+  await page.getByText('k8s-deploy 1.3.1').first().click();
   await page.getByRole('tab', { name: 'Used by' }).click();
   await page.getByTestId('calm-explorer-used-by').waitFor();
   await caption(
