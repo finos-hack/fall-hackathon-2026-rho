@@ -138,6 +138,14 @@ describe('summariseObjects', () => {
             annotations: { 'calm.finos.org/unique-id': 'Orders_API' },
           },
         },
+        // The same node under an earlier converted name, until it is pruned: listed once in nodes.
+        {
+          kind: 'Deployment',
+          metadata: {
+            name: 'orders-api-1x2y3z',
+            annotations: { 'calm.finos.org/unique-id': 'Orders_API' },
+          },
+        },
         { kind: 'NetworkPolicy', metadata: { name: 'default-deny' } },
         {
           kind: 'Service',
@@ -147,7 +155,12 @@ describe('summariseObjects', () => {
         { kind: 'ConfigMap', metadata: { name: 'gateway-config' } },
       ]),
     ).toEqual({
-      deployments: ['api-gateway', 'orders-api', 'web-service'],
+      deployments: [
+        'api-gateway',
+        'orders-api',
+        'orders-api-1x2y3z',
+        'web-service',
+      ],
       nodes: ['Orders_API', 'api-gateway', 'web-service'],
       networkPolicies: ['default-deny'],
       services: ['api-gateway:80'],
@@ -429,6 +442,48 @@ describe('calm:deploy:k8s: a failed deployment', () => {
     // The lines of the error are joined, so the notes stay one line.
     expect(notes).toContain('web-service second line');
     expect(c.output).not.toHaveBeenCalledWith('endTime', expect.anything());
+  });
+
+  it('applies to the unique-id of a workload with a converted name', async () => {
+    await fs.writeFile(
+      path.join(dir, 'deploy', 'k8s', 'workloads.yaml'),
+      [
+        'apiVersion: apps/v1',
+        'kind: Deployment',
+        'metadata:',
+        '  name: web-service-ab12cd',
+        '  annotations:',
+        '    calm.finos.org/unique-id: Web_Service',
+        '  labels:',
+        '    calm.finos.org/node: web-service-ab12cd',
+        '---',
+        'apiVersion: apps/v1',
+        'kind: StatefulSet',
+        'metadata:',
+        '  name: mongo-database',
+        '  labels:',
+        '    calm.finos.org/node: mongo-database',
+        '',
+      ].join('\n'),
+    );
+    await fs.writeFile(
+      path.join(root, 'architecture.json'),
+      JSON.stringify({
+        nodes: [
+          { 'unique-id': 'Web_Service' },
+          { 'unique-id': 'mongo-database' },
+        ],
+      }),
+    );
+    const { hub, posted } = fakeRecordingHub();
+    const { result } = await run({
+      input: { record },
+      hub,
+      failRollout: rollout,
+    });
+    await expect(result).rejects.toThrow(/timed out waiting/);
+    expect(posted).toHaveLength(1);
+    expect(posted[0]['applies-to']).toEqual(['Web_Service', 'mongo-database']);
   });
 
   it('applies to every architecture node when no workload names one', async () => {

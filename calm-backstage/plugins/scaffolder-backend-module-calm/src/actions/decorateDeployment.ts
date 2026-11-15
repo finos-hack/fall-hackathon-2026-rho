@@ -15,8 +15,9 @@ import {
 } from '@internal/backstage-plugin-calm-common';
 
 /**
- * The node `unique-id`s among the workloads: the node each Deployment was rendered from (calm:deploy:k8s or
- * calm:deploy:gitops output `nodes`), which is its name unless the id is not a valid Kubernetes name.
+ * The node `unique-id`s among the workloads, each once: the node each Deployment was rendered from (calm:deploy:k8s or
+ * calm:deploy:gitops output `nodes`), which is its name unless the id is not a valid Kubernetes name. A node can be
+ * listed twice when two Deployments carry its id, e.g. while an old Deployment with an earlier converted name remains.
  */
 export function deployedNodes(
   workloads: string[],
@@ -26,7 +27,7 @@ export function deployedNodes(
     ? (architecture as any).nodes
     : [];
   const ids = new Set(nodes.map(n => n?.['unique-id']));
-  return workloads.filter(w => ids.has(w));
+  return [...new Set(workloads)].filter(w => ids.has(w));
 }
 
 /** What `recordDeployment` writes to the Hub: the inputs of `calm:decorate:deployment`, plus where the run is. */
@@ -73,7 +74,9 @@ export async function recordDeployment(
   );
   const doc = JSON.parse(await fs.readFile(file, 'utf-8'));
   const appliesTo = deployedNodes(input.workloads, doc);
-  const notNodes = input.workloads.filter(w => !appliesTo.includes(w));
+  const notNodes = [...new Set(input.workloads)].filter(
+    w => !appliesTo.includes(w),
+  );
   if (notNodes.length) {
     logger.warn(
       `Not nodes of the architecture, so left out of applies-to: ${notNodes.join(

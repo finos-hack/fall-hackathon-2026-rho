@@ -198,7 +198,7 @@ export async function listAndWaitForRollouts(
 
 export interface Deployed {
   deployments: string[];
-  /** The node each Deployment was rendered from: its `calm.finos.org/unique-id` annotation, else its name. */
+  /** The nodes the Deployments were rendered from, each once: a `calm.finos.org/unique-id` annotation, else the name. */
   nodes: string[];
   networkPolicies: string[];
   services: string[];
@@ -216,15 +216,18 @@ export function summariseObjects(items: any[]): Deployed {
       .sort();
   return {
     deployments: names('Deployment'),
-    nodes: items
-      .filter(i => i?.kind === 'Deployment')
-      .map(i =>
-        String(
-          i.metadata?.annotations?.[CALM_KUBERNETES.uniqueIdAnnotation] ??
-            i.metadata?.name,
-        ),
-      )
-      .sort(),
+    nodes: [
+      ...new Set(
+        items
+          .filter(i => i?.kind === 'Deployment')
+          .map(i =>
+            String(
+              i.metadata?.annotations?.[CALM_KUBERNETES.uniqueIdAnnotation] ??
+                i.metadata?.name,
+            ),
+          ),
+      ),
+    ].sort(),
     networkPolicies: names('NetworkPolicy'),
     services: items
       .filter(i => i?.kind === 'Service')
