@@ -222,6 +222,7 @@ describe('the actions without a cluster', () => {
       logger: { info: jest.fn(), warn: jest.fn() },
       output: jest.fn(),
       workspacePath: os.tmpdir(),
+      task: { id: 'task-test' },
     } as any);
   const localDir = path.join(os.tmpdir(), 'calm-output');
   const dir = path.join(localDir, 'stock-api');

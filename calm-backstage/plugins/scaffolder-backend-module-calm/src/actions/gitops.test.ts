@@ -42,6 +42,7 @@ const ctx = (input: object) =>
     logger: { info: jest.fn(), warn: jest.fn(), error: jest.fn() },
     output: jest.fn(),
     workspacePath: root,
+    task: { id: 'task-test' },
   } as any);
 const outputs = (c: any) =>
   Object.fromEntries(c.output.mock.calls.map((x: any[]) => [x[0], x[1]]));
