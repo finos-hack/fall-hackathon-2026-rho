@@ -213,6 +213,21 @@ describe('deploy', () => {
     await w.deps.jobs.idle();
   });
 
+  it('accepts only one of two requests that arrive together', async () => {
+    const w = make();
+    const [a, b]: any[] = await Promise.all([
+      call(w, 'POST', '/deploy/hackathon/architectures/events-stream/1.0.1', {}),
+      call(w, 'POST', '/namespaces/hackathon/architectures/events-stream/versions/1.0.1/deployments', {}),
+    ]);
+    expect([a.status, b.status].sort()).toEqual([202, 409]);
+    await w.deps.jobs.idle();
+    expect(w.hub.decorators.size).toBe(1);
+    expect(w.gitea.pulls).toHaveLength(1);
+    // The claim is released once the job ends: the next request is accepted.
+    expect((await call(w, 'POST', '/deploy/hackathon/architectures/events-stream/1.0.0', {})).status).toBe(202);
+    await w.deps.jobs.idle();
+  });
+
   it('refuses a repository that runs another namespace’s architecture', async () => {
     const w = make();
     // The repository claims an architecture of the same name in another namespace.
