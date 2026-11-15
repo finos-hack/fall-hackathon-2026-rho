@@ -61,15 +61,25 @@ export function fluxObjects(o: {
 const FLUX_PRUNE_ANNOTATION = 'kustomize.toolkit.fluxcd.io/prune';
 
 /**
+ * Pod Security admission at `baseline` for a service's namespace: `admin` there cannot run privileged pods or pods
+ * that use the host's namespaces, paths or ports. The bundles' workloads need none of that.
+ */
+const POD_SECURITY_LABELS = {
+  'pod-security.kubernetes.io/enforce': 'baseline',
+  'pod-security.kubernetes.io/warn': 'baseline',
+};
+
+/**
  * What a service's Kustomization needs before Flux can apply it, in apply order: the service's Namespace, the
  * service account `calm-<name>` in `flux-system` (Flux impersonates an account in the Kustomization's own namespace),
  * a RoleBinding of the built-in ClusterRole `admin` to it in the service's namespace, and the ClusterRole and
  * ClusterRoleBinding `calm-<name>-namespace` described below. `admin` covers namespaced objects only, so a push to
  * the service's repository cannot touch other namespaces or cluster-scoped objects.
  *
- * The service account cannot create a Namespace, so the Namespace is applied here and not from Git. It is marked
- * prune-disabled: a service deployed before this change has it in its Kustomization's inventory, and the push that
- * drops it from the overlay would otherwise make Flux delete the namespace and everything in it.
+ * The service account cannot create a Namespace, so the Namespace is applied here and not from Git, with Pod
+ * Security `baseline` enforced. It is marked prune-disabled: a service deployed before this change has it in its
+ * Kustomization's inventory, and the push that drops it from the overlay would otherwise make Flux delete the
+ * namespace and everything in it.
  *
  * Flux prunes that stale inventory entry as the service account too: it reads the Namespace, finds the annotation
  * and keeps it, without writing to it. A RoleBinding cannot grant access to a cluster-scoped object, so a ClusterRole
@@ -89,6 +99,10 @@ export function fluxTenantObjects(o: {
       ...ns,
       metadata: {
         ...ns.metadata,
+        labels: {
+          ...(ns.metadata.labels as Record<string, string>),
+          ...POD_SECURITY_LABELS,
+        },
         annotations: { [FLUX_PRUNE_ANNOTATION]: 'disabled' },
       },
     },

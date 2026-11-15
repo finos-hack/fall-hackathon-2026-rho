@@ -51,7 +51,7 @@ describe('flux', () => {
     });
   });
 
-  it('builds the Namespace, a ServiceAccount in flux-system, a RoleBinding to admin in the namespace and a ClusterRole that reads the namespace, in that order', () => {
+  it('builds the Namespace (Pod Security baseline), a ServiceAccount in flux-system, a RoleBinding to admin in the namespace and a ClusterRole that reads the namespace, in that order', () => {
     const objects = fluxTenantObjects({
       name: 'orders',
       namespace: 'calm-orders',
@@ -64,7 +64,13 @@ describe('flux', () => {
       kind: 'Namespace',
       metadata: {
         name: 'calm-orders',
-        labels: { 'backstage.io/kubernetes-id': 'orders', ...labels },
+        labels: {
+          'backstage.io/kubernetes-id': 'orders',
+          ...labels,
+          // admin in the namespace must not be able to run privileged or host-access pods.
+          'pod-security.kubernetes.io/enforce': 'baseline',
+          'pod-security.kubernetes.io/warn': 'baseline',
+        },
         annotations: { 'kustomize.toolkit.fluxcd.io/prune': 'disabled' },
       },
     });

@@ -99,8 +99,8 @@ Scope: GitHub publish, dry run, register the architecture in the Hub.
   applies as its own service account (`calm-<name>` in `flux-system`, bound to the ClusterRole `admin` in the
   service's namespace only) with `targetNamespace`; `calm:deploy:gitops` applies the Namespace, the service account,
   the RoleBinding and a ClusterRole allowing `get` on that one Namespace (Flux reads it to skip its prune) itself, so
-  a push to a service repository can only change objects in the service's namespace. `admin` there can still run
-  privileged pods: the namespace has no Pod Security admission label yet.
+  a push to a service repository can only change objects in the service's namespace. The namespace enforces Pod
+  Security `baseline`, so `admin` there cannot run privileged or host-access pods.
 - Left (part 3): an upgrade overwrites the files the starter rendered (no three-way merge of a developer's edits);
   a bundle is published from Git by a script, not by a Backstage action; bundles fit patterns by id only.
 - Done: bundles are OCI artifacts in a local registry (`localhost:5050/calm-bundles/<name>:<version>`, pushed with
@@ -140,8 +140,7 @@ Scope: GitHub publish, dry run, register the architecture in the Hub.
   the RoleBinding and a ClusterRole allowing `get` on that one Namespace (for Flux's prune) itself, so a push to a service repository can only change objects in the service's
   namespace. `admin` there can still run privileged pods: the namespace has no Pod Security admission label yet.
 - Left (part 3): a GitHub client next to `GiteaClient` (push-to-create, pull requests and anonymous Flux reads are
-  Gitea's); `user-cookie` auth or a separate origin for the app proxy (FINDINGS, part 3, Security); a Pod Security
-  admission label on the service namespace.
+  Gitea's); `user-cookie` auth or a separate origin for the app proxy (FINDINGS, part 3, Security).
 - Swap in `publish:github` + `catalog:register` (url location) for a real repository; no GitHub credentials are set up.
 - `calm:generate`, `calm:fill`, `calm:validate` support dry runs; the template editor's dry run can use them.
 

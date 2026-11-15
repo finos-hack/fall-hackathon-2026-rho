@@ -207,7 +207,7 @@ build of Quarkus 3.33.4 and 3.40.1 (BOM `com.redhat.quarkus.platform:quarkus-bom
   - `/api/calm/app/*` is unauthenticated (a new tab carries no Backstage token) and serves the app on the backend's
     origin, so the app's script is same-origin with Backstage's APIs. Use `user-cookie` auth or a separate origin.
   - Anyone who can push to a service repository in Gitea (port 3300, fixed admin password) can change anything in
-    that service's namespace through Flux (each Kustomization runs as a service account bound to `admin` there).
-    Seed a random password.
+    that service's namespace through Flux (each Kustomization runs as a service account bound to `admin` there;
+    the namespace enforces Pod Security `baseline`, so not privileged or host-access pods). Seed a random password.
 - **A `PageBlueprint` gets a sidebar item from the plugin's `title` and `icon` and a `routeRef`**, not from the page's
   own title.
