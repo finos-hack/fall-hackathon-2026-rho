@@ -370,6 +370,19 @@ describe('upgrade Template', () => {
       t.spec.parameters[0].properties.service['ui:options'].catalogFilter,
     ).toEqual([{ kind: 'Component', 'metadata.tags': 'calm-gitops' }]);
   });
+
+  it('passes record to the deploy step, from the render step', () => {
+    const t = snapshot(true).entities.find(
+      e => e.metadata.name === 'calm-upgrade',
+    ) as any;
+    const deploy = t.spec.steps.find((s: any) => s.id === 'deploy');
+    expect(deploy.input.record).toEqual({
+      hubNamespace: '${{ steps.render.output.hubNamespace }}',
+      architecture: '${{ steps.render.output.architecture }}',
+      version: '${{ steps.render.output.architectureVersion }}',
+      architecturePath: '${{ steps.render.output.architecturePath }}',
+    });
+  });
 });
 
 describe('templateEntity: Git and Flux', () => {
@@ -401,6 +414,20 @@ describe('templateEntity: Git and Flux', () => {
       gitRepo: '${{ steps.deploy.output.repoUrl }}',
       gitCommit: '${{ steps.deploy.output.commit }}',
     });
+  });
+
+  it('passes record to the deploy step, so a failed deployment is recorded in the Hub', () => {
+    const expected = {
+      hubNamespace: '${{ steps["register-hub"].output.namespace }}',
+      architecture: '${{ steps["register-hub"].output.architecture }}',
+      version: '${{ steps["register-hub"].output.version }}',
+      architecturePath: '${{ steps.fill.output.architecturePath }}',
+    };
+    for (const gitops of [false, true]) {
+      const t = template([bundle('3.0.0', 'kubernetes')], { gitops });
+      expect(t.step('deploy').input.record).toEqual(expected);
+      expect(t.step('decorate').input.status).toBe('completed');
+    }
   });
 
   it('keeps kubectl apply without calm.gitops', () => {

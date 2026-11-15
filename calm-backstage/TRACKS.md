@@ -79,9 +79,11 @@ Scope: GitHub publish, dry run, register the architecture in the Hub.
 
 - Done: the generated architecture is stored in CALM Hub (`calm:register:hub`), the service is built and deployed
   to the local minikube (`calm:image:build`, `calm:deploy:k8s`) with NetworkPolicies from its `connects`
-  relationships, and the deployment is recorded as a decorator (`calm:decorate:deployment`).
+  relationships, and the deployment is recorded as a decorator (`calm:decorate:deployment`). A failed deployment is
+  recorded too: `calm:deploy:k8s` and `calm:deploy:gitops` take `record` and, when the deploy fails after it started,
+  post a `failed` decorator (applies to the nodes the rendered workloads are labelled with, the error in the notes)
+  and rethrow the error.
 - Left:
-  - A failed deployment is not recorded (the Template always passes `completed`).
   - An existing service cannot be redeployed: `calm:register:hub` and `calm:publish:local` refuse a name whose
     folder exists.
   - `calm:register:hub` runs before the render, so a run that fails later (render, publish, build or deploy) leaves
@@ -96,7 +98,7 @@ Scope: GitHub publish, dry run, register the architecture in the Hub.
 - Left (part 3): a GitHub client next to `GiteaClient` (push-to-create, pull requests and anonymous Flux reads are
   Gitea's); a namespaced service account and `targetNamespace` per Flux Kustomization (Flux runs as cluster-admin, so
   anyone who can push to Gitea controls the cluster); `user-cookie` auth or a separate origin for the app proxy
-  (FINDINGS, part 3, Security); a failed deploy is still not recorded in the Hub.
+  (FINDINGS, part 3, Security).
 - Swap in `publish:github` + `catalog:register` (url location) for a real repository; no GitHub credentials are set up.
 - `calm:generate`, `calm:fill`, `calm:validate` support dry runs; the template editor's dry run can use them.
 
