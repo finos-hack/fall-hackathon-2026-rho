@@ -1,0 +1,31 @@
+# Overrides calm-backstage/hub/docker-compose.yml so CALM Hub loads the gitops-deploy extension.
+#
+# Start it with scripts/hub-up.sh, not by hand: with several -f files Compose resolves relative paths against the
+# first file's folder (calm-backstage/hub), so the script passes absolute paths in EXT_DIR and KEYS_DIR.
+#
+# - The image is pinned to the first build with the whole extension framework (proxy, identity, actions, MCP tools).
+#   finos/calm-hub:latest and 0.7.7 do not have it.
+# - The extension runs on the host (it needs git, kubectl and the minikube kubeconfig), so Hub reaches it through
+#   host.docker.internal, which is not loopback: allow-http is needed for plain http.
+# - The Hub runs without auth (no-auth profile), so allow-without-auth is needed and every caller is "no-auth".
+#   Local development only.
+services:
+  calmhub:
+    image: finos/calm-hub:sha-96fe367
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    volumes:
+      - ${EXT_DIR:?run scripts/hub-up.sh}:/calm-extensions:ro
+      - ${KEYS_DIR:?run scripts/hub-up.sh}:/calm-keys:ro
+    environment:
+      - >-
+        JAVA_OPTS=-Dquarkus.mongodb.connection-string=mongodb://mongodb:27017
+        -Dquarkus.profile=no-auth
+        -Dcalm.hub.base-url=http://localhost:8090
+        -Dcalm.mcp.enabled=true
+        -Dcalm.extensions.dir=/calm-extensions
+        -Dcalm.extensions.allow-without-auth=true
+        -Dcalm.extensions.identity.private-key-location=/calm-keys/hub-private.pem
+        -Dcalm.extensions.identity.public-key-locations=/calm-keys/hub-public.pem
+        -Dcalm.extensions."gitops-deploy".backend-url=${GITOPS_DEPLOY_URL:-http://host.docker.internal:8093}
+        -Dcalm.extensions."gitops-deploy".allow-http=true
