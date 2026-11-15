@@ -55,6 +55,16 @@ without the deployment.
 - **Runs locally in a few minutes.** CALM Hub, MongoDB and the bundle registry run in Docker with seed content: a
   pattern with a `oneOf` and an `anyOf` decision, two architectures and a controls domain.
 
+## CALM Hub deployment extension
+
+[`calm-hub-deploy-extension/`](calm-hub-deploy-extension/README.md) is a
+[CALM Hub extension](https://calm.finos.org/tutorials/advanced/hub-extension/) that deploys an architecture version
+from CALM Hub itself: a **Deployment** tab and a **Deploy this version** action, plus the same operations as CLI
+commands and MCP tools. It checks the version against its pattern and controls, re-renders the service's deployment
+rules, opens a pull request in Gitea and lets Flux apply it, recording every step as a deployment decorator. It is a
+reference for a firm plugging its own deployment platform into CALM Hub ([PROFILE.md](calm-hub-deploy-extension/PROFILE.md)),
+and runs on this stack without changing Backstage.
+
 ## Installation
 
 You need Docker, Node 26 (Node 22 and 24 are allowed but untested) and the Yarn version bundled in the project. The
