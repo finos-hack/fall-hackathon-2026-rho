@@ -28,6 +28,24 @@ export const CALM_KUBERNETES = {
   uniqueIdAnnotation: 'calm.finos.org/unique-id',
 } as const;
 
+/** The Namespace of a service: found again by the Kubernetes plugin's label, and marked as made for this service. */
+export function namespaceManifest(
+  name: string,
+  namespace: string,
+): { apiVersion: 'v1'; kind: 'Namespace'; metadata: Record<string, unknown> } {
+  return {
+    apiVersion: 'v1',
+    kind: 'Namespace',
+    metadata: {
+      name: namespace,
+      labels: {
+        [KUBERNETES_ID_LABEL]: name,
+        [CALM_KUBERNETES.serviceLabel]: name,
+      },
+    },
+  };
+}
+
 /** Label the bundles put on a workload and its pods: the (Kubernetes) name of the architecture node it runs. */
 export const CALM_NODE_LABEL = 'calm.finos.org/node';
 

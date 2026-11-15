@@ -192,32 +192,29 @@ export function createCalmUpgradeRenderAction(options: {
         architectureVersion: z => z.string(),
       },
     },
-    // The working copy is reserved from here to the end of the upgrade (its deploy releases it), or until the task
-    // fails or finds nothing to change.
     async handler(outer) {
+      if (!options.gitops) {
+        throw new Error(
+          'calm.gitops is not configured: only services in Git can be upgraded',
+        );
+      }
+      const gitops = options.gitops;
+      const ref = stringifyEntityRef(parseEntityRef(outer.input.entityRef));
+      const entity = await options.catalog.getEntityByRef(ref, {
+        credentials: await outer.getInitiatorCredentials(),
+      });
+      if (!entity) {
+        throw new Error(`${ref} is not in the catalog`);
+      }
+      const name = entity.metadata.name;
+      // The same folder the later steps (merge, deploy) reserve: it comes from the catalog's name, not from the ref.
+      const dir = resolveSafeChildPath(options.localDir, name);
+      // The working copy is reserved from here to the end of the upgrade (its deploy releases it), or until the task
+      // fails or finds nothing to change.
       await withServiceLock(
         outer,
-        {
-          dir: resolveSafeChildPath(
-            options.localDir,
-            parseEntityRef(outer.input.entityRef).name,
-          ),
-          keep: o => o.changed === true,
-        },
+        { dir, keep: o => o.changed === true },
         async ctx => {
-          if (!options.gitops) {
-            throw new Error(
-              'calm.gitops is not configured: only services in Git can be upgraded',
-            );
-          }
-          const ref = stringifyEntityRef(parseEntityRef(ctx.input.entityRef));
-          const entity = await options.catalog.getEntityByRef(ref, {
-            credentials: await ctx.getInitiatorCredentials(),
-          });
-          if (!entity) {
-            throw new Error(`${ref} is not in the catalog`);
-          }
-          const name = entity.metadata.name;
           const a = entity.metadata.annotations ?? {};
           const current = serviceBundles(a);
           if (!a[ANN.gitops] || !current.pattern || !current.starter) {
@@ -230,7 +227,6 @@ export function createCalmUpgradeRenderAction(options: {
               `${ref} was made with the full bundle ${current.starter.name} ${current.starter.version}, which has no separate deployment rules; create it again with a starter to upgrade it`,
             );
           }
-          const dir = resolveSafeChildPath(options.localDir, name);
           const targets = upgradeTargets(
             current,
             await options.listBundles(),
@@ -302,17 +298,11 @@ export function createCalmUpgradeRenderAction(options: {
             );
           }
           await gitReset(dir, git);
-          if (branchNow !== options.gitops.branch) {
-            await gitCheckoutBranch(dir, options.gitops.branch, false, git);
+          if (branchNow !== gitops.branch) {
+            await gitCheckoutBranch(dir, gitops.branch, false, git);
           }
-          const repo = serviceRepository(options.gitops, name);
-          await gitPull(
-            dir,
-            repo.pushUrl,
-            options.gitops.branch,
-            options.gitops.auth,
-            git,
-          );
+          const repo = serviceRepository(gitops, name);
+          await gitPull(dir, repo.pushUrl, gitops.branch, gitops.auth, git);
           const currentImage = await readOverlayImage(dir);
           if (!currentImage) {
             throw new Error(
@@ -388,7 +378,7 @@ export function createCalmUpgradeRenderAction(options: {
           );
           if (!commit) {
             // The new versions render the same files: nothing to merge.
-            await gitCheckoutBranch(dir, options.gitops.branch, false, git);
+            await gitCheckoutBranch(dir, gitops.branch, false, git);
             await gitDeleteBranch(dir, branch, git);
             ctx.logger.info(
               'The new versions render the same files; nothing to upgrade',

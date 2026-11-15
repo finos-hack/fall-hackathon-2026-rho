@@ -1,8 +1,9 @@
 import path from 'node:path';
 
 /**
- * How long a service's working copy stays reserved for the task that took it. A task that fails between steps (the
- * image build, say) cannot always release it, so the reservation ends by itself.
+ * How long a service's working copy stays reserved for the task that took it, counted from the last time a step of
+ * that task worked in it. A task that fails between steps (or is killed) cannot always release it, so it ends by
+ * itself.
  */
 export const SERVICE_LOCK_TTL_MS = 10 * 60 * 1000;
 
@@ -21,15 +22,26 @@ export class ServiceLocks {
   private readonly held = new Map<string, Held>();
 
   constructor(
-    private readonly ttlMs = SERVICE_LOCK_TTL_MS,
+    readonly ttlMs = SERVICE_LOCK_TTL_MS,
     private readonly now: () => number = Date.now,
   ) {}
 
+  /** Drops the reservations that ran out. */
+  private prune(): void {
+    const now = this.now();
+    for (const [key, h] of this.held) {
+      if (h.until <= now) {
+        this.held.delete(key);
+      }
+    }
+  }
+
   /** Reserves `dir` for `owner`, or throws when another task holds it. */
   acquire(dir: string, owner: string): void {
+    this.prune();
     const key = path.resolve(dir);
     const current = this.held.get(key);
-    if (current && current.owner !== owner && current.until > this.now()) {
+    if (current && current.owner !== owner) {
       throw new Error(
         `${key} is in use by the task ${
           current.owner
@@ -39,6 +51,15 @@ export class ServiceLocks {
       );
     }
     this.held.set(key, { owner, until: this.now() + this.ttlMs });
+  }
+
+  /** Extends the reservation of `owner` on `dir` from now; does nothing when `owner` does not hold it. */
+  renew(dir: string, owner: string): void {
+    this.prune();
+    const key = path.resolve(dir);
+    if (this.held.get(key)?.owner === owner) {
+      this.held.set(key, { owner, until: this.now() + this.ttlMs });
+    }
   }
 
   /** Releases `dir` if `owner` holds it. */
@@ -51,8 +72,8 @@ export class ServiceLocks {
 
   /** The task that holds `dir`, if any. */
   holder(dir: string): string | undefined {
-    const current = this.held.get(path.resolve(dir));
-    return current && current.until > this.now() ? current.owner : undefined;
+    this.prune();
+    return this.held.get(path.resolve(dir))?.owner;
   }
 }
 
@@ -68,11 +89,14 @@ interface LockContext {
 /**
  * Runs the body of an action's handler with the service's working copy reserved for its task.
  *
- * - `dir` is the working copy, from the input.
- * - The reservation is released when the body fails. When it succeeds, `keep` says whether the task goes on in the
- *   same working copy (an upgrade after its render, until its deploy), judged by what the body output; the default
- *   is to release.
- * - `acquire: false` only releases on failure, for a step that works in a copy another step reserved.
+ * - `dir` is the working copy.
+ * - The reservation is renewed while the body runs, so a long step (an image build) does not outlast it.
+ * - It is released when the body fails. When the body succeeds, `keep` says whether the task goes on in the same
+ *   working copy (an upgrade after its render, until its deploy), judged by what the body output; the default is to
+ *   release.
+ * - `acquire: false` is for a step that works in a copy another step reserved (the image build): it takes nothing,
+ *   renews the task's own reservation while it runs, releases it when it fails, and keeps it when it succeeds.
+ * - A task id is needed to tell tasks apart: without one this throws rather than let two runs count as the same task.
  */
 export async function withServiceLock<C extends LockContext>(
   ctx: C,
@@ -85,10 +109,21 @@ export async function withServiceLock<C extends LockContext>(
   run: (ctx: C) => Promise<void>,
 ): Promise<void> {
   const locks = options.locks ?? serviceLocks;
-  const owner = ctx.task?.id ?? 'unknown-task';
-  if (options.acquire !== false) {
+  const owner = ctx.task?.id;
+  if (!owner) {
+    throw new Error(
+      `The working copy ${options.dir} is reserved per scaffolder task, but this run has no task id`,
+    );
+  }
+  const takes = options.acquire !== false;
+  if (takes) {
     locks.acquire(options.dir, owner);
   }
+  const heartbeat = setInterval(
+    () => locks.renew(options.dir, owner),
+    Math.max(1, Math.floor(locks.ttlMs / 3)),
+  );
+  heartbeat.unref();
   const outputs: Record<string, unknown> = {};
   const seen = Object.create(ctx) as C;
   seen.output = ((name: string, value: unknown) => {
@@ -98,9 +133,12 @@ export async function withServiceLock<C extends LockContext>(
   let kept = false;
   try {
     await run(seen);
-    kept = options.keep?.(outputs) ?? false;
+    kept = takes ? options.keep?.(outputs) ?? false : true;
   } finally {
-    if (!kept) {
+    clearInterval(heartbeat);
+    if (kept) {
+      locks.renew(options.dir, owner);
+    } else {
       locks.release(options.dir, owner);
     }
   }

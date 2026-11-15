@@ -121,4 +121,46 @@ describe('withServiceLock', () => {
     );
     expect(locks.holder(DIR)).toBe('task-a');
   });
+
+  it('keeps the task’s own reservation when an acquire: false step succeeds (a build between render and merge)', async () => {
+    const locks = new ServiceLocks();
+    locks.acquire(DIR, 'task-a');
+    await withServiceLock(
+      context('task-a', {}),
+      { dir: DIR, locks, acquire: false },
+      async () => {},
+    );
+    expect(locks.holder(DIR)).toBe('task-a');
+    expect(() => locks.acquire(DIR, 'task-b')).toThrow(/task-a/);
+  });
+
+  it('renews the reservation while the body runs, so a long step does not outlast it', async () => {
+    const locks = new ServiceLocks(60);
+    locks.acquire(DIR, 'task-a');
+    let another: unknown;
+    await withServiceLock(
+      context('task-a', {}),
+      { dir: DIR, locks, acquire: false },
+      async () => {
+        // Longer than the reservation: only the renewal keeps it.
+        await new Promise(r => setTimeout(r, 200));
+        try {
+          locks.acquire(DIR, 'task-b');
+        } catch (e) {
+          another = e;
+        }
+      },
+    );
+    expect(String(another)).toMatch(/in use by the task task-a/);
+    expect(locks.holder(DIR)).toBe('task-a');
+  });
+
+  it('refuses to run without a task id, rather than let two runs count as one task', async () => {
+    const locks = new ServiceLocks();
+    const run = jest.fn();
+    await expect(
+      withServiceLock(context(undefined, {}), { dir: DIR, locks }, run),
+    ).rejects.toThrow(/no task id/);
+    expect(run).not.toHaveBeenCalled();
+  });
 });

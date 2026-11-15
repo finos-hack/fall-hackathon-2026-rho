@@ -1,15 +1,20 @@
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { KUBERNETES_ANNOTATIONS as K8S } from '@internal/backstage-plugin-calm-common';
+import YAML from 'yaml';
 import {
+  KUBERNETES_ANNOTATIONS as K8S,
+  namespaceManifest,
+} from '@internal/backstage-plugin-calm-common';
+import {
+  GITOPS_OVERLAY_HEADER,
   applyArgs,
   checkExistingNamespace,
   createCalmDeployK8sAction,
-  namespaceManifest,
   overlayKustomization,
   parseImage,
   summariseObjects,
+  writeOverlay,
 } from './deployK8s';
 import { createCalmClusterCheckAction } from './clusterCheck';
 import { createCalmImageBuildAction, imageReference } from './imageBuild';
@@ -77,6 +82,48 @@ describe('overlay', () => {
     for (const image of ['stock-api', 'stock-api:latest', 'stock-api:', '']) {
       expect(() => parseImage(image)).toThrow(/Image must be <name>:<tag>/);
     }
+  });
+});
+
+describe('writeOverlay', () => {
+  const opts = {
+    name: 'stock-api',
+    namespace: 'calm-stock-api',
+    image: 'stock-api:run-1',
+  };
+  let dir: string;
+  beforeEach(async () => {
+    dir = await fs.mkdtemp(path.join(os.tmpdir(), 'calm-overlay-'));
+  });
+  afterEach(async () => {
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+  const read = async (overlayDir: string) => ({
+    files: (await fs.readdir(overlayDir)).sort(),
+    kustomization: YAML.parse(
+      await fs.readFile(path.join(overlayDir, 'kustomization.yaml'), 'utf-8'),
+    ),
+  });
+
+  it('keeps the Namespace in the overlay kubectl applies', async () => {
+    const overlay = await read(await writeOverlay(dir, opts, '# kubectl'));
+    expect(overlay.files).toEqual(['kustomization.yaml', 'namespace.yaml']);
+    expect(overlay.kustomization.resources).toEqual([
+      'namespace.yaml',
+      '../k8s',
+    ]);
+  });
+
+  it('leaves the Namespace out of the overlay Flux applies, and removes one an earlier deploy wrote', async () => {
+    await writeOverlay(dir, opts, '# kubectl');
+    const overlay = await read(
+      await writeOverlay(dir, opts, GITOPS_OVERLAY_HEADER, {
+        withNamespace: false,
+      }),
+    );
+    expect(overlay.files).toEqual(['kustomization.yaml']);
+    expect(overlay.kustomization.resources).toEqual(['../k8s']);
+    expect(overlay.kustomization.namespace).toBe('calm-stock-api');
   });
 });
 
@@ -175,6 +222,7 @@ describe('the actions without a cluster', () => {
       logger: { info: jest.fn(), warn: jest.fn() },
       output: jest.fn(),
       workspacePath: os.tmpdir(),
+      task: { id: 'task-test' },
     } as any);
   const localDir = path.join(os.tmpdir(), 'calm-output');
   const dir = path.join(localDir, 'stock-api');

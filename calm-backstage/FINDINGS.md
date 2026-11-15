@@ -158,6 +158,23 @@ build of Quarkus 3.33.4 and 3.40.1 (BOM `com.redhat.quarkus.platform:quarkus-bom
   what Flux applies. A failed build leaves `main`, Gitea and the cluster untouched.
 - **Gitea creates a repository on the first push** into an organisation (`ENABLE_PUSH_CREATE_ORG`), and refuses to
   merge a new pull request until it has checked it can be merged (405 "try again later"); the merge is retried.
+- **Flux impersonates a service account in the Kustomization's own namespace.** `spec.serviceAccountName` names
+  one in `flux-system`, not in `targetNamespace`. Each service's Kustomization runs as `calm-<name>`, bound to the
+  ClusterRole `admin` in the service's namespace only.
+- **A namespaced service account cannot apply a Namespace**, so the Namespace left the overlay in Git:
+  `calm:deploy:gitops` and `calm:upgrade:merge` apply it, with the service account, its RoleBinding and the namespace
+  ClusterRole below, before they push.
+- **Removing an object from a pruned Kustomization deletes it.** A service deployed before the change has the
+  Namespace in its Kustomization's inventory; the push that drops `namespace.yaml` would delete the namespace and
+  everything in it. The Namespace carries `kustomize.toolkit.fluxcd.io/prune: disabled`, applied before that push.
+  An upgrade is the risky path: the old Kustomization can reconcile the merge commit before `calm:deploy:gitops`
+  runs, so `calm:upgrade:merge` applies the annotation too. Both apply it server-side under their own field manager
+  (`calm-backstage`): Flux takes over the fields owned by kubectl's managers on objects it applies, so an old
+  Kustomization still applying `namespace.yaml` would drop an annotation set by a plain `kubectl apply`.
+- **Flux prunes as the impersonated account too, cluster-scoped objects included.** To skip the prune-disabled
+  Namespace it first reads it, as `calm-<name>`, and a RoleBinding cannot grant that (issue #26: the upgrade got a
+  403). A ClusterRole `calm-<name>-namespace` allows `get` on that one Namespace by name; Flux does not write to an
+  object it skips.
 - **GitHub is not a drop-in.** Push-to-create, the pull request API and anonymous reads by Flux are Gitea's. The Git
   host sits behind `GiteaClient`; a GitHub client is a track.
 
@@ -211,18 +228,20 @@ build of Quarkus 3.33.4 and 3.40.1 (BOM `com.redhat.quarkus.platform:quarkus-bom
 - **Security, open (local development only):**
   - `/api/calm/app/*` is unauthenticated (a new tab carries no Backstage token) and serves the app on the backend's
     origin, so the app's script is same-origin with Backstage's APIs. Use `user-cookie` auth or a separate origin.
-  - Anyone who can push to a service repository in Gitea (fixed admin password) can apply anything through Flux,
-    which runs as cluster-admin. Gitea is published on 127.0.0.1:3300, so by default that is anyone on this machine,
-    not the network; with `GITEA_BIND=0.0.0.0` (Linux) it is the network again unless a firewall blocks 3300. Give
-    each Kustomization a namespaced service account and `targetNamespace`, and seed a random password.
+  - Anyone who can push to a service repository in Gitea (port 3300, fixed admin password) can change anything in
+    that service's namespace through Flux (each Kustomization runs as a service account bound to `admin` there;
+    the namespace enforces Pod Security `baseline`, so not privileged or host-access pods). Gitea is published on
+    127.0.0.1:3300, so by default that is anyone on this machine, not the network; with `GITEA_BIND=0.0.0.0` (Linux)
+    it is the network again unless a firewall blocks 3300. Seed a random password.
 - **Two tasks must not share a service's working copy.** `calm:upgrade:render`, `calm:upgrade:merge` and
   `calm:deploy:gitops` reset, clean and switch branches in `output/<name>`, and an upgrade spans render, image build,
   merge and deploy. A double click on Upgrade, or an upgrade over a `deploy:gitops` rerun, could leave one task on
   the other's branch. The working copy is now reserved for the task that took it (in memory, by task id): render
   takes it and keeps it when it changed something, merge takes it again, and the deploy (or any failure, or a render
   with nothing to change) releases it. Another task gets "is in use by the task ..." at once. A task that dies
-  between steps releases it at the latest after 10 minutes (`SERVICE_LOCK_TTL_MS`), so a failed upgrade can be run
-  again after that time, and at once when it failed in the render, the image build or the merge. The reservation is
+  between steps releases it 10 minutes (`SERVICE_LOCK_TTL_MS`) after its last step, which renews it while it runs
+  (a slow image build does not outlast it), so a failed upgrade can be run again after that time, and at once when
+  it failed in the render, the image build or the merge. The reservation is
   per backend process, so it assumes one Backstage backend.
 - **A `PageBlueprint` gets a sidebar item from the plugin's `title` and `icon` and a `routeRef`**, not from the page's
   own title.

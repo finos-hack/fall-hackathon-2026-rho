@@ -12,6 +12,7 @@ import {
   createCalmDeployGitopsAction,
   waitForKustomization,
 } from './deployGitops';
+import { GITOPS_OVERLAY_HEADER, writeOverlay } from './deployK8s';
 import {
   createCalmGitPublishAction,
   withGitAnnotations,
@@ -41,6 +42,7 @@ const ctx = (input: object) =>
     logger: { info: jest.fn(), warn: jest.fn(), error: jest.fn() },
     output: jest.fn(),
     workspacePath: root,
+    task: { id: 'task-test' },
   } as any);
 const outputs = (c: any) =>
   Object.fromEntries(c.output.mock.calls.map((x: any[]) => [x[0], x[1]]));
@@ -169,9 +171,28 @@ function fakeKubectl(opts: {
   failFlux?: string;
 }) {
   const calls: string[][] = [];
+  /** What each `apply` applied, its arguments before `-f`, and the remote's main at that moment. */
+  const applied: {
+    objects: any[];
+    flags: string[];
+    remoteMain: string;
+    call: number;
+  }[] = [];
   const kubectl = async (args: string[]) => {
     calls.push(args);
     const a = args.join(' ');
+    if (args[0] === 'apply') {
+      const f = args.indexOf('-f');
+      applied.push({
+        objects: YAML.parseAllDocuments(await fs.readFile(args[f + 1], 'utf-8'))
+          .map(d => d.toJSON())
+          .filter(Boolean),
+        flags: args.slice(1, f),
+        remoteMain: await git(opts.remote, ['rev-parse', 'main']),
+        call: calls.length - 1,
+      });
+      return '';
+    }
     if (a.startsWith('get namespace')) {
       return opts.namespace ? JSON.stringify(opts.namespace) : '';
     }
@@ -210,7 +231,7 @@ function fakeKubectl(opts: {
     }
     return '';
   };
-  return { calls, kubectl };
+  return { calls, applied, kubectl };
 }
 
 describe('calm:deploy:gitops', () => {
@@ -265,6 +286,79 @@ describe('calm:deploy:gitops', () => {
     );
     expect(annotate.at(-1)).toMatch(/^reconcile\.fluxcd\.io\/requestedAt=/);
     expect(fake.calls.some(c2 => c2.includes('rollout'))).toBe(true);
+  });
+
+  it('applies the prune-disabled namespace, service account and role binding before the push that drops namespace.yaml, and Flux applies as that account', async () => {
+    const { remote, dir } = await published('orders');
+    // Deployed before Flux had a service account: the overlay on main holds the Namespace.
+    await writeOverlay(
+      dir,
+      { name: 'orders', namespace: 'calm-orders', image: 'orders:old' },
+      GITOPS_OVERLAY_HEADER,
+    );
+    await gitCommitAll(dir, 'Deploy orders:old');
+    await gitPush(dir, `file://${remote}`, 'main');
+    const before = await git(remote, ['rev-parse', 'main']);
+    expect(
+      await git(remote, ['show', 'main:deploy/k8s-overlay/namespace.yaml']),
+    ).toContain('kind: Namespace');
+    const fake = fakeKubectl({ remote });
+    const c = ctx({ dir, name: 'orders', image: 'orders:abc123' });
+    await createCalmDeployGitopsAction({
+      settings: settings(),
+      gitops: gitops(),
+      localDir,
+      kubectl: () => fake.kubectl,
+      wait: { pollMs: 1, timeoutMs: 1000 },
+    }).handler(c);
+    const kinds = fake.applied.map(x => x.objects.map(o => o.kind));
+    expect(kinds).toEqual([
+      [
+        'Namespace',
+        'ServiceAccount',
+        'RoleBinding',
+        'ClusterRole',
+        'ClusterRoleBinding',
+      ],
+      ['GitRepository', 'Kustomization'],
+    ]);
+    const [tenant, flux] = fake.applied;
+    // The prune-disabled Namespace is on the cluster before Flux sees an overlay without it.
+    expect(tenant.remoteMain).toBe(before);
+    // Server-side apply under its own field manager: Flux takes over fields owned by kubectl's managers.
+    expect(tenant.flags).toEqual([
+      '--server-side',
+      '--field-manager=calm-backstage',
+      '--force-conflicts',
+    ]);
+    expect(flux.flags).toEqual([]);
+    expect(tenant.objects[0]).toMatchObject({
+      metadata: {
+        name: 'calm-orders',
+        labels: { 'calm.finos.org/service': 'orders' },
+        annotations: { 'kustomize.toolkit.fluxcd.io/prune': 'disabled' },
+      },
+    });
+    expect(flux.remoteMain).toBe(outputs(c).commit);
+    expect(flux.objects[1].spec).toMatchObject({
+      serviceAccountName: 'calm-orders',
+      targetNamespace: 'calm-orders',
+    });
+    const annotate = fake.calls.findIndex(c2 => c2.includes('annotate'));
+    expect(tenant.call).toBeLessThan(flux.call);
+    expect(flux.call).toBeLessThan(annotate);
+    expect(
+      await git(remote, [
+        'ls-tree',
+        '--name-only',
+        'main',
+        'deploy/k8s-overlay/',
+      ]),
+    ).toBe('deploy/k8s-overlay/kustomization.yaml');
+    const overlay = YAML.parse(
+      await git(remote, ['show', 'main:deploy/k8s-overlay/kustomization.yaml']),
+    );
+    expect(overlay.resources).toEqual(['../k8s']);
   });
 
   it('makes no commit when the overlay already deploys the image', async () => {
