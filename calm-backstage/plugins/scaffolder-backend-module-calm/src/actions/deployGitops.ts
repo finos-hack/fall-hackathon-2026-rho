@@ -154,7 +154,7 @@ export function createCalmDeployGitopsAction(options: {
             })
             .optional()
             .describe(
-              'The architecture version in CALM Hub (calm:register:hub output). When set and the deployment fails after it started, a deployment decorator with the status failed is recorded there, and the error is thrown as before',
+              'The architecture version in CALM Hub (calm:register:hub output). When set and the deployment fails after it started (once the commit is pushed: the Flux objects, the reconcile, the rollouts), a deployment decorator with the status failed is recorded there, and the error is thrown as before',
             ),
       },
       output: {
@@ -209,7 +209,7 @@ export function createCalmDeployGitopsAction(options: {
         name,
         existing ? JSON.parse(existing) : undefined,
       );
-      // Checked before the try: on the wrong branch nothing is deployed, so no failed deployment is recorded.
+      // On the wrong branch nothing is deployed, so no failed deployment is recorded.
       const git = { logger: ctx.logger, signal: ctx.signal };
       const branch = await gitCurrentBranch(dir, git);
       if (branch !== gitops.branch) {
@@ -220,33 +220,33 @@ export function createCalmDeployGitopsAction(options: {
 
       const startTime = new Date().toISOString();
       const fluxName = fluxObjectName(name);
-      let commit: string;
-      let repo: ReturnType<typeof serviceRepository>;
+      await writeOverlay(
+        dir,
+        { name, namespace, image },
+        GITOPS_OVERLAY_HEADER,
+      );
+      // From now on the service is deployed from Git: the catalog and the upgrade Template find it by this.
+      const catalogInfo = path.join(dir, CATALOG_INFO_FILE);
+      const info = await fs
+        .readFile(catalogInfo, 'utf-8')
+        .catch(() => undefined);
+      if (info !== undefined) {
+        await fs.writeFile(catalogInfo, withGitopsAnnotations(info, name));
+      }
+      const made = await gitCommitAll(dir, `Deploy ${image}`, git);
+      const commit = made ?? (await gitHead(dir, git));
+      ctx.logger.info(
+        made
+          ? `Committed the overlay for ${image}: ${commit}`
+          : `The overlay already deploys ${image}; deploying ${commit}`,
+      );
+      const repo = serviceRepository(gitops, name);
+      await gitPush(dir, repo.pushUrl, gitops.branch, gitops.auth, git);
+
+      // The deployment starts once the commit is in Git, where Flux reads it. A failure before this point (the
+      // overlay, the commit, a rejected push) deployed nothing, so it is thrown without recording a failed deployment.
       let deployed: Deployed;
       try {
-        await writeOverlay(
-          dir,
-          { name, namespace, image },
-          GITOPS_OVERLAY_HEADER,
-        );
-        // From now on the service is deployed from Git: the catalog and the upgrade Template find it by this.
-        const catalogInfo = path.join(dir, CATALOG_INFO_FILE);
-        const info = await fs
-          .readFile(catalogInfo, 'utf-8')
-          .catch(() => undefined);
-        if (info !== undefined) {
-          await fs.writeFile(catalogInfo, withGitopsAnnotations(info, name));
-        }
-        const made = await gitCommitAll(dir, `Deploy ${image}`, git);
-        commit = made ?? (await gitHead(dir, git));
-        ctx.logger.info(
-          made
-            ? `Committed the overlay for ${image}: ${commit}`
-            : `The overlay already deploys ${image}; deploying ${commit}`,
-        );
-        repo = serviceRepository(gitops, name);
-        await gitPush(dir, repo.pushUrl, gitops.branch, gitops.auth, git);
-
         // The Flux objects are cluster state, not part of the service's repository.
         const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'calm-flux-'));
         try {

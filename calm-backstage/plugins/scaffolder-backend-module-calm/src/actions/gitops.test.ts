@@ -410,11 +410,14 @@ describe('calm:deploy:gitops: a failed deployment', () => {
     namespace?: object;
     failFlux?: string;
     branch?: string;
+    /** Breaks the working copy or the remote before the action runs. */
+    before?: (dir: string, remote: string) => Promise<void>;
   }) => {
     const { remote, dir } = await failing();
     if (opts.branch) {
       await git(dir, ['checkout', '-q', '-b', opts.branch]);
     }
+    await opts.before?.(dir, remote);
     const fake = fakeKubectl({
       remote,
       failFlux: opts.failFlux ?? 'kustomize build failed',
@@ -486,6 +489,45 @@ describe('calm:deploy:gitops: a failed deployment', () => {
     const { result } = await run({ input: { record }, hub, branch: 'feature' });
     await expect(result).rejects.toThrow(/is on the branch feature, not main/);
     expect(hub.architectures).not.toHaveBeenCalled();
+    expect(hub.createDecorator).not.toHaveBeenCalled();
+  });
+
+  it('records nothing when the push is rejected: nothing reached Git or Flux', async () => {
+    const { hub } = fakeRecordingHub();
+    const { result } = await run({
+      input: { record },
+      hub,
+      // The remote is gone, so the push fails.
+      before: async (_dir, remote) => fs.rm(remote, { recursive: true }),
+    });
+    await expect(result).rejects.toThrow(/calm-services\/orders\.git/);
+    expect(hub.architectures).not.toHaveBeenCalled();
+    expect(hub.createDecorator).not.toHaveBeenCalled();
+  });
+
+  it('records nothing when the overlay cannot be written', async () => {
+    const { hub } = fakeRecordingHub();
+    const { result } = await run({
+      input: { record },
+      hub,
+      // A file where the overlay folder goes.
+      before: async dir =>
+        fs.writeFile(path.join(dir, 'deploy', 'k8s-overlay'), 'not a folder'),
+    });
+    await expect(result).rejects.toThrow(/k8s-overlay/);
+    expect(hub.createDecorator).not.toHaveBeenCalled();
+  });
+
+  it('records nothing when the commit fails', async () => {
+    const { hub } = fakeRecordingHub();
+    const { result } = await run({
+      input: { record },
+      hub,
+      // Another git process holds the index (the action's git runs without hooks).
+      before: async dir =>
+        fs.writeFile(path.join(dir, '.git', 'index.lock'), ''),
+    });
+    await expect(result).rejects.toThrow(/index\.lock/);
     expect(hub.createDecorator).not.toHaveBeenCalled();
   });
 });
