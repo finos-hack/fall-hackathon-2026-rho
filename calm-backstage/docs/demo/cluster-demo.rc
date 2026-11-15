@@ -1,0 +1,11 @@
+# bash rc for the terminal in the cluster demo (record-cluster-demo.cjs starts ttyd with it).
+# Short prompt, the repository's kubeconfig, `k` for kubectl, $HUB and $REGISTRY, and a prompt counter the recorder waits on.
+export KUBECONFIG="$CALM_DEMO_REPO/.kube/config"
+export PATH="$CALM_DEMO_REPO/docs/demo:$PATH"
+alias k='kubectl --context calm-backstage'
+PS1='\[\e[1;34m\]$\[\e[0m\] '
+export HUB=http://localhost:8090 REGISTRY=http://localhost:5050
+PROMPT_COMMAND='echo >> "$CALM_DEMO_PROMPTS"'
+export BASH_SILENCE_DEPRECATION_WARNING=1
+cd "$CALM_DEMO_REPO" || exit 1
+clear

@@ -14,7 +14,11 @@ import {
   deploymentDecorator,
 } from '@internal/backstage-plugin-calm-common';
 
-/** The node `unique-id`s among the workloads: a workload is named after the node it was rendered from. */
+/**
+ * The node `unique-id`s among the workloads, each once: the node each Deployment was rendered from (calm:deploy:k8s or
+ * calm:deploy:gitops output `nodes`), which is its name unless the id is not a valid Kubernetes name. A node can be
+ * listed twice when two Deployments carry its id, e.g. while an old Deployment with an earlier converted name remains.
+ */
 export function deployedNodes(
   workloads: string[],
   architecture: unknown,
@@ -23,7 +27,7 @@ export function deployedNodes(
     ? (architecture as any).nodes
     : [];
   const ids = new Set(nodes.map(n => n?.['unique-id']));
-  return workloads.filter(w => ids.has(w));
+  return [...new Set(workloads)].filter(w => ids.has(w));
 }
 
 /** What `recordDeployment` writes to the Hub: the inputs of `calm:decorate:deployment`, plus where the run is. */
@@ -69,8 +73,9 @@ export async function recordDeployment(
     input.architecturePath ?? 'architecture.json',
   );
   const doc = JSON.parse(await fs.readFile(file, 'utf-8'));
-  const appliesTo = deployedNodes(input.workloads, doc);
-  const notNodes = input.workloads.filter(w => !appliesTo.includes(w));
+  const workloads = [...new Set(input.workloads)];
+  const appliesTo = deployedNodes(workloads, doc);
+  const notNodes = workloads.filter(w => !appliesTo.includes(w));
   if (notNodes.length) {
     logger.warn(
       `Not nodes of the architecture, so left out of applies-to: ${notNodes.join(
@@ -194,7 +199,7 @@ export function createCalmDecorateDeploymentAction(options: {
           z
             .array(z.string())
             .describe(
-              'Deployment names (calm:deploy:k8s output deployments); those that are node ids become applies-to',
+              'The nodes the Deployments were rendered from (calm:deploy:k8s output nodes); those that are node ids of the architecture become applies-to',
             ),
         architecturePath: z =>
           z

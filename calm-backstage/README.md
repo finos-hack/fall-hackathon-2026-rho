@@ -16,7 +16,7 @@ You need Docker, Node 26 and the repository's own Yarn (`.yarn/releases`, picked
 
 ```sh
 yarn install
-yarn hub:up && yarn hub:seed    # CALM Hub on :8090, bundle registry on :5050, Gitea on :3300 (seeded, idempotent)
+yarn hub:up && yarn hub:seed    # Hub on 127.0.0.1:8090, registry on 127.0.0.1:5050, Gitea on 127.0.0.1:3300 (seeded, idempotent)
 yarn k8s:up                     # local Kubernetes (minikube profile calm-backstage, 6 GiB, 4 CPUs) with Flux
 yarn start                      # Backstage on http://localhost:3100 (backend on 7107)
 ```
@@ -29,6 +29,14 @@ Gitea (http://localhost:3300, user `calm`, password `calm-local-dev`, local deve
 `calm-templates/bundles` holds the bundle sources and `calm-services/<name>` one repository per service. Flux in the
 cluster reaches it as `http://host.minikube.internal:3300`. Settings are under `calm.gitops` in `app-config.yaml`;
 without that block the Template deploys with `kubectl apply` as in part 2.
+
+The Hub, the registry and Gitea are published on 127.0.0.1 only, because anyone who can reach them can get code run
+in the backend or the cluster. With minikube on macOS (Docker Desktop) Flux still reaches Gitea. Where minikube runs on
+Linux, including inside WSL, `host.minikube.internal` is expected to be the gateway of minikube's Docker network, which
+a 127.0.0.1 port does not answer (not tested on Linux). `yarn k8s:up` warns when the cluster cannot reach Gitea. Then
+add `GITEA_BIND=0.0.0.0` to `hub/.env` (git-ignored) and run `yarn hub:up` again. That publishes Gitea on every
+interface, so keep port 3300 off the network with a host firewall. The comment above `gitea` in
+`hub/docker-compose.yml` has the details.
 
 Open http://localhost:3100 and choose **Enter** to sign in as a guest. `yarn hub:down` stops the Hub and keeps its
 data. To reset the Hub completely (needed after editing files in `seed/`, because Hub versions cannot change):
@@ -82,9 +90,10 @@ app-config.local.yaml --config <that file>`. Both share the Hub, the registry, G
    consumes through a [Nisshi](https://nisshi.io) broker, with PostgreSQL or SQLite storage. Its page sends events and
    shows them coming back.
 10. **Upgrade**: create a service on `spring-boot-service@1.0.0` and `k8s-deploy@1.0.0`. The card then says 1.1.0 and
-    1.2.1 are available; **Upgrade** runs the `calm-upgrade` Template: re-render on a branch, build, open and merge a
+    1.3.1 are available; **Upgrade** runs the `calm-upgrade` Template: re-render on a branch, build, open and merge a
     pull request in Gitea, Flux applies the merge commit, CALM Hub records the deployment. The app page then shows
-    Spring Boot 4.1.2 and `k8s-deploy@1.2.1`.
+    Spring Boot 4.1.2 and `k8s-deploy@1.3.1`. `k8s-deploy` 1.3.x needs cert-manager: run `yarn k8s:up` again on a
+    cluster created before it.
 
 To change a bundle, add a new version folder in Gitea's `calm-templates/bundles` (or in `bundles/`) and run
 `node hub/push-bundles.cjs --from-git` (or `yarn bundles:push`). A published version never changes: changed content
@@ -92,6 +101,10 @@ under an existing version is refused before anything is committed or published.
 
 Recordings (YouTube):
 
+- [The cluster demo](https://youtu.be/mJNV3iuA6H4) (3:58): a terminal on an empty cluster beside Backstage. The
+  pattern in Backstage and CALM Hub, the starters to choose from, the Template form and its run step by step, while the
+  terminal shows a Nisshi service arriving, the app answering `curl`, the network policies enforced and the events in
+  PostgreSQL. Chapters in `docs/demo/README.md`.
 - The full demo of parts 1 to 3 in one take, opening with a table of contents, is not uploaded yet; chapter times are
   in `docs/demo/README.md`. Record it again with `node docs/demo/record-full-demo.cjs <suffix> <out-dir> <base-url>`.
 - [The part 2 walkthrough](https://youtu.be/XhFmQQTT6-k) (135 s): the whole flow, ending with a service
@@ -129,7 +142,7 @@ is the same and stores the next patch version when it is not. The Hub architectu
 | `plugins/scaffolder-backend-module-calm` | Actions `calm:generate`, `calm:fill`, `calm:validate`, `calm:register:hub`, `calm:template`, `calm:publish:local`, `calm:git:publish`, `calm:image:build`, `calm:deploy:k8s`, `calm:deploy:gitops`, `calm:decorate:deployment`, `calm:register:local`, `calm:upgrade:render`, `calm:upgrade:merge`, `calm:catalog:refresh` |
 | `plugins/calm-backend` | Routes `POST /api/calm/placeholders`, `GET /api/calm/architecture` (from the Hub, or a service's file; with a deployed service's workloads, network policies, Flux status and the deployments recorded in the Hub), `GET /api/calm/pattern`, `GET /api/calm/upgrades`, `GET /api/calm/bundles` (+ files, file, diff), and the unauthenticated app proxy `/api/calm/app/<name>/` |
 | `plugins/calm` | Frontend: architecture and pattern entity cards (with bundle versions, Upgrade, Git and Flux, Open the running app), the `CalmPlaceholders` form field, the Template Explorer page |
-| `hub/` | CALM Hub (`finos/calm-hub:latest`, `no-auth`), MongoDB, an OCI registry (`registry:2`, port 5050) and Gitea (port 3300) in Docker; `seed.sh`, `gitea-seed.sh` and `push-bundles.cjs` (all idempotent) |
+| `hub/` | CALM Hub (`finos/calm-hub:latest`, `no-auth`), MongoDB, an OCI registry (`registry:2`, 127.0.0.1:5050) and Gitea (127.0.0.1:3300) in Docker; `seed.sh`, `gitea-seed.sh` and `push-bundles.cjs` (all idempotent) |
 | `k8s/` | `up.sh`/`down.sh` for the minikube profile, `flux-install.cjs` (Flux without its CLI), the read-only Backstage account |
 | `seed/` | Patterns `web-service` (a `oneOf` and an `anyOf` decision) and `event-streaming` (Nisshi, a storage choice), two architectures, controls in domain `hackathon-security` |
 | `bundles/<name>/<version>` | Template bundles; `calm-backstage.json` gives the kind (`starter`, `deployment`, or `full` when absent) and the patterns each fits. Starters: `node-service`, `spring-boot-service`, `quarkus-service`, `nisshi-stream-app`; deployment rules: `k8s-deploy`; full: `web-service`. `yarn bundles:push` (part of `yarn hub:seed`) mirrors them into Gitea and publishes them from that commit as `localhost:5050/calm-bundles/<name>:<version>` |

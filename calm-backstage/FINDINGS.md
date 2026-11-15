@@ -120,6 +120,13 @@ Each is a candidate for a published, supported API.
 - **minikube's docker driver can give the API server a new port on each start.** `k8s/up.sh` rewrites
   `app-config.local.yaml` every time, and Backstage needs a restart after it.
 - **Policies need a CNI that enforces them.** The profile is started with `--cni=calico`.
+- **A NetworkPolicy names the pod's port, not the Service's.** The TLS sidecar (`k8s-deploy` 1.3.0 and later) is reached on
+  Service port 443, but its policies allow 8443, the port it listens on in the pod.
+- **`nginx-unprivileged` listens on 8080 out of the box** (its `conf.d/default.conf`), the starters' default port. A
+  sidecar next to an app on 8080 must replace that folder, as the TLS sidecar's ConfigMap does, or one of them fails
+  to bind.
+- **cert-manager's resources are CRDs**: a bundle that renders an `Issuer` or a `Certificate` fails to apply on a
+  cluster without cert-manager. Clusters made before `yarn k8s:up` installed it need it run again.
 - **An image built into minikube needs a tag other than `latest` and `imagePullPolicy: IfNotPresent`**, or the pod
   tries to pull it.
 - **`hub/push-bundles.cjs` loads a TypeScript file through Node's type stripping**, which Node 22 before 22.18
@@ -137,7 +144,10 @@ build of Quarkus 3.33.4 and 3.40.1 (BOM `com.redhat.quarkus.platform:quarkus-bom
   source and kustomize controllers. Without the notification controller, each controller retries every event five
   times (about 15 s per reconcile) unless `--events-addr` is removed; it is.
 - **Flux in minikube reaches a Compose container through `host.minikube.internal`** and the published port; the two
-  are on different Docker networks. So Gitea must listen on the host's interfaces, not only on loopback.
+  are on different Docker networks. With Docker Desktop on macOS that name is the Docker Desktop host address, which
+  also reaches a port published on 127.0.0.1. Where minikube runs on Linux it is expected to be the gateway of
+  minikube's network, which does not (seen inside Docker Desktop's VM), so there Gitea has to be published on all
+  interfaces (`GITEA_BIND=0.0.0.0`, see `hub/docker-compose.yml`). Binding only the gateway would stop `localhost`.
 - **Ask for a reconcile with the annotation `reconcile.fluxcd.io/requestedAt`**, then wait until the Kustomization is
   Ready with `status.lastAppliedRevision` naming the pushed commit (`main@sha1:<sha>`). Ready alone can still be the
   previous commit.
@@ -148,6 +158,23 @@ build of Quarkus 3.33.4 and 3.40.1 (BOM `com.redhat.quarkus.platform:quarkus-bom
   what Flux applies. A failed build leaves `main`, Gitea and the cluster untouched.
 - **Gitea creates a repository on the first push** into an organisation (`ENABLE_PUSH_CREATE_ORG`), and refuses to
   merge a new pull request until it has checked it can be merged (405 "try again later"); the merge is retried.
+- **Flux impersonates a service account in the Kustomization's own namespace.** `spec.serviceAccountName` names
+  one in `flux-system`, not in `targetNamespace`. Each service's Kustomization runs as `calm-<name>`, bound to the
+  ClusterRole `admin` in the service's namespace only.
+- **A namespaced service account cannot apply a Namespace**, so the Namespace left the overlay in Git:
+  `calm:deploy:gitops` and `calm:upgrade:merge` apply it, with the service account, its RoleBinding and the namespace
+  ClusterRole below, before they push.
+- **Removing an object from a pruned Kustomization deletes it.** A service deployed before the change has the
+  Namespace in its Kustomization's inventory; the push that drops `namespace.yaml` would delete the namespace and
+  everything in it. The Namespace carries `kustomize.toolkit.fluxcd.io/prune: disabled`, applied before that push.
+  An upgrade is the risky path: the old Kustomization can reconcile the merge commit before `calm:deploy:gitops`
+  runs, so `calm:upgrade:merge` applies the annotation too. Both apply it server-side under their own field manager
+  (`calm-backstage`): Flux takes over the fields owned by kubectl's managers on objects it applies, so an old
+  Kustomization still applying `namespace.yaml` would drop an annotation set by a plain `kubectl apply`.
+- **Flux prunes as the impersonated account too, cluster-scoped objects included.** To skip the prune-disabled
+  Namespace it first reads it, as `calm-<name>`, and a RoleBinding cannot grant that (issue #26: the upgrade got a
+  403). A ClusterRole `calm-<name>-namespace` allows `get` on that one Namespace by name; Flux does not write to an
+  object it skips.
 - **GitHub is not a drop-in.** Push-to-create, the pull request API and anonymous reads by Flux are Gitea's. The Git
   host sits behind `GiteaClient`; a GitHub client is a track.
 
@@ -159,6 +186,22 @@ build of Quarkus 3.33.4 and 3.40.1 (BOM `com.redhat.quarkus.platform:quarkus-bom
 - **A published version never changes, so a fix is a new version.** `k8s-deploy` 1.2.0 and `nisshi-stream-app`
   1.0.1 exist because 1.0.0/1.1.0 were already published when a bug was found, and 1.2.1 because 1.2.0 had one too;
   `push-bundles` refuses changed content before anything reaches Gitea.
+- **A CALM unique-id is not a Kubernetes name.** It may hold upper case, `_` and other characters; a NetworkPolicy
+  named `web_service_to_DB-egress` fails `kubectl apply` after the image is built and the Hub version written.
+  `web-service` 3.0.1 and `k8s-deploy` 1.2.2 use an id that is already a valid name as it is (so they rename nothing
+  the versions before them rendered) and convert any other: lower case, other characters as `-`, a short hash when
+  two ids would get the same name or the name is cut. Node names are RFC 1035 labels (a Service name must start with
+  a letter, at most 63 characters) and every selector, Service, gateway upstream and host in the environment uses the
+  same name; the original id stays in an annotation. Older versions are published and keep the bug.
+- **TLS and the valid names had to meet in a new version.** `k8s-deploy` 1.3.0 (TLS) was copied from 1.2.1, so it kept the
+  invalid-name bug 1.2.2 fixed, and versions are immutable. 1.3.1 is 1.2.2 plus the TLS of 1.3.0, with the certificate,
+  its Secret, the sidecar's ConfigMap, the certificate's DNS name and the gateway's `proxy_pass` / `proxy_ssl_name` all
+  using the converted node name. Use 1.3.1, not 1.3.0, for an architecture whose ids are not valid names.
+- **A valid label value can still be a YAML number.** A service name `2024`, `1.0`, `1e3`, `0x1F` or `2024-01-01`
+  written bare as `app.kubernetes.io/part-of` builds with kustomize into a number or a timestamp, but a label value
+  must be a string, so the apply fails. `k8s-deploy` 1.2.2 quotes a label value that starts with a digit and keeps every other one bare,
+  so renders of service names that start with a letter stay byte-identical to 1.2.1. An empty service name renders
+  as null, so 1.2.2 and `web-service` 3.0.1 treat an empty or blank one as none.
 - **Deployment rules must apply over their own older versions, not only to a new namespace.** 1.2.0 set
   `strategy: Recreate` on backing services. A new deployment took it; an upgrade from 1.0.0 did not: Kubernetes
   refuses Recreate while the Deployment holds `rollingUpdate` settings, and server-side apply (Flux) cannot remove
@@ -189,9 +232,21 @@ build of Quarkus 3.33.4 and 3.40.1 (BOM `com.redhat.quarkus.platform:quarkus-bom
 - **Security, open (local development only):**
   - `/api/calm/app/*` is unauthenticated (a new tab carries no Backstage token) and serves the app on the backend's
     origin, so the app's script is same-origin with Backstage's APIs. Use `user-cookie` auth or a separate origin.
-  - Anyone who can push to a service repository in Gitea (port 3300, fixed admin password) can apply anything
-    through Flux, which runs as cluster-admin. Give each Kustomization a namespaced service account and
-    `targetNamespace`, and seed a random password.
+  - Anyone who can push to a service repository in Gitea (port 3300, fixed admin password) can change anything in
+    that service's namespace through Flux (each Kustomization runs as a service account bound to `admin` there;
+    the namespace enforces Pod Security `baseline`, so not privileged or host-access pods). Gitea is published on
+    127.0.0.1:3300, so by default that is anyone on this machine, not the network; with `GITEA_BIND=0.0.0.0` (Linux)
+    it is the network again unless a firewall blocks 3300. Seed a random password.
+- **Two tasks must not share a service's working copy.** `calm:upgrade:render`, `calm:upgrade:merge` and
+  `calm:deploy:gitops` reset, clean and switch branches in `output/<name>`, and an upgrade spans render, image build,
+  merge and deploy. A double click on Upgrade, or an upgrade over a `deploy:gitops` rerun, could leave one task on
+  the other's branch. The working copy is now reserved for the task that took it (in memory, by task id): render
+  takes it and keeps it when it changed something, merge takes it again, and the deploy (or any failure, or a render
+  with nothing to change) releases it. Another task gets "is in use by the task ..." at once. A task that dies
+  between steps releases it 10 minutes (`SERVICE_LOCK_TTL_MS`) after its last step, which renews it while it runs
+  (a slow image build does not outlast it), so a failed upgrade can be run again after that time, and at once when
+  it failed in the render, the image build or the merge. The reservation is
+  per backend process, so it assumes one Backstage backend.
 - **CALM Hub only (after part 3).** Services no longer carry `architecture.json`: the card and upgrades read the
   version their annotations name from CALM Hub. Two consequences:
   - CALM Hub must be up to view or upgrade a service; the card says CALM Hub did not answer rather than showing a

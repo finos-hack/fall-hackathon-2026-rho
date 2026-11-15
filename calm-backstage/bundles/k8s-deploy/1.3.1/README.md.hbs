@@ -1,0 +1,100 @@
+# Deployment rules for {{serviceName}}
+
+Rendered by **{{rules.name}} {{rules.version}}** from the CALM architecture alone. The starter in the folder above
+renders the code; these rules decide how it runs. Upgrading the rules re-renders this folder only.
+
+{{#if hardening}}
+These rules add resource limits, liveness probes, no service-account tokens in pods and the
+`app.kubernetes.io/*` labels.
+{{else}}
+These rules set resource requests and readiness probes. Version 1.1.0 adds limits, liveness probes and more.
+{{/if}}
+
+## The starter contract
+
+The app container (`{{appName}}`) runs the image built from the starter's `Dockerfile` (called `calm-service` here; the
+overlay names the image built for the service). It must listen on `$PORT` ({{servicePort}}) and answer `GET /health`.
+It is told:
+
+| Variable | Value |
+|---|---|
+{{#each workloads}}
+{{#if isApp}}
+{{#each env}}
+| `{{name}}` | `{{{value}}}` |
+{{/each}}
+{{/if}}
+{{/each}}
+
+## Nodes in the cluster
+
+| Name | Node | Technology | Image | Service port | Pod port |
+|---|---|---|---|---|---|
+{{#each workloads}}
+| `{{k8sName}}` | {{name}} | {{{technology}}} | `{{image}}` | {{servicePort}} | {{containerPort}} |
+{{/each}}
+{{#if renamedWorkloads.length}}
+
+These nodes' unique-ids are not valid Kubernetes names, so they run under a converted name: lower case, other
+characters as `-`, `x-` in front when it would not start with a letter, and a short hash when two ids would get the
+same name, the id is too long or it is a word YAML reads as a boolean or null. Their objects keep the unique-id in the
+`calm.finos.org/unique-id` annotation.
+
+| Node unique-id | Name |
+|---|---|
+{{#each renamedWorkloads}}
+| `{{id}}` | `{{k8sName}}` |
+{{/each}}
+{{/if}}
+
+The gateway's external address in the architecture is `{{gatewayHost}}:{{gatewayPort}}`. Inside the cluster it is
+`{{gatewayNode}}:{{gatewayServicePort}}`.
+
+## Connections
+
+Every pod is denied all traffic except DNS and these relationships.
+
+| Relationship | Source | Destination | Protocol | Pod port | Network policy |
+|---|---|---|---|---|---|
+{{#each connects}}
+| `{{id}}` | `{{source}}` | `{{destination}}` | {{protocol}} | {{port}} | {{rendered}} |
+{{/each}}
+{{#if renamedPolicies.length}}
+
+These relationships' unique-ids are not valid Kubernetes names, so their policies are named after a converted id (as
+above, with `-egress` or `-ingress` added). The policies keep the unique-id in the `calm.finos.org/relationship`
+annotation.
+
+| Relationship | Policies named |
+|---|---|
+{{#each renamedPolicies}}
+| `{{relationship}}` | `{{prefix}}-…` |
+{{/each}}
+{{/if}}
+{{#if tlsWorkloads.length}}
+
+## TLS
+
+An HTTPS relationship between two nodes in the cluster is TLS. cert-manager issues a self-signed CA in the namespace
+and, from it, a certificate for each destination's Service name (`tls.yaml`). The destination runs an nginx sidecar
+(`tls-proxy`) that serves it on {{tls.containerPort}} (Service port {{tls.servicePort}}) and forwards to its container over
+localhost; the network policies allow {{tls.containerPort}}, not the plain port. The source mounts the CA certificate at
+`{{tls.caDir}}/ca.crt`{{#if gatewayTls}}, and the gateway checks the service's certificate with it{{/if}}. The cluster needs
+cert-manager (`yarn k8s:up` installs it).
+
+| Node unique-id | Name | Certificate secret |
+|---|---|---|
+{{#each tlsWorkloads}}
+| `{{id}}` | `{{k8sName}}` | `{{tls.secretName}}` |
+{{/each}}
+
+During an upgrade from a version before 1.3.0, traffic through the gateway can fail until the gateway pod has rolled out and the
+certificate is issued. nginx does not reload when cert-manager renews the CA or a certificate: restart the pods after
+a renewal.
+{{/if}}
+
+## Provenance
+
+- Architecture: {{architectureId}}
+- Pattern: {{patternId}}
+- Deployment rules: {{rules.name}} {{rules.version}}
