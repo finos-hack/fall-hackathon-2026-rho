@@ -21,7 +21,30 @@ export const CALM_KUBERNETES = {
   relationshipAnnotation: 'calm.finos.org/relationship',
   /** Annotation on a NetworkPolicy: the relationship's protocol. */
   protocolAnnotation: 'calm.finos.org/protocol',
+  /**
+   * Annotation on a Deployment (k8s-deploy 1.2.2 and later): the `unique-id` of the node it was rendered from, when
+   * that id is not a valid Kubernetes name and the Deployment has a converted name.
+   */
+  uniqueIdAnnotation: 'calm.finos.org/unique-id',
 } as const;
+
+/** Label the bundles put on a workload and its pods: the (Kubernetes) name of the architecture node it runs. */
+export const CALM_NODE_LABEL = 'calm.finos.org/node';
+
+/**
+ * The `unique-id` of the architecture node a rendered workload (Deployment, StatefulSet) runs: its
+ * `calm.finos.org/unique-id` annotation (k8s-deploy 1.2.2 and later, when the id was converted), else its
+ * `calm.finos.org/node` label, on the object or its pod template. Undefined when it has neither.
+ */
+export function workloadNode(obj: any): string | undefined {
+  const pod = obj?.spec?.template?.metadata;
+  const node =
+    obj?.metadata?.annotations?.[CALM_KUBERNETES.uniqueIdAnnotation] ??
+    pod?.annotations?.[CALM_KUBERNETES.uniqueIdAnnotation] ??
+    obj?.metadata?.labels?.[CALM_NODE_LABEL] ??
+    pod?.labels?.[CALM_NODE_LABEL];
+  return typeof node === 'string' ? node : undefined;
+}
 
 const DNS_LABEL = /^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/;
 
