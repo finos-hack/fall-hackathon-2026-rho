@@ -80,7 +80,7 @@ export function tabReply(s: Status, history: HistoryEntry[], version?: string): 
     { label: 'This version', value: version ?? 'unknown' },
     { label: 'Latest version', value: s.latestVersion ?? 'unknown' },
     { label: 'Deployment rules', value: s.deploymentRules ?? 'none' },
-    { label: 'Flux', value: s.ready === undefined ? 'unknown' : s.ready ? `Ready: ${s.message ?? ''}` : `Not ready: ${s.message ?? ''}` },
+    { label: 'Flux', value: s.ready === undefined ? s.message ?? 'unknown' : s.ready ? 'Ready' : `Not ready: ${s.message ?? ''}` },
     { label: 'Commit applied', value: s.commit ? s.commit.slice(0, 12) : 'none' },
   ];
   const links: Link[] = [

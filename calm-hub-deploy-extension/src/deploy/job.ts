@@ -265,7 +265,7 @@ export async function runDeployment(
       if (result.hasErrors) {
         const first = result.errors
           .slice(0, 3)
-          .map(e => e.message)
+          .map(e => (e.path ? `${e.path}: ${e.message}` : e.message))
           .join('; ');
         throw new Error(`calm validate found ${result.errors.length} error(s): ${first}`);
       }
