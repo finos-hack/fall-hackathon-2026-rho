@@ -1,5 +1,4 @@
 import fs from 'node:fs/promises';
-import os from 'node:os';
 import path from 'node:path';
 import { resolveSafeChildPath } from '@backstage/backend-plugin-api';
 import { createTemplateAction } from '@backstage/plugin-scaffolder-node';
@@ -23,14 +22,14 @@ import {
   gitPush,
   kubectlCommand,
   requireKubernetesDeploy,
-  runKubectl,
   serviceRepository,
 } from '@internal/backstage-plugin-calm-node';
-import YAML from 'yaml';
 import {
   Kubectl,
   GITOPS_OVERLAY_HEADER,
-  checkExistingNamespace,
+  applyObjects,
+  checkNamespace,
+  clusterKubectl,
   listAndWaitForRollouts,
   requireBase,
   writeOverlay,
@@ -102,29 +101,11 @@ export async function waitForKustomization(
   }
 }
 
-/** Applies `objects` with `kubectl apply -f` from a temporary file: they are cluster state, not part of the repository. */
-async function applyObjects(
-  kubectl: Kubectl,
-  objects: object[],
-): Promise<void> {
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'calm-flux-'));
-  try {
-    const file = path.join(tmp, 'objects.yaml');
-    await fs.writeFile(
-      file,
-      objects.map(o => `---\n${YAML.stringify(o)}`).join(''),
-    );
-    await kubectl(['apply', '-f', file]);
-  } finally {
-    await fs.rm(tmp, { recursive: true, force: true });
-  }
-}
-
 /**
- * `calm:deploy:gitops`: deploys a service through Git. Writes the overlay (namespace and image) in the working copy,
- * commits it when it changed, applies the Namespace and the service account Flux applies the overlay as, pushes,
- * makes sure Flux has a GitRepository and Kustomization for the service, asks them to reconcile now, waits until
- * Flux has applied that commit, then waits for the rollouts.
+ * `calm:deploy:gitops`: deploys a service through Git. Writes the overlay (the image over the bundle's base, into the
+ * service's namespace) in the working copy, commits it when it changed, applies the Namespace and the service account
+ * Flux applies the overlay as (`fluxTenantObjects`), pushes, makes sure Flux has a GitRepository and Kustomization
+ * for the service, asks them to reconcile now, waits until Flux has applied that commit, then waits for the rollouts.
  */
 export function createCalmDeployGitopsAction(options: {
   settings?: KubernetesDeploySettings;
@@ -187,27 +168,12 @@ export function createCalmDeployGitopsAction(options: {
       await requireBase(dir);
       const kubectl: Kubectl = options.kubectl
         ? options.kubectl(settings, dir)
-        : async (args, quiet) =>
-            (
-              await runKubectl(settings, args, {
-                cwd: dir,
-                logger: ctx.logger,
-                signal: ctx.signal,
-                quietStdout: quiet,
-              })
-            ).stdout;
-
-      const existing = (
-        await kubectl(
-          ['get', 'namespace', namespace, '--ignore-not-found', '-o', 'json'],
-          true,
-        )
-      ).trim();
-      checkExistingNamespace(
-        namespace,
-        name,
-        existing ? JSON.parse(existing) : undefined,
-      );
+        : clusterKubectl(settings, {
+            cwd: dir,
+            logger: ctx.logger,
+            signal: ctx.signal,
+          });
+      await checkNamespace(kubectl, namespace, name);
 
       const startTime = new Date().toISOString();
       const git = { logger: ctx.logger, signal: ctx.signal };

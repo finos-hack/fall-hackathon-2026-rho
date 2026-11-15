@@ -4,11 +4,11 @@ import { createTemplateAction } from '@backstage/plugin-scaffolder-node';
 import {
   GiteaClient,
   deployNamespace,
+  fluxTenantObjects,
 } from '@internal/backstage-plugin-calm-common';
 import {
   GitopsSettings,
   KubernetesDeploySettings,
-  DEFAULT_NAMESPACE_PREFIX,
   gitCheckoutBranch,
   gitCommitAll,
   gitCurrentBranch,
@@ -17,9 +17,18 @@ import {
   gitHead,
   gitPull,
   gitPush,
+  requireKubernetesDeploy,
   serviceRepository,
 } from '@internal/backstage-plugin-calm-node';
-import { GITOPS_OVERLAY_HEADER, OVERLAY_DIR, writeOverlay } from './deployK8s';
+import {
+  GITOPS_OVERLAY_HEADER,
+  Kubectl,
+  OVERLAY_DIR,
+  applyObjects,
+  checkNamespace,
+  clusterKubectl,
+  writeOverlay,
+} from './deployK8s';
 
 /** The pull request body: what changes, the files, and what happens after the merge. */
 export function pullRequestBody(o: {
@@ -46,6 +55,11 @@ export function pullRequestBody(o: {
  * `calm:upgrade:merge`: finishes an upgrade prepared by calm:upgrade:render. Sets the image in the overlay on the
  * branch, pushes the branch, opens a pull request in the Git server, merges it and fast-forwards main, so main only
  * ever holds a complete upgrade and its merge commit is the one Flux applies.
+ *
+ * Before the push it applies the service's Namespace, marked prune-disabled, and the service account Flux applies the
+ * overlay as (`fluxTenantObjects`). The overlay it writes no longer holds the Namespace. For a service deployed
+ * before that change, Flux would otherwise reconcile the merge commit and prune the namespace with everything in it,
+ * before calm:deploy:gitops runs.
  */
 export function createCalmUpgradeMergeAction(options: {
   gitops?: GitopsSettings;
@@ -53,6 +67,7 @@ export function createCalmUpgradeMergeAction(options: {
   localDir: string;
   /** For tests. */
   gitea?: GiteaClient;
+  kubectl?: (settings: KubernetesDeploySettings, cwd: string) => Kubectl;
   mergeAttempts?: number;
   mergeRetryMs?: number;
 }) {
@@ -82,6 +97,7 @@ export function createCalmUpgradeMergeAction(options: {
       },
     },
     async handler(ctx) {
+      const settings = await requireKubernetesDeploy(options.settings);
       const gitops = options.gitops;
       if (!gitops) {
         throw new Error('calm.gitops is not configured');
@@ -95,16 +111,24 @@ export function createCalmUpgradeMergeAction(options: {
       if ((await gitCurrentBranch(dir, git)) !== branch) {
         throw new Error(`${dir} is not on the branch ${branch}`);
       }
-      const prefix =
-        options.settings?.namespacePrefix ?? DEFAULT_NAMESPACE_PREFIX;
+      const namespace = deployNamespace(settings.namespacePrefix, name);
+      const kubectl: Kubectl = options.kubectl
+        ? options.kubectl(settings, dir)
+        : clusterKubectl(settings, {
+            cwd: dir,
+            logger: ctx.logger,
+            signal: ctx.signal,
+          });
+      await checkNamespace(kubectl, namespace, name);
       await writeOverlay(
         dir,
-        { name, namespace: deployNamespace(prefix, name), image },
+        { name, namespace, image },
         GITOPS_OVERLAY_HEADER,
         { withNamespace: false },
       );
       await gitCommitAll(dir, `Deploy ${image}`, git);
       const diffStat = await gitDiffStat(dir, gitops.branch, git);
+      await applyObjects(kubectl, fluxTenantObjects({ name, namespace }));
       const repo = serviceRepository(gitops, name);
       // The upgrade branch is this action's own: a run that failed after pushing it left an older one there.
       await gitPush(dir, repo.pushUrl, branch, gitops.auth, {

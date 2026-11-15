@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import { createTemplateAction } from '@backstage/plugin-scaffolder-node';
 import { publishedFolder } from './publishedFolder';
@@ -10,6 +11,7 @@ import {
 } from '@internal/backstage-plugin-calm-common';
 import {
   KubernetesDeploySettings,
+  KubernetesRunOptions,
   kubectlCommand,
   requireKubernetesDeploy,
   runKubectl,
@@ -162,6 +164,52 @@ export async function readOverlayImage(
 
 /** Runs kubectl with the given arguments and returns stdout (quiet: stdout is data, kept out of the log). */
 export type Kubectl = (args: string[], quiet?: boolean) => Promise<string>;
+
+/** A `Kubectl` that runs kubectl against the configured cluster in `cwd`. */
+export function clusterKubectl(
+  settings: KubernetesDeploySettings,
+  opts: Omit<KubernetesRunOptions, 'quietStdout'>,
+): Kubectl {
+  return async (args, quiet) =>
+    (await runKubectl(settings, args, { ...opts, quietStdout: quiet })).stdout;
+}
+
+/** Reads the Namespace `namespace` and refuses it when it exists and was not made for the service `name`. */
+export async function checkNamespace(
+  kubectl: Kubectl,
+  namespace: string,
+  name: string,
+): Promise<void> {
+  const existing = (
+    await kubectl(
+      ['get', 'namespace', namespace, '--ignore-not-found', '-o', 'json'],
+      true,
+    )
+  ).trim();
+  checkExistingNamespace(
+    namespace,
+    name,
+    existing ? JSON.parse(existing) : undefined,
+  );
+}
+
+/** Applies `objects` with `kubectl apply -f` from a temporary file: they are cluster state, not part of a repository. */
+export async function applyObjects(
+  kubectl: Kubectl,
+  objects: object[],
+): Promise<void> {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'calm-objects-'));
+  try {
+    const file = path.join(tmp, 'objects.yaml');
+    await fs.writeFile(
+      file,
+      objects.map(o => `---\n${YAML.stringify(o)}`).join(''),
+    );
+    await kubectl(['apply', '-f', file]);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+}
 
 /** Lists the Deployments, NetworkPolicies and Services in `namespace` and waits for every Deployment to roll out. */
 export async function listAndWaitForRollouts(

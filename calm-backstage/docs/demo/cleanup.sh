@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # docs/demo/cleanup.sh <service>... : removes what a Template run made for a service, so the name can be used again
-# (for example before recording the demo again with the same suffix): the Flux objects (Flux prunes what it applied),
-# the namespace, the Gitea repository, output/<name> and its catalog location. The architecture stays in CALM Hub
-# (versions cannot be deleted; a new run stores the next patch version).
+# (for example before recording the demo again with the same suffix): the Flux objects (Flux prunes what it applied)
+# and service account, the namespace, the Gitea repository, output/<name> and its catalog location. The architecture
+# stays in CALM Hub (versions cannot be deleted; a new run stores the next patch version).
 #
 # CALM_BACKEND (default http://localhost:7107) is the Backstage backend whose catalog is cleaned.
 set -u
@@ -13,6 +13,7 @@ TOKEN=$(curl -s "$BACKEND/api/auth/guest/refresh" | node -e 'let s="";process.st
 for n in "$@"; do
   case "$n" in *[!a-z0-9-]*|"") echo "skipped $n: not a service name"; continue ;; esac
   $K -n flux-system delete kustomization "calm-$n" --ignore-not-found --wait=true --timeout=120s >/dev/null
+  $K -n flux-system delete serviceaccount "calm-$n" --ignore-not-found >/dev/null
   $K -n flux-system delete gitrepository "calm-$n" --ignore-not-found >/dev/null
   $K delete namespace "calm-$n" --ignore-not-found --wait=true --timeout=180s >/dev/null
   curl -s -o /dev/null -u calm:calm-local-dev -X DELETE "http://localhost:3300/api/v1/repos/calm-services/$n"
