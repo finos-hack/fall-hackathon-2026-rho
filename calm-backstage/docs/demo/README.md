@@ -31,8 +31,7 @@ node docs/demo/record-full-demo.cjs <suffix> <out-dir> http://localhost:3100
 The cluster demo (3:58) puts the live cluster next to Backstage. A terminal (left) starts on an empty cluster; Backstage
 (right) walks through the pattern, the starters, the Template form and its run step by step, while the terminal shows
 what each step did: CALM Hub and the bundle registry over their APIs, the pods arriving, the Git source Flux applies,
-the app answering, the network policies enforced and Nisshi's storage. Not committed; it will be linked here once it is
-on YouTube.
+the app answering, the network policies enforced and Nisshi's storage. Watch it on [YouTube](https://youtu.be/mJNV3iuA6H4).
 
 | # | Starts at | Chapter | Terminal | Backstage, CALM Hub, Gitea |
 |---|---|---|---|---|
@@ -40,7 +39,7 @@ on YouTube.
 | 2 | 0:09 | The pattern | The patterns, from the CALM Hub API. | The event-streaming pattern in Backstage (its decision, the bundles that fit), then in CALM Hub. |
 | 3 | 0:23 | Starters and deployment rules | The bundles in the OCI registry and the Nisshi starter's versions. | Template Explorer: four starters (Spring Boot, Red Hat build of Quarkus, Node.js, Nisshi), a starter file, the `k8s-deploy` network policy template. |
 | 4 | 0:44 | Create, step by step | | The web-service Template's starter choice, then the event-streaming Template: name; storage decision, starter and deployment rules; the placeholders `calm generate` leaves; review. |
-| 5 | 1:07 | The Template runs | `watch-cluster.sh`: the Kustomization, then four pods ready after 12 s. | The run, then each step highlighted: generate, validate, store in CALM Hub, render code and rules, Git, build, Flux, record in CALM Hub. |
+| 5 | 1:07 | The Template runs | `watch-cluster.sh`: the Kustomization, then four pods ready after 12 s. | The run, then each step highlighted: generate, validate, render code and rules, Git, store in CALM Hub, build, Flux, record in CALM Hub. |
 | 6 | 1:45 | The service | Deployments, services, network policies with the CALM node each applies to. | The service page: bundles, Git and Flux, workloads and policies. |
 | 7 | 1:59 | In Git | The Flux source and the commit it applied. | The repository in Gitea, and `deploy/k8s/network-policy.yaml`. |
 | 8 | 2:11 | In CALM Hub | The architecture's nodes and the deployment decorator, from the CALM Hub API. | The architecture in CALM Hub and its Deployments tab. |
@@ -48,8 +47,8 @@ on YouTube.
 | 10 | 3:05 | Network policies, enforced | A busybox pod times out on `nisshi-broker:9092`; labelled `calm.finos.org/node=stream-app` it connects. | The relationships and their policies. |
 | 11 | 3:34 | Topics in PostgreSQL | `psql`: the `orders` topic with 2 events, and the events. | |
 
-Recorded on 2026-11-15 against this branch (Backstage on 3200/7207, warm image caches; the run page shows the home
-folder as `~`). Needs `ttyd` and `ffmpeg` (`brew install vhs` brings both) and, for the empty opening shot, no other
+Recorded on 2026-11-15 on top of #8, before #15 moved the CALM Hub step after the Git push (Backstage on 3200/7207,
+warm image caches; the run page shows the home folder as `~`). Needs `ttyd` and `ffmpeg` (`brew install vhs` brings both) and, for the empty opening shot, no other
 `calm-*` service in the cluster (`docs/demo/cleanup.sh`). Use a suffix CALM Hub has no `events-<suffix>` architecture
 for yet: the terminal reads version 1.0.0. Record it again:
 

@@ -92,6 +92,10 @@ under an existing version is refused before anything is committed or published.
 
 Recordings (YouTube):
 
+- [The cluster demo](https://youtu.be/mJNV3iuA6H4) (3:58): a terminal on an empty cluster beside Backstage. The
+  pattern in Backstage and CALM Hub, the starters to choose from, the Template form and its run step by step, while the
+  terminal shows a Nisshi service arriving, the app answering `curl`, the network policies enforced and the events in
+  PostgreSQL. Chapters in `docs/demo/README.md`.
 - The full demo of parts 1 to 3 in one take, opening with a table of contents, is not uploaded yet; chapter times are
   in `docs/demo/README.md`. Record it again with `node docs/demo/record-full-demo.cjs <suffix> <out-dir> <base-url>`.
 - [The part 2 walkthrough](https://youtu.be/XhFmQQTT6-k) (135 s): the whole flow, ending with a service

@@ -483,10 +483,6 @@ let onFailure = async () => {};
       'calm validate: the architecture is checked against the pattern',
     ],
     [
-      'Store the architecture in CALM Hub',
-      'The architecture is stored in CALM Hub',
-    ],
-    [
       'Render with the template bundle',
       'calm template: the starter renders the code from the architecture',
     ],
@@ -497,6 +493,10 @@ let onFailure = async () => {};
     [
       'Push the service to its Git repository',
       'The service gets its own Git repository',
+    ],
+    [
+      'Store the architecture in CALM Hub',
+      'The architecture is stored in CALM Hub',
     ],
     ['Build the image', 'Its image is built in the cluster'],
     ['Deploy through Git and Flux', 'Flux applies the commit to the cluster'],
