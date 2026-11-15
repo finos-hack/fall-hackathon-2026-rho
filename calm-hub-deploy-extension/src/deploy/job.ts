@@ -27,14 +27,30 @@ import { BASE_DIR, labelledNodes, oneLine, readOverlayImage, requestReconcile, w
 /** One deployment job per service at a time; jobs live in memory (a restart marks unfinished ones failed). */
 export class Jobs {
   private readonly running = new Map<string, Promise<void>>();
+  private readonly reserved = new Set<string>();
 
   isRunning(key: string): boolean {
-    return this.running.has(key);
+    return this.running.has(key) || this.reserved.has(key);
+  }
+
+  /**
+   * Claims `key` synchronously, so a second request cannot pass the check while the first is still awaiting CALM
+   * Hub. Gives false when the key is taken. Follow with `start` (which takes over the claim) or `release`.
+   */
+  reserve(key: string): boolean {
+    if (this.isRunning(key)) return false;
+    this.reserved.add(key);
+    return true;
+  }
+
+  release(key: string): void {
+    this.reserved.delete(key);
   }
 
   start(key: string, run: () => Promise<void>): void {
     const p = run().finally(() => this.running.delete(key));
     this.running.set(key, p);
+    this.reserved.delete(key);
   }
 
   /** Resolves when every running job has finished (tests, shutdown). */
@@ -128,8 +144,23 @@ export async function requestDeployment(deps: DeployDeps, req: DeployRequest): P
   }
   const problem = bindingProblem(service, req.namespace, arch.name);
   if (problem) throw new HttpError(409, problem);
-  if (jobs.isRunning(arch.name)) throw new HttpError(409, `A deployment of ${arch.name} is already running`);
+  if (!jobs.reserve(arch.name)) throw new HttpError(409, `A deployment of ${arch.name} is already running`);
+  try {
+    return await accept(deps, req, arch, doc, service);
+  } finally {
+    // start() has taken the claim over when the deployment was accepted; otherwise give it back.
+    jobs.release(arch.name);
+  }
+}
 
+async function accept(
+  deps: DeployDeps,
+  req: DeployRequest,
+  arch: { name: string; numericId?: number },
+  doc: any,
+  service: ServiceInfo,
+): Promise<DeployAccepted> {
+  const { settings, hub, jobs } = deps;
   const now = deps.now ?? Date.now;
   const archNodes: string[] = (Array.isArray(doc?.nodes) ? doc.nodes : []).map((n: any) => n?.['unique-id']).filter(Boolean);
   const record: DeploymentRecord = {
