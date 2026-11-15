@@ -6,9 +6,10 @@
 #
 # The Hub and the registry have no authentication, bundles carry JavaScript that runs in the Backstage backend, and
 # Gitea's admin login is in this repository (a push to calm-templates/bundles or calm-services/<name> ends up running
-# in the backend or the cluster). So all three are published on 127.0.0.1 only: not reachable from other machines. On
-# Docker Desktop, containers and minikube pods on this machine can still reach them through host.docker.internal /
-# host.minikube.internal. On Linux, Gitea needs one more address for Flux: see GITEA_BIND below.
+# in the backend or the cluster). So all three are published on 127.0.0.1 only, not on the machine's network
+# addresses. On Docker Desktop, containers and minikube pods on this machine can still reach them through
+# host.docker.internal / host.minikube.internal. Where minikube runs on Linux, Flux may need Gitea on all interfaces:
+# see GITEA_BIND below.
 #
 # Prepare the release meta-schemas first (git-ignored): hub/copy-schemas.sh
 # Start: yarn hub:up   Seed: yarn hub:seed   Stop: yarn hub:down
@@ -71,23 +72,20 @@ services:
   # it as http://host.minikube.internal:3300. Local development only: the admin user and its password are created by
   # hub/gitea-seed.sh and are in app-config.yaml.
   #
-  # GITEA_BIND is one more host address to publish Gitea on, besides 127.0.0.1. With minikube on macOS (Docker
-  # Desktop) leave it unset: host.minikube.internal reaches a port published on 127.0.0.1 there (tested). Where the
-  # minikube binary runs on Linux (a Linux host, or inside WSL) it points host.minikube.internal at the gateway of its
-  # Docker network instead, and a 127.0.0.1-only port does not answer there (tested inside Docker Desktop's VM, not on
-  # a Linux host). `yarn k8s:up` checks this; when Flux cannot reach Gitea it prints a line such as
-  #   GITEA_BIND=192.168.49.1
-  # Put it in hub/.env (git-ignored, read by `yarn hub:up`) and run `yarn hub:up` again. That is narrower than 0.0.0.0
-  # (not on the LAN address), but a machine on the same network segment that routes the minikube subnet through this
-  # host could still reach it; use a host firewall if that matters. Use one address that exists on the host: 0.0.0.0
-  # clashes with the 127.0.0.1 entry ("address already in use"), and after `yarn k8s:down` the gateway is gone, so
-  # remove the line before the next `yarn hub:up`.
+  # Published on 127.0.0.1 by default, like the Hub and the registry. With minikube on macOS (Docker Desktop),
+  # host.minikube.internal still reaches a port published on 127.0.0.1 (tested). Where the minikube binary runs on
+  # Linux (a Linux host, or inside WSL, with Docker Engine or Docker Desktop) it is expected to be the gateway of
+  # minikube's Docker network instead, which a 127.0.0.1-only port does not answer (seen inside Docker Desktop's VM; not
+  # tested on a Linux host or in WSL). `yarn k8s:up` warns when Flux cannot reach Gitea. Then put
+  #   GITEA_BIND=0.0.0.0
+  # in hub/.env (git-ignored, read by `yarn hub:up`) and run `yarn hub:up` again. That publishes Gitea on every
+  # interface, as before issue #5, so other machines can reach it with the committed password: use a host firewall to
+  # keep port 3300 off the network. (Binding only the gateway would stop localhost:3300, which Backstage and the seed
+  # scripts use, and Docker Desktop cannot bind that address at all.)
   gitea:
     image: gitea/gitea:1.27.3
     container_name: calm-backstage-gitea
     ports:
-      - "127.0.0.1:3300:3000"
-      # Same as the line above when GITEA_BIND is unset; Compose drops the duplicate.
       - "${GITEA_BIND:-127.0.0.1}:3300:3000"
     environment:
       - USER_UID=1000

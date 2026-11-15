@@ -32,10 +32,11 @@ without that block the Template deploys with `kubectl apply` as in part 2.
 
 The Hub, the registry and Gitea are published on 127.0.0.1 only, because anyone who can reach them can get code run
 in the backend or the cluster. With minikube on macOS (Docker Desktop) Flux still reaches Gitea. Where minikube runs on
-Linux, including inside WSL, `host.minikube.internal` is the gateway of minikube's Docker network, which a 127.0.0.1
-port does not answer: `yarn k8s:up` then prints a warning and a line such as `GITEA_BIND=192.168.49.1`. Put that line
-in `hub/.env` (git-ignored) and run `yarn hub:up` again, which publishes Gitea on that address as well. Remove the
-line after `yarn k8s:down`. The comment above `gitea` in `hub/docker-compose.yml` has the details.
+Linux, including inside WSL, `host.minikube.internal` is expected to be the gateway of minikube's Docker network, which
+a 127.0.0.1 port does not answer (not tested on Linux). `yarn k8s:up` warns when the cluster cannot reach Gitea. Then
+add `GITEA_BIND=0.0.0.0` to `hub/.env` (git-ignored) and run `yarn hub:up` again. That publishes Gitea on every
+interface, so keep port 3300 off the network with a host firewall. The comment above `gitea` in
+`hub/docker-compose.yml` has the details.
 
 Open http://localhost:3100 and choose **Enter** to sign in as a guest. `yarn hub:down` stops the Hub and keeps its
 data. To reset the Hub completely (needed after editing files in `seed/`, because Hub versions cannot change):

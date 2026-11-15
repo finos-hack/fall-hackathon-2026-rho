@@ -43,16 +43,15 @@ node "$ROOT_DIR/k8s/flux-install.cjs" | kc apply --server-side --force-conflicts
 kc -n flux-system rollout status deployment/source-controller --timeout=300s
 kc -n flux-system rollout status deployment/kustomize-controller --timeout=300s
 
-# Gitea is published on 127.0.0.1 (hub/docker-compose.yml). Where minikube runs on Linux, host.minikube.internal is
-# the gateway of minikube's Docker network, which a 127.0.0.1-only port does not answer. Check from the node and, if
-# Gitea answers here but not there, say which GITEA_BIND to set. A warning only: Gitea may not be started yet.
-if curl -sf -o /dev/null --max-time 5 http://localhost:3300/api/healthz; then
-  if ! minikube -p "$PROFILE" ssh -- curl -sf -o /dev/null --max-time 5 http://host.minikube.internal:3300/api/healthz 2>/dev/null; then
-    HOST_IP="$(minikube -p "$PROFILE" ssh -- grep -m1 host.minikube.internal /etc/hosts | awk '{print $1}' | tr -d '\r' || true)"
-    echo "k8s:up: WARNING: Flux cannot reach Gitea at http://host.minikube.internal:3300 ($HOST_IP)." >&2
-    echo "k8s:up: add this line to $ROOT_DIR/hub/.env and run yarn hub:up again (see hub/docker-compose.yml):" >&2
-    echo "k8s:up:   GITEA_BIND=$HOST_IP" >&2
-  fi
+# Gitea is published on 127.0.0.1 by default (hub/docker-compose.yml). Where minikube runs on Linux, Flux is expected
+# not to reach that; check from the node and say what to do. Warnings only: Gitea may simply not be started yet.
+if ! curl -sf -o /dev/null --max-time 5 http://localhost:3300/api/healthz; then
+  echo "k8s:up: Gitea is not answering on localhost:3300; Flux needs it (start it with: yarn hub:up)" >&2
+elif ! minikube -p "$PROFILE" ssh -- \
+  curl -sf -o /dev/null --max-time 5 http://host.minikube.internal:3300/api/healthz 2>/dev/null; then
+  echo "k8s:up: WARNING: the cluster cannot reach Gitea at http://host.minikube.internal:3300 (Flux clones it)." >&2
+  echo "k8s:up: if minikube runs on Linux or WSL, add GITEA_BIND=0.0.0.0 to hub/.env and run yarn hub:up again;" >&2
+  echo "k8s:up: that publishes Gitea on every interface (see the comment above gitea in hub/docker-compose.yml)." >&2
 fi
 
 kc apply -f "$ROOT_DIR/k8s/backstage-reader.yaml"
