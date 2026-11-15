@@ -6,6 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import * as tar from 'tar';
 import {
+  checkBundle,
   BUNDLE_ARTIFACT_TYPE,
   BUNDLE_CONFIG_MEDIA_TYPE,
   OCI_LAYER_MEDIA_TYPE,
@@ -295,6 +296,73 @@ describe('bundles in a registry', () => {
     expect(third.digest).toBe(first.digest);
   });
 
+  it('writes the given annotations', async () => {
+    const ref = `${host}/calm-bundles/web-service:2.0.0`;
+    await pushBundle({
+      dir: bundleDir,
+      ref,
+      annotations: {
+        'org.opencontainers.image.source':
+          'http://localhost:3300/calm-templates/bundles/src/commit/abc/web-service/2.0.0',
+        'org.opencontainers.image.revision': 'abc',
+      },
+    });
+    const manifest = JSON.parse(
+      registry.manifests
+        .get('calm-bundles/web-service:2.0.0')!
+        .body.toString('utf8'),
+    );
+    expect(manifest.annotations).toMatchObject({
+      'org.opencontainers.image.version': '2.0.0',
+      'org.opencontainers.image.revision': 'abc',
+    });
+  });
+
+  it('with immutable, skips an identical layer without touching the manifest', async () => {
+    const ref = `${host}/calm-bundles/web-service:2.0.0`;
+    const first = await pushBundle({ dir: bundleDir, ref });
+    const before = registry.manifests.get(
+      'calm-bundles/web-service:2.0.0',
+    )!.body;
+    const again = await pushBundle({
+      dir: bundleDir,
+      ref,
+      immutable: true,
+      annotations: { 'org.opencontainers.image.revision': 'new' },
+    });
+    expect(again).toEqual({ ref, digest: first.digest, skipped: true });
+    expect(
+      registry.manifests.get('calm-bundles/web-service:2.0.0')!.body,
+    ).toEqual(before);
+  });
+
+  it('with immutable, refuses different content for an existing tag', async () => {
+    const ref = `${host}/calm-bundles/web-service:2.0.0`;
+    await pushBundle({ dir: bundleDir, ref });
+    await fs.writeFile(path.join(bundleDir, 'index.json'), '{"changed":true}');
+    await expect(
+      pushBundle({ dir: bundleDir, ref, immutable: true }),
+    ).rejects.toThrow(
+      /already published with different content; publish a new version/,
+    );
+  });
+
+  it('checkBundle says new, same or changed', async () => {
+    const ref = `${host}/calm-bundles/web-service:2.0.0`;
+    expect(await checkBundle({ dir: bundleDir, ref })).toBe('new');
+    await pushBundle({ dir: bundleDir, ref });
+    expect(await checkBundle({ dir: bundleDir, ref })).toBe('same');
+    await fs.writeFile(path.join(bundleDir, 'index.json'), '{"changed":true}');
+    expect(await checkBundle({ dir: bundleDir, ref })).toBe('changed');
+  });
+
+  it('with immutable, pushes a tag that is not there yet', async () => {
+    const ref = `${host}/calm-bundles/web-service:9.9.9`;
+    const pushed = await pushBundle({ dir: bundleDir, ref, immutable: true });
+    expect(pushed.skipped).toBeUndefined();
+    expect(registry.manifests.has('calm-bundles/web-service:9.9.9')).toBe(true);
+  });
+
   it('lists repositories under a prefix and their tags', async () => {
     await pushBundle({
       dir: bundleDir,
@@ -327,6 +395,11 @@ describe('bundles in a registry', () => {
     expect(await readBundleConfig(ref)).toEqual({
       digest: pushed.digest,
       config: CONFIG,
+      annotations: {
+        'org.opencontainers.image.version': '2.0.0',
+        'org.opencontainers.image.description': 'A test bundle',
+      },
+      size: expect.any(Number),
     });
     await expect(
       readBundleConfig(`${host}/calm-bundles/web-service:9.9.9`),

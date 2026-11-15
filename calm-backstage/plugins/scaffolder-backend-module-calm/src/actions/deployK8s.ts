@@ -105,7 +105,96 @@ export function applyArgs(overlayDir: string): string[] {
   return ['apply', '-k', overlayDir];
 }
 
-interface Deployed {
+/** The first line of an overlay Flux applies: the same for every action that writes it, so rewriting it is no change. */
+export const GITOPS_OVERLAY_HEADER = `# Written by Backstage (calm:deploy:gitops, calm:upgrade:merge). Flux applies this folder (${OVERLAY_DIR}) from Git.`;
+
+/** Throws unless `<dir>/deploy/k8s` holds a kustomize base (a bundle that rendered Kubernetes manifests). */
+export async function requireBase(dir: string): Promise<void> {
+  const base = path.join(dir, BASE_DIR);
+  const hasBase = await fs
+    .stat(path.join(base, 'kustomization.yaml'))
+    .then(() => true)
+    .catch(() => false);
+  if (!hasBase) {
+    throw new Error(
+      `${base} has no kustomization.yaml: the template bundle did not render Kubernetes manifests`,
+    );
+  }
+}
+
+/**
+ * Writes `deploy/k8s-overlay` (the namespace and the kustomization over the bundle's base) in a published folder and
+ * returns its path. `header` is the comment line at the top of the kustomization.
+ */
+export async function writeOverlay(
+  dir: string,
+  opts: { name: string; namespace: string; image: string },
+  header: string,
+): Promise<string> {
+  const overlayDir = path.join(dir, OVERLAY_DIR);
+  await fs.mkdir(overlayDir, { recursive: true });
+  await fs.writeFile(
+    path.join(overlayDir, NAMESPACE_FILE),
+    YAML.stringify(namespaceManifest(opts.name, opts.namespace)),
+  );
+  await fs.writeFile(
+    path.join(overlayDir, 'kustomization.yaml'),
+    `${header}\n${YAML.stringify(overlayKustomization(opts))}`,
+  );
+  return overlayDir;
+}
+
+/** The image the overlay deploys (`<newName>:<newTag>` of its `calm-service` entry), or undefined without one. */
+export async function readOverlayImage(
+  dir: string,
+): Promise<string | undefined> {
+  const text = await fs
+    .readFile(path.join(dir, OVERLAY_DIR, 'kustomization.yaml'), 'utf-8')
+    .catch(() => undefined);
+  const entry = text
+    ? (YAML.parse(text)?.images ?? []).find(
+        (i: any) => i?.name === PLACEHOLDER_IMAGE,
+      )
+    : undefined;
+  return entry?.newName && entry?.newTag
+    ? `${entry.newName}:${entry.newTag}`
+    : undefined;
+}
+
+/** Runs kubectl with the given arguments and returns stdout (quiet: stdout is data, kept out of the log). */
+export type Kubectl = (args: string[], quiet?: boolean) => Promise<string>;
+
+/** Lists the Deployments, NetworkPolicies and Services in `namespace` and waits for every Deployment to roll out. */
+export async function listAndWaitForRollouts(
+  kubectl: Kubectl,
+  namespace: string,
+): Promise<Deployed> {
+  const listed = await kubectl(
+    [
+      '-n',
+      namespace,
+      'get',
+      'deployments,networkpolicies,services',
+      '-o',
+      'json',
+    ],
+    true,
+  );
+  const deployed = summariseObjects(JSON.parse(listed).items ?? []);
+  for (const deployment of deployed.deployments) {
+    await kubectl([
+      '-n',
+      namespace,
+      'rollout',
+      'status',
+      `deployment/${deployment}`,
+      `--timeout=${ROLLOUT_TIMEOUT}`,
+    ]);
+  }
+  return deployed;
+}
+
+export interface Deployed {
   deployments: string[];
   networkPolicies: string[];
   services: string[];
@@ -191,28 +280,12 @@ export function createCalmDeployK8sAction(options: {
       const { name, image } = ctx.input;
       const namespace = deployNamespace(settings.namespacePrefix, name);
       const dir = publishedFolder(options.localDir, ctx.input.dir);
-      const base = path.join(dir, BASE_DIR);
-      const hasBase = await fs
-        .stat(path.join(base, 'kustomization.yaml'))
-        .then(() => true)
-        .catch(() => false);
-      if (!hasBase) {
-        throw new Error(
-          `${base} has no kustomization.yaml: the template bundle did not render Kubernetes manifests`,
-        );
-      }
+      await requireBase(dir);
 
-      const overlayDir = path.join(dir, OVERLAY_DIR);
-      await fs.mkdir(overlayDir, { recursive: true });
-      await fs.writeFile(
-        path.join(overlayDir, NAMESPACE_FILE),
-        YAML.stringify(namespaceManifest(name, namespace)),
-      );
-      await fs.writeFile(
-        path.join(overlayDir, 'kustomization.yaml'),
-        `# Written by calm:deploy:k8s. Apply by hand: kubectl apply -k ${OVERLAY_DIR}\n${YAML.stringify(
-          overlayKustomization({ name, namespace, image }),
-        )}`,
+      const overlayDir = await writeOverlay(
+        dir,
+        { name, namespace, image },
+        `# Written by calm:deploy:k8s. Apply by hand: kubectl apply -k ${OVERLAY_DIR}`,
       );
       ctx.logger.info(`Wrote the overlay ${overlayDir}`);
 
@@ -236,33 +309,10 @@ export function createCalmDeployK8sAction(options: {
       const startTime = new Date().toISOString();
       await runKubectl(settings, args, run);
 
-      const listed = await runKubectl(
-        settings,
-        [
-          '-n',
-          namespace,
-          'get',
-          'deployments,networkpolicies,services',
-          '-o',
-          'json',
-        ],
-        quiet,
+      const deployed = await listAndWaitForRollouts(
+        async (a, q) => (await runKubectl(settings, a, q ? quiet : run)).stdout,
+        namespace,
       );
-      const deployed = summariseObjects(JSON.parse(listed.stdout).items ?? []);
-      for (const deployment of deployed.deployments) {
-        await runKubectl(
-          settings,
-          [
-            '-n',
-            namespace,
-            'rollout',
-            'status',
-            `deployment/${deployment}`,
-            `--timeout=${ROLLOUT_TIMEOUT}`,
-          ],
-          run,
-        );
-      }
       ctx.logger.info(
         `Deployed ${name} to ${settings.context} / ${namespace}: ${
           deployed.deployments.length

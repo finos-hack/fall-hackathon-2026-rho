@@ -83,6 +83,20 @@ export function createCalmDecorateDeploymentAction(options: {
             .describe('When the deployment ended (ISO 8601)'),
         status: z =>
           z.enum(DEPLOYMENT_STATUSES).optional().describe('Default completed'),
+        gitRepo: z =>
+          z
+            .string()
+            .optional()
+            .describe(
+              'Web URL of the Git repository Flux deployed from (calm:deploy:gitops output repoUrl)',
+            ),
+        gitCommit: z =>
+          z
+            .string()
+            .optional()
+            .describe(
+              'The commit Flux applied (calm:deploy:gitops output commit)',
+            ),
       },
       output: {
         id: z =>
@@ -157,12 +171,23 @@ export function createCalmDecorateDeploymentAction(options: {
         status,
         startTime: ctx.input.startTime,
         endTime: ctx.input.endTime,
-        details: `${options.appBaseUrl.replace(
-          /\/+$/,
-          '',
-        )}/catalog/default/component/${encodeURIComponent(name)}`,
+        details:
+          ctx.input.gitRepo && ctx.input.gitCommit
+            ? `${ctx.input.gitRepo}/commit/${ctx.input.gitCommit}`
+            : `${options.appBaseUrl.replace(
+                /\/+$/,
+                '',
+              )}/catalog/default/component/${encodeURIComponent(name)}`,
         // The workloads are in applies-to.
-        notes: `Deployed by Backstage to the cluster ${cluster}, namespace ${namespace}.`,
+        notes:
+          ctx.input.gitRepo && ctx.input.gitCommit
+            ? `Deployed by Flux from ${
+                ctx.input.gitRepo
+              } at ${ctx.input.gitCommit.slice(
+                0,
+                12,
+              )} to the cluster ${cluster}, namespace ${namespace}.`
+            : `Deployed by Backstage to the cluster ${cluster}, namespace ${namespace}.`,
       });
       ctx.output('uniqueId', uniqueId);
       ctx.output('target', target);

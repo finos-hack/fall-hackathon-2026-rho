@@ -54,6 +54,7 @@ export {
   OCI_MANIFEST_MEDIA_TYPE,
   OciError,
   bundleRef,
+  checkBundle,
   extractBundle,
   listRepositories,
   listTags,
@@ -63,9 +64,33 @@ export {
   pullBundleCached,
   pushBundle,
   readBundleConfig,
+  readBundleManifest,
   resolveBundleDigest,
   sha256Digest,
   type OciDescriptor,
   type OciManifest,
   type OciRef,
 } from './oci';
+export {
+  GIT_AUTHOR,
+  git,
+  gitCheckoutBranch,
+  gitClone,
+  gitCommitAll,
+  gitCurrentBranch,
+  gitDeleteBranch,
+  gitDiffStat,
+  gitHead,
+  gitInit,
+  gitPull,
+  gitPush,
+  gitReset,
+  type GitAuth,
+  type GitOptions,
+} from './git';
+export {
+  readGitopsSettings,
+  serviceRepository,
+  type GitopsSettings,
+} from './gitops';
+export { listRegistryBundles, type RegistryBundle } from './registryBundles';

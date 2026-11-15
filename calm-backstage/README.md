@@ -2,7 +2,10 @@
 
 A clone-and-run base for the CALM hackathon. A developer sees CALM architectures in the Backstage catalog, sees the
 architecture on a service page, and creates a new service from a CALM pattern, with the pattern's options as form
-choices. A template bundle decides what code the new service gets.
+choices. Template bundles decide what the service gets: a *starter* (its code: Node, Spring Boot, Red Hat build of
+Quarkus, or a Nisshi event-streaming app) and *deployment rules* (how any service runs on Kubernetes). Each service
+lives in its own Git repository and Flux deploys it; Backstage opens it as a running app, and upgrades its code and
+its deployment rules through a pull request.
 
 ![Architecture page](docs/demo/architecture-page.png)
 
@@ -13,19 +16,28 @@ You need Docker, Node 26 and the repository's own Yarn (`.yarn/releases`, picked
 
 ```sh
 yarn install
-yarn hub:up && yarn hub:seed    # CALM Hub on http://localhost:8090 (seeded from seed/), bundle registry on 5050
-yarn k8s:up                     # optional: local Kubernetes (minikube profile calm-backstage) for deployments
+yarn hub:up && yarn hub:seed    # CALM Hub on :8090, bundle registry on :5050, Gitea on :3300 (seeded, idempotent)
+yarn k8s:up                     # local Kubernetes (minikube profile calm-backstage, 6 GiB, 4 CPUs) with Flux
 yarn start                      # Backstage on http://localhost:3100 (backend on 7107)
 ```
 
 `yarn k8s:up` needs `minikube` and `kubectl`. It keeps its kubeconfig in `.kube/` inside the repository, so your own
-kubeconfig, its current context and other minikube profiles are not touched. `yarn k8s:down` deletes the cluster.
+kubeconfig, its current context and other minikube profiles are not touched. It installs Flux's source and kustomize
+controllers from the pinned release (no `flux` CLI). `yarn k8s:down` deletes the cluster.
+
+Gitea (http://localhost:3300, user `calm`, password `calm-local-dev`, local development only) stands in for GitHub:
+`calm-templates/bundles` holds the bundle sources and `calm-services/<name>` one repository per service. Flux in the
+cluster reaches it as `http://host.minikube.internal:3300`. Settings are under `calm.gitops` in `app-config.yaml`;
+without that block the Template deploys with `kubectl apply` as in part 2.
 
 Open http://localhost:3100 and choose **Enter** to sign in as a guest. `yarn hub:down` stops the Hub and keeps its
 data. To reset the Hub completely (needed after editing files in `seed/`, because Hub versions cannot change):
 `docker compose -f hub/docker-compose.yml down -v`, then `yarn hub:up && yarn hub:seed` again.
 
-The ports keep clear of other local Backstage and Hub instances on 3000, 7007, 8080 and 8088.
+The ports keep clear of other local Backstage and Hub instances on 3000, 7007, 8080 and 8088. To run a second checkout
+beside one on 3100/7107, add a config file that sets `app.baseUrl`, `backend.baseUrl`, `backend.listen.port` and
+`backend.cors.origin` (for example 3200/7207) and start with `yarn start --config app-config.yaml --config
+app-config.local.yaml --config <that file>`. Both share the Hub, the registry, Gitea and the cluster.
 
 ## What to try
 
@@ -54,15 +66,41 @@ The ports keep clear of other local Backstage and Hub instances on 3000, 7007, 8
 
 ![Service page of a deployed service, with its deployment recorded in CALM Hub](docs/demo/hub-recorded-service.png)
 
-Two recordings walk through this:
+## What to try (part 3: starters, GitOps, upgrades)
 
-- [The full walkthrough](https://youtu.be/XhFmQQTT6-k) (135 s, YouTube): the whole flow, ending with a service
+6. **Template Explorer** (sidebar): every bundle in the registry as starters, deployment rules and full bundles. For
+   a version: its OCI reference and digest, its source folder in Gitea at the commit it was published from, its
+   files, what changed from an older version (try `k8s-deploy` 1.0.0 → 1.2.1), and the services that use it.
+7. **Create with a starter**: on the web-service Template choose a starter (`spring-boot-service`,
+   `quarkus-service` or `node-service`) and deployment rules (`k8s-deploy`). The run pushes the service to
+   `calm-services/<name>` in Gitea, builds the image from that commit, commits the overlay, and Flux deploys it. The
+   card shows the Git repository, the Flux status and the commit applied.
+8. **Open the running app**: the button on the card opens the service's own page through Backstage (the Kubernetes
+   API's service proxy to its gateway; nothing to port-forward). It shows the starter and runtime, the deployment
+   rules and whether its connections answer.
+9. **Nisshi**: the event-streaming Template (pattern `hackathon/event-streaming`) creates a service that produces and
+   consumes through a [Nisshi](https://nisshi.io) broker, with PostgreSQL or SQLite storage. Its page sends events and
+   shows them coming back.
+10. **Upgrade**: create a service on `spring-boot-service@1.0.0` and `k8s-deploy@1.0.0`. The card then says 1.1.0 and
+    1.2.1 are available; **Upgrade** runs the `calm-upgrade` Template: re-render on a branch, build, open and merge a
+    pull request in Gitea, Flux applies the merge commit, CALM Hub records the deployment. The app page then shows
+    Spring Boot 4.1.2 and `k8s-deploy@1.2.1`.
+
+To change a bundle, add a new version folder in Gitea's `calm-templates/bundles` (or in `bundles/`) and run
+`node hub/push-bundles.cjs --from-git` (or `yarn bundles:push`). A published version never changes: changed content
+under an existing version is refused before anything is committed or published.
+
+Recordings (YouTube):
+
+- The full demo of parts 1 to 3 in one take, opening with a table of contents, is not uploaded yet; chapter times are
+  in `docs/demo/README.md`. Record it again with `node docs/demo/record-full-demo.cjs <suffix> <out-dir> <base-url>`.
+- [The part 2 walkthrough](https://youtu.be/XhFmQQTT6-k) (135 s): the whole flow, ending with a service
   deployed to the local cluster, its network policies on the card, its pods on the Kubernetes tab, and its
   architecture and deployment in CALM Hub's own UI.
-- [The first walkthrough](https://youtu.be/zQ1cLPv3Fmk) (78 s, YouTube): the first part only, without the
+- [The first walkthrough](https://youtu.be/zQ1cLPv3Fmk) (78 s): the first part only, without the
   registry and the deployment.
 
-To record the full walkthrough again with the Hub, the cluster and Backstage running:
+To record the part 2 walkthrough again with the Hub, the cluster and Backstage running:
 `node docs/demo/record-demo.cjs <new-service-name>` (it prints where the `.webm` is).
 
 Bundle 2.0.0 renders a `Dockerfile` and a `deploy/` folder that 1.0.0 does not; the data store and add-ons change
@@ -78,15 +116,16 @@ is the same and stores the next patch version when it is not. The Hub architectu
 
 | Package | Role |
 |---|---|
-| `plugins/calm-common` | Types, annotation and entity names, pattern options reader, placeholder scanner and filler, read-only Hub client and the Hub calls that write (architecture version, decorator), CALM → Mermaid transform |
-| `plugins/calm-node` | Runs the published `@finos/calm-cli` 1.71.0 (`generate`, `validate`, `template`) with the backend's own Node; pushes and pulls template bundles as OCI artifacts (`oci.ts`); runs `kubectl` and `minikube` against the one cluster in `calm.deploy.kubernetes` (`kubernetes.ts`) |
+| `plugins/calm-common` | Types, annotation and entity names, pattern options reader, placeholder scanner and filler, read-only Hub client and the Hub calls that write (architecture version, decorator), CALM → Mermaid transform, bundle kinds and upgrade targets, Flux object builders, Gitea client |
+| `plugins/calm-node` | Runs the published `@finos/calm-cli` 1.71.0 (`generate`, `validate`, `template`) with the backend's own Node; pushes and pulls template bundles as OCI artifacts (`oci.ts`, immutable publishing, registry listing); runs `kubectl` and `minikube` against the one cluster in `calm.deploy.kubernetes` (`kubernetes.ts`); the `git` CLI (`git.ts`); `calm.gitops` settings |
 | `plugins/catalog-backend-module-calm` | Entity provider: reads the Hub namespaces in `calm.namespaces` and emits architectures, patterns, controls, bundles and one Template per pattern |
-| `plugins/scaffolder-backend-module-calm` | Actions `calm:generate`, `calm:fill`, `calm:validate`, `calm:register:hub`, `calm:template`, `calm:publish:local`, `calm:image:build`, `calm:deploy:k8s`, `calm:decorate:deployment`, `calm:register:local` |
-| `plugins/calm-backend` | Routes `POST /api/calm/placeholders`, `GET /api/calm/architecture` (from the Hub, or a service's file; with a deployed service's workloads and network policies and the deployments recorded in the Hub), `GET /api/calm/pattern` |
-| `plugins/calm` | Frontend: architecture and pattern entity cards, the `CalmPlaceholders` form field |
-| `hub/` | CALM Hub (`finos/calm-hub:latest`, `no-auth`), MongoDB and an OCI registry (`registry:2`, port 5050) in Docker; `seed.sh` and `push-bundles.cjs` (both idempotent) |
-| `seed/` | Our pattern with a `oneOf` and an `anyOf` decision, two architectures, controls in domain `hackathon-security` |
-| `bundles/web-service/<version>` | Template bundles; `calm-backstage.json` names the pattern each one fits. `yarn bundles:push` (part of `yarn hub:seed`) pushes them to the registry as `localhost:5050/calm-bundles/<name>:<version>`, which is where Backstage reads them |
+| `plugins/scaffolder-backend-module-calm` | Actions `calm:generate`, `calm:fill`, `calm:validate`, `calm:register:hub`, `calm:template`, `calm:publish:local`, `calm:git:publish`, `calm:image:build`, `calm:deploy:k8s`, `calm:deploy:gitops`, `calm:decorate:deployment`, `calm:register:local`, `calm:upgrade:render`, `calm:upgrade:merge`, `calm:catalog:refresh` |
+| `plugins/calm-backend` | Routes `POST /api/calm/placeholders`, `GET /api/calm/architecture` (from the Hub, or a service's file; with a deployed service's workloads, network policies, Flux status and the deployments recorded in the Hub), `GET /api/calm/pattern`, `GET /api/calm/upgrades`, `GET /api/calm/bundles` (+ files, file, diff), and the unauthenticated app proxy `/api/calm/app/<name>/` |
+| `plugins/calm` | Frontend: architecture and pattern entity cards (with bundle versions, Upgrade, Git and Flux, Open the running app), the `CalmPlaceholders` form field, the Template Explorer page |
+| `hub/` | CALM Hub (`finos/calm-hub:latest`, `no-auth`), MongoDB, an OCI registry (`registry:2`, port 5050) and Gitea (port 3300) in Docker; `seed.sh`, `gitea-seed.sh` and `push-bundles.cjs` (all idempotent) |
+| `k8s/` | `up.sh`/`down.sh` for the minikube profile, `flux-install.cjs` (Flux without its CLI), the read-only Backstage account |
+| `seed/` | Patterns `web-service` (a `oneOf` and an `anyOf` decision) and `event-streaming` (Nisshi, a storage choice), two architectures, controls in domain `hackathon-security` |
+| `bundles/<name>/<version>` | Template bundles; `calm-backstage.json` gives the kind (`starter`, `deployment`, or `full` when absent) and the patterns each fits. Starters: `node-service`, `spring-boot-service`, `quarkus-service`, `nisshi-stream-app`; deployment rules: `k8s-deploy`; full: `web-service`. `yarn bundles:push` (part of `yarn hub:seed`) mirrors them into Gitea and publishes them from that commit as `localhost:5050/calm-bundles/<name>:<version>` |
 
 All CALM logic comes from published packages: the actions run the CLI, and the small parts the CLI does not offer as
 an API (options reader, Hub client, Mermaid transform, placeholders) live in `calm-common`. `FINDINGS.md` lists them
@@ -120,4 +159,7 @@ yarn build:backend
 - `FINDINGS.md`: what we learnt about the CALM CLI, CALM Hub and Backstage, and requests to the CALM project.
 - `docs/superpowers/specs/2026-11-13-calm-backstage-design.md`: the design. `docs/superpowers/plans/`: one plan per
   build step, each with its results and deviations.
-- `docs/plan/calm-backstage-status.html`: the build's status page.
+- `docs/plan/calm-backstage-status.html`, `docs/plan/calm-backstage-part2-status.html`,
+  `docs/plan/calm-backstage-part3-status.html`: the status pages of each part.
+- `docs/superpowers/specs/2026-11-14-part3-templates-gitops-design.md` and
+  `docs/superpowers/plans/2026-11-14-part3-templates-gitops.md`: part 3's design and plan.

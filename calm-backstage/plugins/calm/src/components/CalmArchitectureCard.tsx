@@ -19,6 +19,8 @@ import Typography from '@material-ui/core/Typography';
 import Alert from '@material-ui/lab/Alert';
 import { ArchitectureResponse, useCalmBackend } from '../api';
 import { MermaidDiagram } from './MermaidDiagram';
+import { VersionsSection } from './VersionsSection';
+import { OpenAppButton } from './OpenAppButton';
 
 /** The controls a CALM document references, as control Resource refs (one per domain and control). */
 function controlsOf(architecture: unknown) {
@@ -119,6 +121,50 @@ function DeploymentSection(props: {
           Also in the namespace: {policies.other.join(', ')}.
         </Typography>
       )}
+    </Box>
+  );
+}
+
+/** Where the service's code and manifests live, and what Flux last applied from there. */
+function GitopsSection(props: {
+  gitops: NonNullable<ArchitectureResponse['gitops']>;
+}) {
+  const g = props.gitops;
+  return (
+    <Box mb={2} data-testid="calm-gitops">
+      <Typography variant="overline" display="block">
+        Git and Flux
+      </Typography>
+      <Typography variant="body2">
+        {g.repoUrl ? (
+          <Link to={g.repoUrl}>Git repository</Link>
+        ) : (
+          'Git repository'
+        )}{' '}
+        deployed by the Flux Kustomization <code>{g.kustomization}</code>:{' '}
+        <Chip
+          size="small"
+          label={g.ready ? 'Ready' : 'Not ready'}
+          color={g.ready ? 'primary' : 'default'}
+        />
+      </Typography>
+      <Typography variant="body2">
+        {g.commit ? (
+          <>
+            Applied commit{' '}
+            {g.commitUrl ? (
+              <Link to={g.commitUrl}>
+                <code>{g.commit.slice(0, 12)}</code>
+              </Link>
+            ) : (
+              <code>{g.commit.slice(0, 12)}</code>
+            )}
+            {g.ready ? '' : `. ${g.message}`}
+          </>
+        ) : (
+          g.message
+        )}
+      </Typography>
     </Box>
   );
 }
@@ -281,6 +327,13 @@ export function CalmArchitectureCard() {
               </Box>
             )}
           </Box>
+          {value.deployment && (
+            <Box mb={2}>
+              <OpenAppButton name={entity.metadata.name} />
+            </Box>
+          )}
+          {annotations[ANN.bundle] && <VersionsSection entityRef={entityRef} />}
+          {value.gitops && <GitopsSection gitops={value.gitops} />}
           {value.deployment && (
             <DeploymentSection
               deployment={value.deployment}

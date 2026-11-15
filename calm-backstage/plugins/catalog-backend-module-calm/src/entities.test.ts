@@ -164,8 +164,8 @@ const bundle = (version: string, deploy?: string): BundleInfo => ({
 });
 const hubUrl = 'http://localhost:8090';
 
-function template(bundles: BundleInfo[]) {
-  const spec = templateEntity(pattern, bundles, hubUrl).spec as any;
+function template(bundles: BundleInfo[], opts: { gitops?: boolean } = {}) {
+  const spec = templateEntity(pattern, bundles, hubUrl, opts).spec as any;
   const steps: any[] = spec.steps;
   return {
     spec,
@@ -242,6 +242,172 @@ describe('templateEntity: build and deploy', () => {
       'CALM Hub',
     ]);
     expect(t.spec.output.text[1].content).not.toContain('decorate');
+  });
+});
+
+describe('templateEntity: starters and deployment rules', () => {
+  const starter = (
+    name: string,
+    version: string,
+    runtime?: string,
+  ): BundleInfo => ({
+    name,
+    version,
+    kind: 'starter',
+    runtime,
+    patterns: [fits],
+  });
+  const rules = (version: string): BundleInfo => ({
+    name: 'k8s-deploy',
+    version,
+    kind: 'deployment',
+    deploy: 'kubernetes',
+    patterns: [fits, { namespace: 'hackathon', patternId: 'event-streaming' }],
+  });
+  const all = [
+    bundle('3.0.0', 'kubernetes'),
+    starter('spring-boot-service', '1.0.0', 'Spring Boot 4.0.9 on Java 21'),
+    starter('node-service', '1.0.0'),
+    rules('1.0.0'),
+    rules('1.1.0'),
+  ];
+
+  it('offers starters and full bundles as bundle and deployment bundles as deployBundle', () => {
+    const t = template(all, { gitops: true });
+    expect(t.choices.bundle.enum).toEqual([
+      'node-service@1.0.0',
+      'spring-boot-service@1.0.0',
+      'web-service@3.0.0',
+    ]);
+    expect(t.choices.bundle.enumNames[1]).toBe(
+      'spring-boot-service 1.0.0 (Spring Boot 4.0.9 on Java 21)',
+    );
+    expect(t.choices.bundle.enumNames[2]).toBe(
+      'web-service 3.0.0 (full bundle)',
+    );
+    expect(t.choices.deployBundle).toMatchObject({
+      enum: ['k8s-deploy@1.0.0', 'k8s-deploy@1.1.0'],
+      default: 'k8s-deploy@1.1.0',
+    });
+  });
+
+  it('renders the deployment rules into rendered-deploy only when the starter is not full', () => {
+    const t = template(all, { gitops: true });
+    const isStarter =
+      '(parameters.bundle in ["node-service@1.0.0","spring-boot-service@1.0.0"])';
+    expect(t.stepIds.slice(5, 8)).toEqual([
+      'template',
+      'template-deploy',
+      'publish',
+    ]);
+    expect(t.step('template-deploy')).toMatchObject({
+      action: 'calm:template',
+      if: `\${{ ${isStarter} }}`,
+      input: {
+        bundle: '${{ parameters.deployBundle }}',
+        outputDir: 'rendered-deploy',
+      },
+    });
+    expect(t.step('publish').input).toMatchObject({
+      deployBundle: `\${{ parameters.deployBundle if ${isStarter} else "" }}`,
+      deploySourceDir: `\${{ "rendered-deploy" if ${isStarter} else "" }}`,
+    });
+    // Every starter can be deployed (there are deployment rules), and so can the deployable full bundle.
+    expect(t.step('deploy').if).toContain(
+      '"web-service@3.0.0","node-service@1.0.0","spring-boot-service@1.0.0"',
+    );
+  });
+
+  it('has no deployment-rules choice without starters', () => {
+    const t = template([bundle('3.0.0', 'kubernetes'), rules('1.0.0')]);
+    expect(t.choices.deployBundle).toBeUndefined();
+    expect(t.stepIds).not.toContain('template-deploy');
+  });
+
+  it('does not offer a bundle that fits another pattern', () => {
+    const t = template([
+      ...all,
+      {
+        name: 'nisshi-stream-app',
+        version: '1.0.0',
+        kind: 'starter',
+        patterns: [{ patternId: 'event-streaming' }],
+      },
+    ]);
+    expect(t.choices.bundle.enum).not.toContain('nisshi-stream-app@1.0.0');
+  });
+});
+
+describe('upgrade Template', () => {
+  const snapshot = (gitops: boolean) =>
+    buildEntities({
+      hubUrl,
+      patterns: [],
+      architectures: [],
+      controls: [],
+      bundles: [],
+      gitops,
+    });
+
+  it('is emitted only when services live in Git, with render, build, merge, deploy, decorate and refresh steps', () => {
+    expect(
+      snapshot(false).entities.find(e => e.metadata.name === 'calm-upgrade'),
+    ).toBeUndefined();
+    const t = snapshot(true).entities.find(
+      e => e.metadata.name === 'calm-upgrade',
+    ) as any;
+    expect(t.kind).toBe('Template');
+    expect(t.spec.steps.map((s: any) => s.action)).toEqual([
+      'calm:upgrade:render',
+      'calm:image:build',
+      'calm:upgrade:merge',
+      'calm:deploy:gitops',
+      'calm:decorate:deployment',
+      'calm:catalog:refresh',
+    ]);
+    expect(t.spec.steps[1].if).toBe('${{ steps.render.output.codeChanged }}');
+    expect(
+      t.spec.parameters[0].properties.service['ui:options'].catalogFilter,
+    ).toEqual([{ kind: 'Component', 'metadata.tags': 'calm-gitops' }]);
+  });
+});
+
+describe('templateEntity: Git and Flux', () => {
+  it('pushes the service to Git after publishing, tags the image with the commit and deploys with Flux', () => {
+    const t = template([bundle('3.0.0', 'kubernetes')], { gitops: true });
+    expect(t.stepIds).toEqual([
+      'check-cluster',
+      'generate',
+      'fill',
+      'validate',
+      'register-hub',
+      'template',
+      'publish',
+      'git-publish',
+      'build',
+      'deploy',
+      'decorate',
+      'register',
+    ]);
+    expect(t.step('git-publish')).toMatchObject({
+      action: 'calm:git:publish',
+      input: { dir: '${{ steps.publish.output.path }}' },
+    });
+    expect(t.step('build').input.tag).toBe(
+      '${{ steps["git-publish"].output.shortCommit }}',
+    );
+    expect(t.step('deploy').action).toBe('calm:deploy:gitops');
+    expect(t.step('decorate').input).toMatchObject({
+      gitRepo: '${{ steps.deploy.output.repoUrl }}',
+      gitCommit: '${{ steps.deploy.output.commit }}',
+    });
+  });
+
+  it('keeps kubectl apply without calm.gitops', () => {
+    const t = template([bundle('3.0.0', 'kubernetes')]);
+    expect(t.stepIds).not.toContain('git-publish');
+    expect(t.step('deploy').action).toBe('calm:deploy:k8s');
+    expect(t.step('build').input.tag).toBe('${{ context.task.id }}');
   });
 });
 

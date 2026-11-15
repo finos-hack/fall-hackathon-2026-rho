@@ -1,0 +1,10 @@
+{
+  "name": "k8s-deploy",
+  "version": "1.2.1",
+  "kind": "deployment",
+  "description": "Deployment rules for any starter, version 1.2.1: a Deployment and Service per in-cluster node, the gateway's nginx config, the starter contract's environment and NetworkPolicies from the architecture's connects relationships, with resource limits, liveness probes, no service-account tokens in pods and app.kubernetes.io labels (since 1.1.0), Nisshi 0.8.2, and backing services whose data is in the pod roll out one pod at a time (maxSurge 0), so two brokers never run at once. Use 1.2.1, not 1.2.0: 1.2.0's Recreate strategy cannot be applied over an existing deployment.",
+  "patterns": [
+    { "namespace": "hackathon", "patternId": "web-service" },
+    { "namespace": "hackathon", "patternId": "event-streaming" }
+  ]
+}

@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CALM service</title>
+<style>
+  :root { --bg:#f4f6f9; --card:#fff; --ink:#18202b; --muted:#5d6b7c; --line:#dfe4ea; --ok:#127a46; --okbg:#d9f2e4;
+    --bad:#a8261f; --badbg:#fbe0dd; --accent:#2f5bd3; --code:#eef1f6; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#10141a; --card:#181e27; --ink:#e6eaf0; --muted:#97a3b3;
+    --line:#2a323e; --ok:#7fdca6; --okbg:#143826; --bad:#ff9d95; --badbg:#47191a; --accent:#8eabff; --code:#222a35; } }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;
+    padding:32px max(16px,env(safe-area-inset-left)); }
+  main { max-width:880px; margin:0 auto; display:flex; flex-direction:column; gap:20px; }
+  header { display:flex; flex-wrap:wrap; align-items:center; gap:12px 20px; justify-content:space-between; }
+  h1 { margin:0; font-size:30px; letter-spacing:-0.01em; }
+  .sub { color:var(--muted); margin:2px 0 0; }
+  .pill { display:inline-flex; align-items:center; gap:8px; padding:6px 14px; border-radius:999px; font-weight:600; }
+  .pill.ok { color:var(--ok); background:var(--okbg); } .pill.bad { color:var(--bad); background:var(--badbg); }
+  .dot { width:9px; height:9px; border-radius:50%; background:currentColor; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:14px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px 18px; min-width:0; }
+  .label { text-transform:uppercase; letter-spacing:.07em; font-size:11.5px; color:var(--muted); font-weight:600; }
+  .value { font-size:19px; font-weight:600; margin-top:4px; overflow-wrap:anywhere; }
+  .small { color:var(--muted); font-size:13.5px; margin-top:4px; overflow-wrap:anywhere; }
+  code { background:var(--code); padding:1px 6px; border-radius:5px; font:13px ui-monospace,Menlo,monospace; }
+  table { width:100%; border-collapse:collapse; }
+  td, th { text-align:left; padding:8px 6px; border-top:1px solid var(--line); font-size:14px; vertical-align:top; }
+  th { color:var(--muted); font-weight:600; font-size:12px; text-transform:uppercase; letter-spacing:.06em; border-top:0; }
+  #extra:empty { display:none; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <div>
+      <h1 id="name">CALM service</h1>
+      <p class="sub" id="sub">Loading what this service is and how it was made&hellip;</p>
+    </div>
+    <span class="pill" id="status"><span class="dot"></span><span id="status-text">checking</span></span>
+  </header>
+  <section class="grid">
+    <div class="card"><div class="label">Code (starter)</div><div class="value" id="starter">-</div><div class="small" id="runtime">-</div></div>
+    <div class="card"><div class="label">Deployment rules</div><div class="value" id="rules">-</div><div class="small">rendered deploy/k8s from the CALM architecture</div></div>
+    <div class="card"><div class="label">Running in</div><div class="value" id="pod">-</div><div class="small" id="started">-</div></div>
+  </section>
+  <section class="card">
+    <div class="label">Connections from the CALM architecture</div>
+    <table><thead><tr><th>Node</th><th>Technology</th><th>Address</th><th>Answers</th></tr></thead><tbody id="conns"><tr><td colspan="4">checking&hellip;</td></tr></tbody></table>
+  </section>
+  <section id="extra"></section>
+  <section class="card">
+    <div class="label">Made from</div>
+    <div class="small">Architecture <code id="arch">-</code></div>
+    <div class="small">Pattern <code id="pattern">-</code></div>
+    <div class="small">Owner <code id="owner">-</code></div>
+  </section>
+</main>
+<script>
+  const $ = id => document.getElementById(id);
+  const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  async function load() {
+    try {
+      const info = await (await fetch('api/info')).json();
+      document.title = info.service;
+      $('name').textContent = info.service;
+      $('sub').textContent = info.description || 'Created from a CALM pattern in Backstage';
+      $('starter').textContent = info.starter;
+      $('runtime').textContent = info.runtime;
+      $('rules').textContent = info.deployRules || 'not set';
+      $('pod').textContent = info.hostname;
+      $('started').textContent = 'up since ' + new Date(info.startedAt).toLocaleString();
+      $('arch').textContent = info.architecture || '-';
+      $('pattern').textContent = info.pattern || '-';
+      $('owner').textContent = info.owner || '-';
+      $('status').className = 'pill ok';
+      $('status-text').textContent = 'Running';
+    } catch (e) {
+      $('status').className = 'pill bad';
+      $('status-text').textContent = 'Not answering';
+    }
+    try {
+      const conns = await (await fetch('api/connections')).json();
+      $('conns').innerHTML = conns.length
+        ? conns.map(c => `<tr><td><b>${esc(c.name)}</b><br><code>${esc(c.id)}</code></td><td>${esc(c.technology)}</td>` +
+            `<td><code>${esc(c.host)}:${esc(c.port)}</code></td><td><span class="pill ${c.open ? 'ok' : 'bad'}">` +
+            `<span class="dot"></span>${c.open ? 'yes' : 'no'}</span></td></tr>`).join('')
+        : '<tr><td colspan="4">The architecture gives this service no connections inside the cluster.</td></tr>';
+    } catch (e) {
+      $('conns').innerHTML = '<tr><td colspan="4">Could not check the connections.</td></tr>';
+    }
+  }
+  load();
+</script>
+</body>
+</html>

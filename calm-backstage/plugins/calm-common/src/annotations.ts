@@ -15,6 +15,10 @@ export const CALM_ANNOTATIONS = {
   /** Template bundle name, e.g. `web-service`. */
   bundle: 'calm.finos.org/bundle',
   bundleVersion: 'calm.finos.org/bundle-version',
+  /** On a bundle Resource: starter, deployment or full. */
+  bundleKind: 'calm.finos.org/bundle-kind',
+  /** On a starter bundle Resource: what it runs on. */
+  bundleRuntime: 'calm.finos.org/bundle-runtime',
   /** OCI reference of a bundle in the bundle registry, e.g. `localhost:5050/calm-bundles/web-service:2.0.0`. */
   bundleRef: 'calm.finos.org/bundle-ref',
   /** Digest of the bundle's OCI manifest (`sha256:…`): the exact content behind `bundle-ref` at the time. */
@@ -28,7 +32,17 @@ export const CALM_ANNOTATIONS = {
    * decision it answers, so a later step can rebuild the `--option-choices` JSON.
    */
   decisions: 'calm.finos.org/decisions',
+  /** On a service made from a starter: the deployment-rules bundle that rendered its `deploy/k8s`. */
+  deployBundle: 'calm.finos.org/deploy-bundle',
+  deployBundleVersion: 'calm.finos.org/deploy-bundle-version',
+  /** Web URL of the service's Git repository (output/<name> is its working copy). */
+  gitRepo: 'calm.finos.org/git-repo',
+  /** `<namespace>/<name>` of the Flux Kustomization that deploys the service from Git. */
+  gitops: 'calm.finos.org/gitops',
 } as const;
+
+/** Tag on a service that lives in Git and is deployed by Flux (the upgrade Template lists only these). */
+export const CALM_GITOPS_TAG = 'calm-gitops';
 
 /** Entity `spec.type` values the CALM catalog provider emits. */
 export const CALM_ENTITY_TYPES = {

@@ -1,3 +1,4 @@
+import { readBundleMeta } from '@internal/backstage-plugin-calm-common';
 import { promises as fs } from 'fs';
 import { resolve } from 'path';
 import type {
@@ -92,6 +93,8 @@ export interface CalmProviderSettings {
   namespaces: string[];
   /** Local bundle folders (authoring). */
   bundles: { name: string; version: string; path: string }[];
+  /** `calm.gitops` is configured: the Templates push services to Git and deploy them with Flux. */
+  gitops?: boolean;
   /** The OCI registry the bundles are read from. */
   bundleRegistry?: BundleRegistrySettings;
 }
@@ -220,6 +223,7 @@ export class CalmEntityProvider implements EntityProvider {
       architectures,
       controls,
       bundles: await this.readBundles(),
+      gitops: this.settings.gitops,
     };
   }
 
@@ -260,13 +264,16 @@ export class CalmEntityProvider implements EntityProvider {
         const meta = JSON.parse(
           await fs.readFile(resolve(dir, 'calm-backstage.json'), 'utf-8'),
         );
+        const m = readBundleMeta(meta, b);
         out.push({
           name: b.name,
           version: b.version,
           path: dir,
-          description: meta.description,
-          deploy: typeof meta.deploy === 'string' ? meta.deploy : undefined,
-          pattern: meta.pattern,
+          description: m.description,
+          deploy: m.deploy,
+          kind: m.kind,
+          runtime: m.runtime,
+          patterns: m.patterns,
         });
       } catch (e) {
         this.logger.warn(

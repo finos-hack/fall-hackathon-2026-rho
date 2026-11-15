@@ -1,0 +1,25 @@
+# {{title}}
+
+{{description}}
+
+Owner: **{{owner}}**. Started from the **{{starter.name}} {{starter.version}}** starter: {{starter.runtime}}.
+
+| File | What it is |
+|---|---|
+| `pom.xml` | The Maven build |
+| `src/main/java/com/example/service/InfoResource.java` | The service: `GET /` (a page about itself), `/health`, `/api/info`, `/api/connections` |
+| `src/main/resources/META-INF/resources/index.html` | The page |
+| `Dockerfile` | Builds the image (`registry.access.redhat.com/ubi9/openjdk-21` to build, `ubi9/openjdk-21-runtime` to run) |
+| `deploy/k8s/` | Rendered by the deployment rules, not by this starter |
+
+## Run it
+
+```sh
+mvn quarkus:dev
+```
+
+## Provenance
+
+- Architecture: {{architectureId}}
+- Pattern: {{patternId}}
+- Starter: {{starter.name}} {{starter.version}}

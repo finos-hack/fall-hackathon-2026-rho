@@ -371,7 +371,14 @@ export async function extractBundle(
 export async function pushBundle(opts: {
   dir: string;
   ref: string;
-}): Promise<{ ref: string; digest: string }> {
+  /** More manifest annotations, e.g. `org.opencontainers.image.source` and `.revision`. */
+  annotations?: Record<string, string>;
+  /**
+   * A published version never changes: when the tag exists, the same content (layer) is skipped without touching
+   * the manifest, and different content is refused.
+   */
+  immutable?: boolean;
+}): Promise<{ ref: string; digest: string; skipped?: boolean }> {
   const ref = parseRef(opts.ref);
   const configBytes = await fs.readFile(
     path.join(opts.dir, BUNDLE_CONFIG_FILE),
@@ -386,6 +393,27 @@ export async function pushBundle(opts: {
   }
   const layerBytes = await packBundle(opts.dir);
 
+  if (opts.immutable) {
+    const existing = await readManifest(ref).catch(e => {
+      if (e instanceof OciError && e.status === 404) {
+        return undefined;
+      }
+      throw e;
+    });
+    if (existing) {
+      const layer = existing.manifest.layers.find(
+        l => l.mediaType === OCI_LAYER_MEDIA_TYPE,
+      );
+      const shown = `${ref.registry}/${ref.repository}:${ref.tag}`;
+      if (layer?.digest === sha256Digest(layerBytes)) {
+        return { ref: shown, digest: existing.digest, skipped: true };
+      }
+      throw new Error(
+        `bundle ${shown} already published with different content; publish a new version`,
+      );
+    }
+  }
+
   const configBlob = await pushBlob(ref, configBytes);
   const layerBlob = await pushBlob(ref, layerBytes);
 
@@ -396,6 +424,7 @@ export async function pushBundle(opts: {
   if (typeof config.description === 'string') {
     annotations['org.opencontainers.image.description'] = config.description;
   }
+  Object.assign(annotations, opts.annotations ?? {});
   const manifest: OciManifest = {
     schemaVersion: 2,
     mediaType: OCI_MANIFEST_MEDIA_TYPE,
@@ -476,17 +505,59 @@ export async function listTags(
  * The manifest digest and the config (the bundle's `calm-backstage.json`) of a bundle in the registry. The config
  * blob is checked against the digest in the manifest.
  */
-export async function readBundleConfig(
-  ref: string,
-): Promise<{ digest: string; config: any }> {
+export async function readBundleConfig(ref: string): Promise<{
+  digest: string;
+  config: any;
+  annotations: Record<string, string>;
+  /** Size of the bundle layer in bytes. */
+  size?: number;
+}> {
   const parsed = parseRef(ref);
   const { digest, manifest } = await readManifest(parsed);
   const blob = await readBlob(parsed, manifest.config);
+  const layer = manifest.layers.find(l => l.mediaType === OCI_LAYER_MEDIA_TYPE);
   try {
-    return { digest, config: JSON.parse(blob.toString('utf8')) };
+    return {
+      digest,
+      config: JSON.parse(blob.toString('utf8')),
+      annotations: manifest.annotations ?? {},
+      ...(layer ? { size: layer.size } : {}),
+    };
   } catch (e) {
     throw new Error(`The config of ${ref} is not JSON: ${e}`);
   }
+}
+
+/**
+ * Whether a bundle folder can be published to `ref`: `new` (the tag is not there), `same` (the registry has this
+ * content) or `changed` (the registry has other content under this version, which must not change).
+ */
+export async function checkBundle(opts: {
+  dir: string;
+  ref: string;
+}): Promise<'new' | 'same' | 'changed'> {
+  const existing = await readManifest(parseRef(opts.ref)).catch(e => {
+    if (e instanceof OciError && e.status === 404) {
+      return undefined;
+    }
+    throw e;
+  });
+  if (!existing) {
+    return 'new';
+  }
+  const layer = existing.manifest.layers.find(
+    l => l.mediaType === OCI_LAYER_MEDIA_TYPE,
+  );
+  return layer?.digest === sha256Digest(await packBundle(opts.dir))
+    ? 'same'
+    : 'changed';
+}
+
+/** The manifest of a bundle in the registry (annotations, layers) and its digest. */
+export async function readBundleManifest(
+  ref: string,
+): Promise<{ digest: string; manifest: OciManifest }> {
+  return readManifest(parseRef(ref));
 }
 
 /** The manifest digest of a bundle in the registry, without reading its blobs. */

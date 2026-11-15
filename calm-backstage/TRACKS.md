@@ -2,8 +2,10 @@
 
 The base works end to end: CALM Hub → catalog → entity pages → create a service from a pattern with options → store
 its architecture in CALM Hub → render with a template bundle from the OCI registry → publish to `output/` → build
-and deploy to a local Kubernetes cluster → record the deployment in CALM Hub → register. Each track below can start from it without waiting for
-the others. Pick one, branch from `main`, keep to its folders where you can, and add tests for what you change.
+and deploy to a local Kubernetes cluster → record the deployment in CALM Hub → register. Part 3 added starters
+(Node, Spring Boot, Red Hat Quarkus, Nisshi) and deployment rules as separate bundles, one Gitea repository per
+service deployed by Flux, upgrades of code and deployment rules through pull requests, a Template Explorer and an
+"Open the running app" button. Each track below can start from it without waiting for the others. Pick one, branch from `main`, keep to its folders where you can, and add tests for what you change.
 
 How it fits together (details in `README.md` and `docs/superpowers/specs/2026-11-13-calm-backstage-design.md`):
 
@@ -56,6 +58,12 @@ Scope: `anyOf` UX, option descriptions, a review step, nested patterns.
 
 Scope: where bundles live (Git, npm, CALM Hub), versions, "bundle update available", transformers.
 
+- Done (part 3): starters and deployment rules as two kinds of bundle (`calm-backstage.json` `kind`, `patterns`);
+  bundles are published from the Gitea repository `calm-templates/bundles` with their source and revision as OCI
+  annotations, and a published version never changes; the Template Explorer shows files, sources, diffs and who uses
+  what; "update available" is on the service card with an Upgrade Template.
+- Left (part 3): an upgrade overwrites the files the starter rendered (no three-way merge of a developer's edits);
+  a bundle is published from Git by a script, not by a Backstage action; bundles fit patterns by id only.
 - Done: bundles are OCI artifacts in a local registry (`localhost:5050/calm-bundles/<name>:<version>`, pushed with
   `yarn bundles:push`); the catalog lists them and `calm:template` pulls them by digest. `calm-backstage.json` says
   which pattern a bundle fits and whether it can be deployed. Bundle fit ignores the pattern version.
@@ -83,6 +91,12 @@ Scope: GitHub publish, dry run, register the architecture in the Hub.
     scaffolder skips the publish step they depend on.
   - The gateway forwards plain HTTP although the architecture says HTTPS.
 - `calm:publish:local` still writes `output/<name>/` and `calm:register:local` adds a file location.
+- Done (part 3): services are pushed to Gitea and deployed by Flux (`calm:git:publish`, `calm:deploy:gitops`); the
+  card shows the Flux status and the commit applied; upgrades go through a merged pull request.
+- Left (part 3): a GitHub client next to `GiteaClient` (push-to-create, pull requests and anonymous Flux reads are
+  Gitea's); a namespaced service account and `targetNamespace` per Flux Kustomization (Flux runs as cluster-admin, so
+  anyone who can push to Gitea controls the cluster); `user-cookie` auth or a separate origin for the app proxy
+  (FINDINGS, part 3, Security); a failed deploy is still not recorded in the Hub.
 - Swap in `publish:github` + `catalog:register` (url location) for a real repository; no GitHub credentials are set up.
 - `calm:generate`, `calm:fill`, `calm:validate` support dry runs; the template editor's dry run can use them.
 

@@ -5,11 +5,15 @@ import type { Entity } from '@backstage/catalog-model';
 import {
   CALM_ANNOTATIONS as ANN,
   CALM_ENTITY_TYPES as TYPES,
+  BundleKind,
+  BundlePatternRef,
+  CALM_GITOPS_TAG,
   PatternDecision,
   TemplateDecisionParameter,
   bundleEntityName,
   compareVersions,
   controlEntityName,
+  fitsPattern,
   entityName,
   parsePatternUrl,
   parseRequirementUrl,
@@ -53,13 +57,34 @@ export interface BundleInfo {
   description?: string;
   /** Where the rendered service can be deployed (`deploy` in calm-backstage.json): `kubernetes`, or nothing. */
   deploy?: string;
+  /** starter, deployment or full (no kind in calm-backstage.json: full). */
+  kind?: BundleKind;
+  /** What a starter runs on. */
+  runtime?: string;
+  /** The patterns the bundle fits (calm-backstage.json `patterns`, or its older single `pattern`). */
+  patterns?: BundlePatternRef[];
+  /** @deprecated read `patterns`; kept for bundles described by hand in tests. */
   pattern?: {
     namespace?: string;
     patternId?: string;
     version?: string;
     url?: string;
   };
+  /** Manifest annotations of a registry bundle (source, revision, created). */
+  annotations?: Record<string, string>;
 }
+
+/** The patterns a bundle fits, from `patterns` or the older `pattern`. */
+export function bundlePatterns(b: BundleInfo): BundlePatternRef[] {
+  if (b.patterns?.length) {
+    return b.patterns;
+  }
+  return b.pattern?.patternId
+    ? [{ ...b.pattern, patternId: b.pattern.patternId }]
+    : [];
+}
+
+export const bundleKind = (b: BundleInfo): BundleKind => b.kind ?? 'full';
 
 export interface CalmSnapshot {
   hubUrl: string;
@@ -67,6 +92,8 @@ export interface CalmSnapshot {
   architectures: HubDocument[];
   controls: ControlDocument[];
   bundles: BundleInfo[];
+  /** `calm.gitops` is configured: services are pushed to Git and deployed by Flux. */
+  gitops?: boolean;
 }
 
 const resourceRef = (name: string) => `resource:default/${name}`;
@@ -178,19 +205,27 @@ function controlEntity(c: ControlDocument, hubUrl: string): Entity {
 }
 
 function bundleEntity(b: BundleInfo, hubUrl: string): Entity {
-  const p = b.pattern;
+  const fits = bundlePatterns(b);
+  const p = fits[0];
+  const kind = bundleKind(b);
   return {
     apiVersion: 'backstage.io/v1alpha1',
     kind: 'Resource',
     metadata: {
       name: bundleEntityName(b.name, b.version),
-      title: `${b.name} ${b.version}`,
+      title: `${b.name} ${b.version}${
+        kind === 'full'
+          ? ''
+          : ` (${kind === 'starter' ? 'starter' : 'deployment rules'})`
+      }`,
       description: `${
         b.description ?? `CALM template bundle ${b.name} ${b.version}`
       }${b.ref ? `\n\nStored in the OCI bundle registry as ${b.ref}.` : ''}`,
       annotations: {
         [ANN.bundle]: b.name,
         [ANN.bundleVersion]: b.version,
+        [ANN.bundleKind]: kind,
+        ...(b.runtime ? { [ANN.bundleRuntime]: b.runtime } : {}),
         ...(b.ref ? { [ANN.bundleRef]: b.ref } : {}),
         ...(b.digest ? { [ANN.bundleDigest]: b.digest } : {}),
         [ANN.hubUrl]: hubUrl,
@@ -198,13 +233,19 @@ function bundleEntity(b: BundleInfo, hubUrl: string): Entity {
         ...(p?.patternId ? { [ANN.pattern]: p.patternId } : {}),
         ...(p?.version ? { [ANN.patternVersion]: p.version } : {}),
       },
-      tags: ['calm', 'calm-template-bundle'],
+      tags: ['calm', 'calm-template-bundle', `calm-bundle-${kind}`],
     },
     spec: {
       type: TYPES.bundle,
       owner: OWNER,
-      ...(p?.patternId
-        ? { dependsOn: [resourceRef(patternEntityName(p.patternId))] }
+      ...(fits.length
+        ? {
+            dependsOn: [
+              ...new Set(
+                fits.map(f => resourceRef(patternEntityName(f.patternId))),
+              ),
+            ],
+          }
         : {}),
     },
   };
@@ -216,12 +257,17 @@ export function bundlesFor(
   bundles: BundleInfo[],
 ): BundleInfo[] {
   return bundles
-    .filter(
-      b =>
-        b.pattern?.patternId === pattern.id &&
-        (b.pattern?.namespace ?? pattern.namespace) === pattern.namespace,
+    .filter(b =>
+      fitsPattern(
+        { patterns: bundlePatterns(b) },
+        pattern.namespace,
+        pattern.id,
+      ),
     )
-    .sort((a, b) => compareVersions(a.version, b.version));
+    .sort(
+      (a, b) =>
+        a.name.localeCompare(b.name) || compareVersions(a.version, b.version),
+    );
 }
 
 /** The `deploy` value of a bundle whose rendered service the Template can build and deploy to Kubernetes. */
@@ -267,6 +313,16 @@ const DEPLOYED_TEXT = {
   ].join('\n'),
 };
 
+/** The output text about the service's Git repository and, when it was deployed, the commit Flux applied. */
+const GIT_TEXT = {
+  title: 'Git and Flux',
+  content: [
+    'Repository: ${{ steps["git-publish"].output.repoUrl }} (the working copy is the published folder).',
+    '',
+    '${{ ("Flux (`" + steps.deploy.output.kustomization + "`) applied commit `" + steps.deploy.output.commit + "`.") if steps.deploy.output.kustomization else "Not deployed, so Flux was not set up for it." }}',
+  ].join('\n'),
+};
+
 /**
  * The output text about CALM Hub: the architecture version and, in a Template that can deploy, the deployment
  * decorator when one was posted.
@@ -288,6 +344,7 @@ export function templateEntity(
   p: HubDocument,
   bundles: BundleInfo[],
   hubUrl: string,
+  opts: { gitops?: boolean } = {},
 ): Entity {
   const decisions = readPatternDecisions(p.doc);
   const fitting = bundlesFor(p, bundles);
@@ -301,22 +358,61 @@ export function templateEntity(
   decisions.forEach((d, i) => {
     choiceProperties[map[i].parameter] = decisionProperty(d);
   });
-  const bundleValues = fitting.map(b => `${b.name}@${b.version}`);
+  const value = (b: BundleInfo) => `${b.name}@${b.version}`;
+  const codeBundles = fitting.filter(b => bundleKind(b) !== 'deployment');
+  const starters = codeBundles
+    .filter(b => bundleKind(b) === 'starter')
+    .map(value);
+  const deployRules = fitting
+    .filter(b => bundleKind(b) === 'deployment')
+    .map(value);
+  const bundleValues = codeBundles.map(value);
   if (bundleValues.length) {
+    // Starters first (newest of each first), then the older full bundles.
+    const ordered = [
+      ...codeBundles.filter(b => bundleKind(b) === 'starter'),
+      ...codeBundles.filter(b => bundleKind(b) !== 'starter'),
+    ];
     choiceProperties.bundle = {
-      title: 'Template bundle',
-      description: 'Which bundle renders the code for the new service.',
+      title: 'Code: starter (or a full bundle)',
+      description: starters.length
+        ? 'The starter renders the code and Dockerfile; the deployment rules below render how it runs. A full bundle renders both.'
+        : 'Which bundle renders the code for the new service.',
       type: 'string',
-      enum: bundleValues,
-      default: bundleValues[bundleValues.length - 1],
+      enum: ordered.map(value),
+      enumNames: ordered.map(
+        b =>
+          `${b.name} ${b.version}${b.runtime ? ` (${b.runtime})` : ''}${
+            bundleKind(b) === 'full' ? ' (full bundle)' : ''
+          }`,
+      ),
+      default: starters.length
+        ? starters[starters.length - 1]
+        : bundleValues[bundleValues.length - 1],
       'ui:widget': 'radio',
     };
   }
-  // The bundles that render Kubernetes manifests, as the `bundle` parameter names them. Whether the chosen bundle
-  // is one of them is only known at run time, so the steps that need it test this list.
-  const deployable = fitting
-    .filter(b => b.deploy === DEPLOY_KUBERNETES)
-    .map(b => `${b.name}@${b.version}`);
+  if (starters.length && deployRules.length) {
+    choiceProperties.deployBundle = {
+      title: 'Deployment rules',
+      description:
+        'Render deploy/k8s for a starter: workloads, network policies from the architecture, hardening. Not used with a full bundle.',
+      type: 'string',
+      enum: deployRules,
+      default: deployRules[deployRules.length - 1],
+      'ui:widget': 'radio',
+    };
+  }
+  const isStarter = `(parameters.bundle in ${JSON.stringify(starters)})`;
+  // The bundles that render Kubernetes manifests, as the `bundle` parameter names them: full bundles that say so,
+  // and every starter when there are deployment rules. Whether the chosen bundle is one of them is only known at run
+  // time, so the steps that need it test this list.
+  const deployable = [
+    ...fitting
+      .filter(b => bundleKind(b) === 'full' && b.deploy === DEPLOY_KUBERNETES)
+      .map(value),
+    ...(deployRules.length ? starters : []),
+  ];
   const isDeployable = `(parameters.bundle in ${JSON.stringify(deployable)})`;
   if (deployable.length) {
     choiceProperties.deploy = {
@@ -438,7 +534,12 @@ export function templateEntity(
           },
         },
         ...(bundleValues.length
-          ? publishSteps(p, deployable.length ? isDeployable : undefined)
+          ? publishSteps(
+              p,
+              deployable.length ? isDeployable : undefined,
+              Boolean(opts.gitops),
+              starters.length && deployRules.length ? isStarter : undefined,
+            )
           : []),
       ],
       output: bundleValues.length
@@ -461,6 +562,7 @@ export function templateEntity(
                   'Architecture: **${{ steps.generate.output.nodeCount }} nodes**, **${{ steps.generate.output.relationshipCount }} relationships**, ${{ steps.fill.output.filledCount }} placeholders filled. `calm validate`: ${{ steps.validate.output.errorCount }} errors, ${{ steps.validate.output.warningCount }} warnings.',
                 ].join('\n'),
               },
+              ...(opts.gitops ? [GIT_TEXT] : []),
               ...(deployable.length ? [DEPLOYED_TEXT] : []),
               hubText(deployable.length > 0),
             ],
@@ -484,7 +586,12 @@ export function templateEntity(
  * Kubernetes manifests (`isDeployable`, an expression over the parameters) and with the `deploy` box ticked, build
  * the image, deploy it and record the deployment in the Hub; last, register the new service.
  */
-function publishSteps(p: HubDocument, isDeployable?: string): object[] {
+function publishSteps(
+  p: HubDocument,
+  isDeployable: string | undefined,
+  gitops: boolean,
+  isStarter?: string,
+): object[] {
   return [
     {
       // Before the render, so the rendered files and the published architecture.json carry the $id.
@@ -506,6 +613,22 @@ function publishSteps(p: HubDocument, isDeployable?: string): object[] {
         outputDir: 'rendered',
       },
     },
+    ...(isStarter
+      ? [
+          {
+            // For a starter: the deployment rules render deploy/k8s from the same architecture.
+            id: 'template-deploy',
+            name: 'Render the deployment rules (calm template)',
+            if: `\${{ ${isStarter} }}`,
+            action: 'calm:template',
+            input: {
+              architecturePath: '${{ steps.fill.output.architecturePath }}',
+              bundle: '${{ parameters.deployBundle }}',
+              outputDir: 'rendered-deploy',
+            },
+          },
+        ]
+      : []),
     {
       id: 'publish',
       name: 'Publish to the local output folder',
@@ -518,6 +641,12 @@ function publishSteps(p: HubDocument, isDeployable?: string): object[] {
         patternId: p.id,
         patternVersion: p.version,
         bundle: '${{ parameters.bundle }}',
+        ...(isStarter
+          ? {
+              deployBundle: `\${{ parameters.deployBundle if ${isStarter} else "" }}`,
+              deploySourceDir: `\${{ "rendered-deploy" if ${isStarter} else "" }}`,
+            }
+          : {}),
         // Set when calm:template pulled the bundle from the registry; empty for a local folder.
         bundleRef: '${{ steps.template.output.bundleRef }}',
         bundleDigest: '${{ steps.template.output.bundleDigest }}',
@@ -530,6 +659,21 @@ function publishSteps(p: HubDocument, isDeployable?: string): object[] {
         ...(isDeployable ? { deployable: `\${{ ${isDeployable} }}` } : {}),
       },
     },
+    ...(gitops
+      ? [
+          {
+            // The published folder becomes the working copy of the service's repository.
+            id: 'git-publish',
+            name: 'Push the service to its Git repository',
+            action: 'calm:git:publish',
+            input: {
+              dir: '${{ steps.publish.output.path }}',
+              name: '${{ parameters.name }}',
+              message: `Create \${{ parameters.name }} from the CALM pattern ${p.namespace}/${p.id} ${p.version} with \${{ parameters.bundle }}`,
+            },
+          },
+        ]
+      : []),
     ...(isDeployable
       ? [
           {
@@ -540,15 +684,24 @@ function publishSteps(p: HubDocument, isDeployable?: string): object[] {
             input: {
               dir: '${{ steps.publish.output.path }}',
               name: '${{ parameters.name }}',
-              // Unique per run, so a rerun rolls out the new image.
-              tag: '${{ context.task.id }}',
+              ...(gitops
+                ? {
+                    // The commit the image is built from.
+                    tag: '${{ steps["git-publish"].output.shortCommit }}',
+                  }
+                : {
+                    // Unique per run, so a rerun rolls out the new image.
+                    tag: '${{ context.task.id }}',
+                  }),
             },
           },
           {
             id: 'deploy',
-            name: 'Deploy to the local Kubernetes cluster (kubectl apply)',
+            name: gitops
+              ? 'Deploy through Git and Flux (commit the overlay, wait for Flux)'
+              : 'Deploy to the local Kubernetes cluster (kubectl apply)',
             if: `\${{ parameters.deploy and ${isDeployable} }}`,
-            action: 'calm:deploy:k8s',
+            action: gitops ? 'calm:deploy:gitops' : 'calm:deploy:k8s',
             input: {
               dir: '${{ steps.publish.output.path }}',
               name: '${{ parameters.name }}',
@@ -572,6 +725,12 @@ function publishSteps(p: HubDocument, isDeployable?: string): object[] {
               startTime: '${{ steps.deploy.output.startTime }}',
               endTime: '${{ steps.deploy.output.endTime }}',
               status: 'completed',
+              ...(gitops
+                ? {
+                    gitRepo: '${{ steps.deploy.output.repoUrl }}',
+                    gitCommit: '${{ steps.deploy.output.commit }}',
+                  }
+                : {}),
             },
           },
         ]
@@ -614,6 +773,164 @@ function choicesInput(
   return out;
 }
 
+/** Name of the Template that upgrades a service's starter and deployment rules. */
+export const UPGRADE_TEMPLATE_NAME = 'calm-upgrade';
+
+/**
+ * The Template that upgrades a CALM service in Git: re-render with newer bundles on a branch, build when the code
+ * changed, merge a pull request (the merge commit carries the image), let Flux apply it, record the deployment.
+ */
+export function upgradeTemplateEntity(hubUrl: string): Entity {
+  const changed = '${{ steps.render.output.changed }}';
+  return {
+    apiVersion: 'scaffolder.backstage.io/v1beta3',
+    kind: 'Template',
+    metadata: {
+      name: UPGRADE_TEMPLATE_NAME,
+      title: 'Upgrade a CALM service',
+      description:
+        "Upgrade a service's code (its starter) and/or how it runs (its deployment rules) to the newest bundles that fit its CALM pattern, through a pull request in its Git repository and a Flux redeploy.",
+      annotations: { [ANN.hubUrl]: hubUrl },
+      tags: ['calm', 'calm-upgrade'],
+    },
+    spec: {
+      owner: OWNER,
+      type: 'service',
+      parameters: [
+        {
+          title: 'Upgrade',
+          required: ['service'],
+          properties: {
+            service: {
+              title: 'Service',
+              description:
+                'A service created from a CALM pattern with a starter, in Git and deployed by Flux.',
+              type: 'string',
+              'ui:field': 'EntityPicker',
+              'ui:options': {
+                catalogFilter: [
+                  { kind: 'Component', 'metadata.tags': CALM_GITOPS_TAG },
+                ],
+                defaultKind: 'Component',
+              },
+            },
+            upgradeCode: {
+              title: 'Upgrade the code (starter)',
+              description:
+                'Re-render the starter with its newest version and build a new image.',
+              type: 'boolean',
+              default: true,
+            },
+            upgradeDeploy: {
+              title: 'Upgrade the deployment rules',
+              description:
+                'Re-render deploy/k8s with the newest deployment rules.',
+              type: 'boolean',
+              default: true,
+            },
+          },
+        },
+      ],
+      steps: [
+        {
+          id: 'render',
+          name: 'Re-render with the newer bundles on a branch',
+          action: 'calm:upgrade:render',
+          input: {
+            entityRef: '${{ parameters.service }}',
+            upgradeCode: '${{ parameters.upgradeCode }}',
+            upgradeDeploy: '${{ parameters.upgradeDeploy }}',
+          },
+        },
+        {
+          id: 'build',
+          name: 'Build the new image from the branch (minikube image build)',
+          if: '${{ steps.render.output.codeChanged }}',
+          action: 'calm:image:build',
+          input: {
+            dir: '${{ steps.render.output.dir }}',
+            name: '${{ steps.render.output.name }}',
+            tag: '${{ steps.render.output.shortCommit }}',
+          },
+        },
+        {
+          id: 'merge',
+          name: 'Open and merge the pull request',
+          if: changed,
+          action: 'calm:upgrade:merge',
+          input: {
+            dir: '${{ steps.render.output.dir }}',
+            name: '${{ steps.render.output.name }}',
+            branch: '${{ steps.render.output.branch }}',
+            image:
+              '${{ steps.build.output.image if steps.render.output.codeChanged else steps.render.output.currentImage }}',
+            summary: '${{ steps.render.output.summary }}',
+          },
+        },
+        {
+          id: 'deploy',
+          name: 'Wait for Flux to apply the merge commit',
+          if: changed,
+          action: 'calm:deploy:gitops',
+          input: {
+            dir: '${{ steps.render.output.dir }}',
+            name: '${{ steps.render.output.name }}',
+            image:
+              '${{ steps.build.output.image if steps.render.output.codeChanged else steps.render.output.currentImage }}',
+          },
+        },
+        {
+          id: 'decorate',
+          name: 'Record the deployment in CALM Hub',
+          if: changed,
+          action: 'calm:decorate:deployment',
+          input: {
+            hubNamespace: '${{ steps.render.output.hubNamespace }}',
+            architecture: '${{ steps.render.output.architecture }}',
+            version: '${{ steps.render.output.architectureVersion }}',
+            name: '${{ steps.render.output.name }}',
+            cluster: '${{ steps.deploy.output.cluster }}',
+            namespace: '${{ steps.deploy.output.namespace }}',
+            workloads: '${{ steps.deploy.output.deployments }}',
+            architecturePath: '${{ steps.render.output.architecturePath }}',
+            startTime: '${{ steps.deploy.output.startTime }}',
+            endTime: '${{ steps.deploy.output.endTime }}',
+            status: 'completed',
+            gitRepo: '${{ steps.deploy.output.repoUrl }}',
+            gitCommit: '${{ steps.deploy.output.commit }}',
+          },
+        },
+        {
+          id: 'refresh',
+          name: 'Refresh the service in the catalog',
+          action: 'calm:catalog:refresh',
+          input: { entityRef: '${{ parameters.service }}' },
+        },
+      ],
+      output: {
+        links: [
+          {
+            title: 'Open the service',
+            icon: 'catalog',
+            entityRef: '${{ parameters.service }}',
+          },
+          { title: 'Pull request', url: '${{ steps.merge.output.prUrl }}' },
+        ],
+        text: [
+          {
+            title: 'Upgrade',
+            content: [
+              '${{ steps.render.output.summary }}',
+              '',
+              '${{ ("Pull request " + steps.merge.output.prUrl + " merged; Flux applied `" + steps.deploy.output.commit + "`. Now: " + steps.render.output.starter + " and " + steps.render.output.deployBundle + ".") if steps.render.output.changed else "Nothing to upgrade: the service already uses the newest bundles that fit its pattern." }}',
+            ].join('\n'),
+          },
+        ],
+      },
+    },
+  };
+}
+
 /**
  * All entities for one snapshot. Later duplicates of an entity name are dropped and reported. A Hub architecture
  * that `calm:register:hub` stored for a service (its metadata names the service's entity) gets no Component here:
@@ -639,9 +956,12 @@ export function buildEntities(s: CalmSnapshot): {
   const emittedControls = new Set(
     s.controls.map(c => controlEntityName(c.domain, c.control)),
   );
+  if (s.gitops) {
+    add(upgradeTemplateEntity(s.hubUrl));
+  }
   for (const p of s.patterns) {
     add(patternEntity(p, s.hubUrl, emittedControls));
-    add(templateEntity(p, s.bundles, s.hubUrl));
+    add(templateEntity(p, s.bundles, s.hubUrl, { gitops: s.gitops }));
   }
   const serviceArchitectures: string[] = [];
   for (const a of s.architectures) {

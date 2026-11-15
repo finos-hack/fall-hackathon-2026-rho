@@ -1,6 +1,7 @@
 /*
  * Template bundles from the OCI bundle registry, and how they combine with the local folders in `calm.bundles`.
  */
+import { readBundleMeta } from '@internal/backstage-plugin-calm-common';
 import {
   type BundleRegistrySettings,
   bundleRef,
@@ -89,18 +90,17 @@ async function readOne(
   version: string,
 ): Promise<BundleInfo> {
   const { digest, config } = await client.readBundleConfig(ref);
+  const meta = readBundleMeta(config, { name, version });
   return {
     name,
     version,
     ref,
     digest,
-    description:
-      typeof config?.description === 'string' ? config.description : undefined,
-    deploy: typeof config?.deploy === 'string' ? config.deploy : undefined,
-    pattern:
-      config?.pattern && typeof config.pattern === 'object'
-        ? config.pattern
-        : undefined,
+    description: meta.description,
+    deploy: meta.deploy,
+    kind: meta.kind,
+    runtime: meta.runtime,
+    patterns: meta.patterns,
   };
 }
 

@@ -1,0 +1,8 @@
+{
+  "name": "node-service",
+  "version": "1.0.0",
+  "kind": "starter",
+  "runtime": "Node 22, no dependencies",
+  "description": "Starter: a small Node service (src/server.js, a page about itself, /health, /api/info, /api/connections) and its Dockerfile. Deployed with deployment rules such as k8s-deploy.",
+  "patterns": [{ "namespace": "hackathon", "patternId": "web-service" }]
+}

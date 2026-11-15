@@ -1,0 +1,25 @@
+# {{title}}
+
+{{description}}
+
+Owner: **{{owner}}**. Started from the **{{starter.name}} {{starter.version}}** starter: {{starter.runtime}}.
+
+| File | What it is |
+|---|---|
+| `pom.xml` | The Maven build |
+| `src/main/java/com/example/service/InfoController.java` | The service: `GET /` (a page about itself), `/health`, `/api/info`, `/api/connections` |
+| `src/main/resources/static/index.html` | The page |
+| `Dockerfile` | Builds the image (`maven:3.9-eclipse-temurin-21` to build, `eclipse-temurin:21-jre-alpine` to run) |
+| `deploy/k8s/` | Rendered by the deployment rules, not by this starter |
+
+## Run it
+
+```sh
+mvn spring-boot:run
+```
+
+## Provenance
+
+- Architecture: {{architectureId}}
+- Pattern: {{patternId}}
+- Starter: {{starter.name}} {{starter.version}}

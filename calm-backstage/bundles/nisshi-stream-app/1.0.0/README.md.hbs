@@ -1,0 +1,29 @@
+# {{title}}
+
+{{description}}
+
+Owner: **{{owner}}**. Started from the **nisshi-stream-app {{starterVersion}}** starter: Node 22 and kafkajs, talking
+to a [Nisshi](https://nisshi.io) broker (Kafka-compatible) that keeps its topics in {{storage}}.
+
+| File | What it is |
+|---|---|
+| `src/server.js` | Creates the topic `{{topic}}`, produces events (`POST /api/messages`) and consumes them (`GET /api/messages`); also `/health`, `/api/info`, `/api/connections` |
+| `src/index.html` | The page: produce an event and watch it come back through the broker |
+| `package.json`, `package-lock.json` | kafkajs 2.2.4 |
+| `Dockerfile` | Builds the image (`node:22-alpine`, `npm ci`, runs as a non-root user) |
+| `deploy/k8s/` | Rendered by the deployment rules (the broker, its storage, the network policies), not by this starter |
+
+## Run it
+
+```sh
+npm ci
+KAFKA_BOOTSTRAP_SERVERS=localhost:9092 KAFKA_TOPIC={{topic}} PORT={{servicePort}} node src/server.js
+```
+
+A local broker: `docker run -p 9092:9092 ghcr.io/nisshi-io/nisshi:0.8.2 broker`.
+
+## Provenance
+
+- Architecture: {{architectureId}}
+- Pattern: {{patternId}}
+- Starter: nisshi-stream-app {{starterVersion}}

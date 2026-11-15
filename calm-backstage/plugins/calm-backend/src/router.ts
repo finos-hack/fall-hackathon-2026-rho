@@ -31,13 +31,21 @@ import {
   templateEntityName,
 } from '@internal/backstage-plugin-calm-common';
 import {
+  BundleRegistrySettings,
   CalmCliError,
   KubernetesDeploySettings,
+  RegistryBundle,
+  listRegistryBundles,
+  pullBundleCached,
   generateArchitecture,
   normaliseChoices,
 } from '@internal/backstage-plugin-calm-node';
 import { DeploymentInfo, readDeployment } from './deployment';
 import { readRecordedDeployments } from './hubDeployments';
+import { GitopsInfo, readGitops } from './gitops';
+import { upgradesFor } from './upgrades';
+import { bundleDiff, bundleFile, bundleFiles, groupBundles } from './bundles';
+import { createAppProxy } from './appProxy';
 
 /**
  * Body of `POST /placeholders`.
@@ -78,6 +86,8 @@ export interface ArchitectureResponse {
    * deployment decorators), newest first. Empty when none is recorded or the Hub could not be read.
    */
   deployments?: RecordedDeployment[];
+  /** For a service deployed through Git: its Flux Kustomization's status and the commit it applied. */
+  gitops?: GitopsInfo;
 }
 
 /** Response of `GET /pattern?entityRef=`. */
@@ -116,12 +126,21 @@ export async function createRouter(options: {
   localDir: string;
   /** `calm.deploy.kubernetes`: the cluster a published service's deployment is read from. */
   kubernetes?: KubernetesDeploySettings;
+  /** `calm.bundleRegistry`: the bundles the upgrade check and the Template Explorer read. */
+  registry?: BundleRegistrySettings;
+  /** Where registry bundles are pulled to (once per digest). */
+  bundleCacheDir?: string;
 }): Promise<express.Router> {
   const { logger, catalog, httpAuth, localDir } = options;
   const hub = new CalmHubClient(options.hubUrl);
   const hubPrefix = `${hub.baseUrl}/`;
   const router = Router();
   router.use(express.json());
+
+  // "Open the running app" (unauthenticated: a new browser tab has no Backstage token; see plugin.ts).
+  const appProxy = createAppProxy(options.kubernetes);
+  router.get('/app/:name', appProxy);
+  router.all('/app/:name/*', appProxy);
 
   /** The entity named by `?entityRef=`, read with the caller's credentials. */
   async function entityFrom(req: express.Request): Promise<Entity> {
@@ -265,7 +284,7 @@ export async function createRouter(options: {
       );
     }
     const fromFile = fromTheHub ? undefined : await fileArchitecture(entity);
-    const [deployment, deployments] = await Promise.all([
+    const [deployment, deployments, gitops] = await Promise.all([
       deploymentRead,
       fromTheHub
         ? readRecordedDeployments(
@@ -274,6 +293,8 @@ export async function createRouter(options: {
             logger.child({ task: 'hub-deployments' }),
           )
         : undefined,
+      // Undefined for an entity without the Kubernetes annotations.
+      readGitops(entity, options.kubernetes, logger.child({ task: 'gitops' })),
     ]);
     const body: ArchitectureResponse = {
       architecture: fromTheHub?.architecture ?? fromFile?.architecture,
@@ -289,9 +310,91 @@ export async function createRouter(options: {
           }
         : { type: 'file', path: fromFile!.path },
       ...(deployment ? { deployment } : {}),
+      ...(gitops ? { gitops } : {}),
       ...(deployments ? { deployments } : {}),
     };
     res.json(body);
+  });
+
+  // The registry is read at most every 10 s: the card asks once per page view.
+  let cachedBundles: { at: number; bundles: RegistryBundle[] } | undefined;
+  async function registryBundles(): Promise<RegistryBundle[]> {
+    if (!options.registry) {
+      return [];
+    }
+    if (cachedBundles && Date.now() - cachedBundles.at < 10_000) {
+      return cachedBundles.bundles;
+    }
+    const read = await listRegistryBundles(options.registry);
+    read.warnings.forEach(w => logger.warn(w));
+    cachedBundles = { at: Date.now(), bundles: read.bundles };
+    return read.bundles;
+  }
+
+  router.get('/upgrades', async (req, res) => {
+    const entity = await entityFrom(req);
+    res.json(upgradesFor(entity, await registryBundles()));
+  });
+
+  /** The registry bundle `name@version`, pulled into the cache; NotFound when the registry does not list it. */
+  const pulls = new Map<string, Promise<string>>();
+  async function pulledBundle(name: string, version: string): Promise<string> {
+    const b = (await registryBundles()).find(
+      x => x.name === name && x.version === version,
+    );
+    if (!b) {
+      throw new NotFoundError(`No bundle ${name}@${version} in the registry`);
+    }
+    // One pull at a time per digest: the page asks for a bundle's files and a file at once.
+    const key = b.digest;
+    let pull = pulls.get(key);
+    if (!pull) {
+      pull = pullBundleCached({
+        ref: b.ref,
+        cacheDir:
+          options.bundleCacheDir ?? path.join(os.tmpdir(), 'calm-bundles'),
+      }).then(p => p.dir);
+      pulls.set(key, pull);
+      pull.catch(() => pulls.delete(key));
+    }
+    return pull;
+  }
+
+  // Template Explorer: the bundles in the registry, what is inside each, and what changed between versions.
+  router.get('/bundles', async (_req, res) => {
+    res.json({ bundles: groupBundles(await registryBundles()) });
+  });
+
+  router.get('/bundles/:name/:version/files', async (req, res) => {
+    const dir = await pulledBundle(req.params.name, req.params.version);
+    res.json({ files: await bundleFiles(dir) });
+  });
+
+  router.get('/bundles/:name/:version/file', async (req, res) => {
+    const file = req.query.path;
+    if (typeof file !== 'string' || !file) {
+      throw new InputError('path query parameter is required');
+    }
+    const dir = await pulledBundle(req.params.name, req.params.version);
+    const text = await bundleFile(dir, file);
+    if (text === undefined) {
+      throw new NotFoundError(
+        `${req.params.name}@${req.params.version} has no file ${file}`,
+      );
+    }
+    res.type('text/plain').send(text);
+  });
+
+  router.get('/bundles/:name/diff', async (req, res) => {
+    const { from, to } = req.query;
+    if (typeof from !== 'string' || typeof to !== 'string' || !from || !to) {
+      throw new InputError('from and to query parameters are required');
+    }
+    const [a, b] = await Promise.all([
+      pulledBundle(req.params.name, from),
+      pulledBundle(req.params.name, to),
+    ]);
+    res.json({ from, to, files: await bundleDiff(a, b, from, to) });
   });
 
   router.get('/pattern', async (req, res) => {
