@@ -49,8 +49,8 @@ app-config.local.yaml --config <that file>`. Both share the Hub, the registry, G
 
 ## What to try
 
-1. **Catalog** (`/catalog`): the seeded architectures `orders-service` and `catalog-service` (Components, type
-   `calm-architecture`), the pattern `pattern-web-service`, the controls, and the three template bundles (Resources).
+1. **Catalog** (`/catalog`): the seeded architectures `orders-service`, `catalog-service` and `calm-backstage` (Components, type
+   `calm-architecture`; the last one is this project's own architecture), the pattern `pattern-web-service`, the controls, and the three template bundles (Resources).
    The catalog graph shows architecture → pattern → controls.
 2. **Architecture page** (`orders-service`): the CALM architecture card shows the pattern, the controls and a
    Mermaid diagram.
@@ -144,7 +144,7 @@ is the same and stores the next patch version when it is not. The Hub architectu
 | `plugins/calm` | Frontend: architecture and pattern entity cards (with bundle versions, Upgrade, Git and Flux, Open the running app), the `CalmPlaceholders` form field, the Template Explorer page |
 | `hub/` | CALM Hub (`finos/calm-hub:latest`, `no-auth`), MongoDB, an OCI registry (`registry:2`, 127.0.0.1:5050) and Gitea (127.0.0.1:3300) in Docker; `seed.sh`, `gitea-seed.sh` and `push-bundles.cjs` (all idempotent) |
 | `k8s/` | `up.sh`/`down.sh` for the minikube profile, `flux-install.cjs` (Flux without its CLI), the read-only Backstage account |
-| `seed/` | Patterns `web-service` (a `oneOf` and an `anyOf` decision) and `event-streaming` (Nisshi, a storage choice), two architectures, controls in domain `hackathon-security` |
+| `seed/` | Patterns `web-service` (a `oneOf` and an `anyOf` decision) and `event-streaming` (Nisshi, a storage choice), three architectures (`orders-service`, `catalog-service` and `calm-backstage`, the architecture of this project), controls in domain `hackathon-security` |
 | `bundles/<name>/<version>` | Template bundles; `calm-backstage.json` gives the kind (`starter`, `deployment`, or `full` when absent) and the patterns each fits. Starters: `node-service`, `spring-boot-service`, `quarkus-service`, `nisshi-stream-app`; deployment rules: `k8s-deploy`; full: `web-service`. `yarn bundles:push` (part of `yarn hub:seed`) mirrors them into Gitea and publishes them from that commit as `localhost:5050/calm-bundles/<name>:<version>` |
 
 All CALM logic comes from published packages: the actions run the CLI, and the small parts the CLI does not offer as
@@ -155,6 +155,20 @@ Settings are under `calm:` in `app-config.yaml` (`hubUrl`, `namespaces`, `bundle
 names local bundle folders while authoring; `deploy.kubernetes` names the kubeconfig, context and minikube profile of
 the local cluster). The deploy actions use only that kubeconfig and context, never your default ones, and refuse to
 run when the file is missing.
+
+## The architecture of this project
+
+`seed/architectures/calm-backstage.architecture.json` is the CALM architecture of calm-backstage itself: the Backstage app
+and backend with their CALM plugins, the CALM Hub and its MongoDB, the bundle registry, Gitea, and the local cluster with
+Flux and cert-manager, and the connections between them. It is seeded with `yarn hub:seed`, so it shows up in the catalog
+like any service architecture. Four nodes cite controls from the FINOS SDLC Common Controls Catalog as published on
+https://hub.calm.finos.org: SDLC-PREV-017 (service dependencies) on the CALM Hub, SDLC-PREV-003 (artifact provenance)
+on the bundle registry, SDLC-PREV-008 (version control) on Gitea and SDLC-PREV-021 (infrastructure dependencies) on the
+cluster.
+
+To validate it, the CALM CLI must trust that Hub, because it only loads remote documents from hosts in `~/.calm.json`:
+`calm init-config --allowed-remote-hosts hub.calm.finos.org`, then
+`node_modules/.bin/calm validate -a seed/architectures/calm-backstage.architecture.json`.
 
 ## Checks
 

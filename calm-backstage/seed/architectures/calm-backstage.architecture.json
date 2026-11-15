@@ -1,0 +1,459 @@
+{
+  "$schema": "https://calm.finos.org/release/1.3/meta/calm.json",
+  "$id": "http://localhost:8090/calm/namespaces/hackathon/architectures/calm-backstage/versions/1.0.0",
+  "title": "CALM Backstage",
+  "description": "CALM architectures in Backstage: the Backstage app and its CALM plugins, the CALM Hub that holds the architectures, the OCI registry that holds the template bundles, Gitea for each service's repository, and a local Kubernetes cluster where Flux deploys the services. Everything runs on one developer machine; there is no authentication between the parts (local development only).",
+  "metadata": [
+    {
+      "owner": "team-rho",
+      "repository": "https://github.com/finos-hack/fall-hackathon-2026-rho",
+      "scope": "local development, as run by yarn hub:up, yarn k8s:up and yarn start"
+    }
+  ],
+  "nodes": [
+    {
+      "unique-id": "developer",
+      "node-type": "actor",
+      "name": "Developer",
+      "description": "Browses architectures, creates a service from a pattern, and upgrades it."
+    },
+    {
+      "unique-id": "backstage-app",
+      "node-type": "webclient",
+      "name": "Backstage app",
+      "description": "The Backstage frontend with the calm plugin: architecture and pattern cards, the Template Explorer, the placeholders form field, Upgrade and Open the running app.",
+      "interfaces": [
+        {
+          "unique-id": "backstage-app-http",
+          "host": "localhost",
+          "port": 3100
+        }
+      ]
+    },
+    {
+      "unique-id": "backstage-backend",
+      "node-type": "service",
+      "name": "Backstage backend",
+      "description": "The one Backstage backend process. It runs the CALM plugins below, the catalog and the scaffolder, and runs kubectl, minikube and git as local processes. The reservation of a service's working copy lives in this process, so it assumes one backend.",
+      "interfaces": [
+        {
+          "unique-id": "backstage-backend-http",
+          "host": "localhost",
+          "port": 7107
+        }
+      ]
+    },
+    {
+      "unique-id": "catalog-module",
+      "node-type": "service",
+      "name": "CALM catalog module",
+      "description": "catalog-backend-module-calm: an entity provider that turns the Hub's architectures, patterns, controls and the registry's bundles into catalog entities, and one Template per pattern."
+    },
+    {
+      "unique-id": "scaffolder-module",
+      "node-type": "service",
+      "name": "CALM scaffolder module",
+      "description": "scaffolder-backend-module-calm: the calm:* actions. generate, fill, validate, store in the Hub, render a bundle, publish, build the image, deploy through Git and Flux, record the deployment, upgrade."
+    },
+    {
+      "unique-id": "calm-backend",
+      "node-type": "service",
+      "name": "CALM backend plugin",
+      "description": "calm-backend: the routes the cards call (architecture, pattern, upgrades, bundles) and the app proxy that opens a deployed service from Backstage."
+    },
+    {
+      "unique-id": "calm-node",
+      "node-type": "service",
+      "name": "CALM node library",
+      "description": "calm-node: runs the published @finos/calm-cli (generate, validate, template), pushes and pulls template bundles as OCI artifacts, and runs kubectl, minikube and git against the one configured cluster."
+    },
+    {
+      "unique-id": "local-docker",
+      "node-type": "network",
+      "name": "Local Docker",
+      "description": "The Docker Compose project in hub/: the Hub, its MongoDB, the bundle registry and Gitea. Every port is published on 127.0.0.1 only (Gitea can be opened to the network with GITEA_BIND)."
+    },
+    {
+      "unique-id": "calm-hub",
+      "node-type": "service",
+      "name": "CALM Hub",
+      "description": "finos/calm-hub in no-auth mode. Holds the patterns, the controls, and the only copy of each service's architecture. Versions cannot change or be deleted. Deployments are recorded on an architecture version as decorators.",
+      "interfaces": [
+        {
+          "unique-id": "calm-hub-http",
+          "host": "localhost",
+          "port": 8090
+        }
+      ],
+      "controls": {
+        "service-dependency": {
+          "description": "Each service's runtime dependencies are mapped as CALM nodes and relationships in the Hub, and its deployments are recorded against the architecture version",
+          "requirements": [
+            {
+              "requirement-url": "https://hub.calm.finos.org/calm/domains/finos-sdlc-common-controls/controls/sdlc-prev-017-service-dependency-control/requirement/versions/1.0.0",
+              "config": {
+                "control-id": "SDLC-PREV-017",
+                "name": "Service Dependency Control",
+                "description": "The Hub holds each service's architecture as nodes and relationships, and a deployment is recorded on the architecture version it ran. The Backstage catalog shows both"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "unique-id": "hub-database",
+      "node-type": "database",
+      "name": "Hub MongoDB",
+      "description": "MongoDB behind the CALM Hub, in a Docker volume.",
+      "interfaces": [
+        {
+          "unique-id": "hub-database-port",
+          "port": 27017
+        }
+      ]
+    },
+    {
+      "unique-id": "bundle-registry",
+      "node-type": "service",
+      "name": "Bundle registry",
+      "description": "An OCI registry (registry:2) holding the template bundles as calm-bundles/<name>:<version>. A published version is immutable. Each bundle is published from a commit of the calm-templates/bundles repository in Gitea.",
+      "interfaces": [
+        {
+          "unique-id": "bundle-registry-http",
+          "host": "localhost",
+          "port": 5050
+        }
+      ],
+      "controls": {
+        "artifact-provenance": {
+          "description": "A bundle is published from a known Git commit, and a service records the bundle reference and digest it was rendered with",
+          "requirements": [
+            {
+              "requirement-url": "https://hub.calm.finos.org/calm/domains/finos-sdlc-common-controls/controls/sdlc-prev-003-software-artifact-provenance/requirement/versions/1.0.0",
+              "config": {
+                "control-id": "SDLC-PREV-003",
+                "name": "Software Artifact Provenance",
+                "description": "A bundle is published from a Gitea commit as an immutable OCI version, and a service's catalog-info records the bundle reference and digest it was rendered with"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "unique-id": "gitea",
+      "node-type": "service",
+      "name": "Gitea",
+      "description": "Stands in for GitHub: calm-templates/bundles holds the bundle sources and calm-services/<name> holds one repository per service, including its deploy overlay. Flux reads it from inside the cluster.",
+      "interfaces": [
+        {
+          "unique-id": "gitea-http",
+          "host": "localhost",
+          "port": 3300
+        }
+      ],
+      "controls": {
+        "version-control": {
+          "description": "A service's code, its architecture reference and its deployment configuration are kept in its own Git repository",
+          "requirements": [
+            {
+              "requirement-url": "https://hub.calm.finos.org/calm/domains/finos-sdlc-common-controls/controls/sdlc-prev-008-version-control/requirement/versions/1.0.0",
+              "config": {
+                "control-id": "SDLC-PREV-008",
+                "name": "Version Control",
+                "description": "The code, the architecture annotations and the deploy overlay of each service are in its own Git repository, and Flux deploys the commit it names"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "unique-id": "kubernetes-cluster",
+      "node-type": "system",
+      "name": "Local Kubernetes cluster",
+      "description": "A minikube profile (calm-backstage) with Calico, so NetworkPolicies are enforced. Backstage reaches it only through its own kubeconfig, never the developer's default one.",
+      "controls": {
+        "infrastructure-dependencies": {
+          "description": "The compute, network and storage a service needs are generated from its architecture (workloads, Services, NetworkPolicies) and kept with its code",
+          "requirements": [
+            {
+              "requirement-url": "https://hub.calm.finos.org/calm/domains/finos-sdlc-common-controls/controls/sdlc-prev-021-infrastructure-inventory/requirement/versions/1.0.0",
+              "config": {
+                "control-id": "SDLC-PREV-021",
+                "name": "Infrastructure Dependencies",
+                "description": "k8s-deploy renders the workloads, Services and NetworkPolicies from the service's architecture, and they are committed with the service"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "unique-id": "flux-source-controller",
+      "node-type": "service",
+      "name": "Flux source-controller",
+      "description": "Clones each service repository from Gitea (http://host.minikube.internal:3300)."
+    },
+    {
+      "unique-id": "flux-kustomize-controller",
+      "node-type": "service",
+      "name": "Flux kustomize-controller",
+      "description": "Applies each service's deploy overlay as that service's own service account. A Kustomization without one runs as the permissionless flux-system/default."
+    },
+    {
+      "unique-id": "cert-manager",
+      "node-type": "service",
+      "name": "cert-manager",
+      "description": "Issues the per-service certificates (self-signed CA) for the TLS sidecar of k8s-deploy 1.3.x."
+    },
+    {
+      "unique-id": "deployed-service",
+      "node-type": "service",
+      "name": "Deployed service",
+      "description": "A service created from a pattern, in its own namespace (calm-<name>) with Pod Security baseline: its workloads, an nginx TLS sidecar and the NetworkPolicies rendered from its architecture. There can be many."
+    }
+  ],
+  "relationships": [
+    {
+      "unique-id": "developer-uses-backstage",
+      "description": "The developer works in the Backstage app in a browser",
+      "relationship-type": {
+        "interacts": {
+          "actor": "developer",
+          "nodes": ["backstage-app"]
+        }
+      }
+    },
+    {
+      "unique-id": "app-calls-backend",
+      "description": "The app calls the backend's catalog, scaffolder and CALM APIs",
+      "protocol": "HTTP",
+      "relationship-type": {
+        "connects": {
+          "source": {
+            "node": "backstage-app",
+            "interfaces": ["backstage-app-http"]
+          },
+          "destination": {
+            "node": "backstage-backend",
+            "interfaces": ["backstage-backend-http"]
+          }
+        }
+      }
+    },
+    {
+      "unique-id": "backend-composition",
+      "description": "The CALM parts that run inside the Backstage backend",
+      "relationship-type": {
+        "composed-of": {
+          "container": "backstage-backend",
+          "nodes": [
+            "catalog-module",
+            "scaffolder-module",
+            "calm-backend",
+            "calm-node"
+          ]
+        }
+      }
+    },
+    {
+      "unique-id": "local-docker-composition",
+      "description": "What the Docker Compose project runs",
+      "relationship-type": {
+        "composed-of": {
+          "container": "local-docker",
+          "nodes": ["calm-hub", "hub-database", "bundle-registry", "gitea"]
+        }
+      }
+    },
+    {
+      "unique-id": "cluster-composition",
+      "description": "What the cluster runs besides the services",
+      "relationship-type": {
+        "composed-of": {
+          "container": "kubernetes-cluster",
+          "nodes": [
+            "flux-source-controller",
+            "flux-kustomize-controller",
+            "cert-manager",
+            "deployed-service"
+          ]
+        }
+      }
+    },
+    {
+      "unique-id": "catalog-reads-hub",
+      "description": "The catalog provider reads the architectures, patterns and controls of the configured namespaces",
+      "protocol": "HTTP",
+      "relationship-type": {
+        "connects": {
+          "source": {
+            "node": "catalog-module"
+          },
+          "destination": {
+            "node": "calm-hub",
+            "interfaces": ["calm-hub-http"]
+          }
+        }
+      }
+    },
+    {
+      "unique-id": "calm-backend-reads-hub",
+      "description": "The cards read an architecture or a pattern from the Hub, and the deployments recorded on it",
+      "protocol": "HTTP",
+      "relationship-type": {
+        "connects": {
+          "source": {
+            "node": "calm-backend"
+          },
+          "destination": {
+            "node": "calm-hub",
+            "interfaces": ["calm-hub-http"]
+          }
+        }
+      }
+    },
+    {
+      "unique-id": "scaffolder-writes-hub",
+      "description": "A run stores the generated architecture as a new Hub version and records each deployment as a decorator",
+      "protocol": "HTTP",
+      "relationship-type": {
+        "connects": {
+          "source": {
+            "node": "scaffolder-module"
+          },
+          "destination": {
+            "node": "calm-hub",
+            "interfaces": ["calm-hub-http"]
+          }
+        }
+      }
+    },
+    {
+      "unique-id": "hub-stores-in-database",
+      "description": "The Hub keeps every document in MongoDB",
+      "protocol": "TCP",
+      "relationship-type": {
+        "connects": {
+          "source": {
+            "node": "calm-hub"
+          },
+          "destination": {
+            "node": "hub-database",
+            "interfaces": ["hub-database-port"]
+          }
+        }
+      }
+    },
+    {
+      "unique-id": "node-uses-registry",
+      "description": "Lists, pulls and (when authoring) pushes the template bundles as OCI artifacts",
+      "protocol": "HTTP",
+      "relationship-type": {
+        "connects": {
+          "source": {
+            "node": "calm-node"
+          },
+          "destination": {
+            "node": "bundle-registry",
+            "interfaces": ["bundle-registry-http"]
+          }
+        }
+      }
+    },
+    {
+      "unique-id": "node-pushes-to-gitea",
+      "description": "Creates a service's repository and pushes to it, and opens and merges the pull request of an upgrade",
+      "protocol": "HTTP",
+      "relationship-type": {
+        "connects": {
+          "source": {
+            "node": "calm-node"
+          },
+          "destination": {
+            "node": "gitea",
+            "interfaces": ["gitea-http"]
+          }
+        }
+      }
+    },
+    {
+      "unique-id": "node-drives-cluster",
+      "description": "kubectl, minikube image build and rollout checks against the cluster in calm.deploy.kubernetes",
+      "protocol": "HTTPS",
+      "relationship-type": {
+        "connects": {
+          "source": {
+            "node": "calm-node"
+          },
+          "destination": {
+            "node": "kubernetes-cluster"
+          }
+        }
+      }
+    },
+    {
+      "unique-id": "flux-pulls-from-gitea",
+      "description": "Flux clones the service repositories from Gitea",
+      "protocol": "HTTP",
+      "relationship-type": {
+        "connects": {
+          "source": {
+            "node": "flux-source-controller"
+          },
+          "destination": {
+            "node": "gitea",
+            "interfaces": ["gitea-http"]
+          }
+        }
+      }
+    },
+    {
+      "unique-id": "flux-applies-service",
+      "description": "Flux applies the service's overlay to its namespace",
+      "protocol": "HTTPS",
+      "relationship-type": {
+        "connects": {
+          "source": {
+            "node": "flux-kustomize-controller"
+          },
+          "destination": {
+            "node": "deployed-service"
+          }
+        }
+      }
+    },
+    {
+      "unique-id": "cert-manager-issues-tls",
+      "description": "Issues the certificate the service's TLS sidecar and gateway use",
+      "protocol": "HTTPS",
+      "relationship-type": {
+        "connects": {
+          "source": {
+            "node": "cert-manager"
+          },
+          "destination": {
+            "node": "deployed-service"
+          }
+        }
+      }
+    },
+    {
+      "unique-id": "proxy-opens-service",
+      "description": "The app proxy opens a deployed service from Backstage through the Kubernetes API server",
+      "protocol": "HTTPS",
+      "relationship-type": {
+        "connects": {
+          "source": {
+            "node": "calm-backend"
+          },
+          "destination": {
+            "node": "deployed-service"
+          }
+        }
+      }
+    }
+  ]
+}
