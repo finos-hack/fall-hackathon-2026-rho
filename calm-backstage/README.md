@@ -106,6 +106,13 @@ To record the part 2 walkthrough again with the Hub, the cluster and Backstage r
 Bundle 2.0.0 renders a `Dockerfile` and a `deploy/` folder that 1.0.0 does not; the data store and add-ons change
 the compose services. `output/` is git-ignored, and services in it come back into the catalog after a restart.
 
+CALM Hub is the only store of patterns and architectures. A service's repository and `output/` folder carry no copy
+of its architecture, only the CALM Hub coordinates in `catalog-info.yaml` (`calm.finos.org/architecture` and
+`architecture-version`); the architecture card and upgrades read that exact version from CALM Hub, so both need it
+running. The catalog's pattern and architecture entries are pointers too: name, description and CALM Hub
+annotations, with their pages reading the document live. Services made before this carry an `architecture.json`
+that nothing reads; their next upgrade pull request removes it.
+
 What a run stores in CALM Hub stays there: Hub versions cannot change or be deleted. A second run for a name that
 already has a service folder in `output/`, or that the catalog holds from elsewhere, is refused before anything is
 written to the Hub. Once the folder is removed, a run for the same name reuses the Hub version when the architecture

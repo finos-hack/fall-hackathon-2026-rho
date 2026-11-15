@@ -192,5 +192,12 @@ build of Quarkus 3.33.4 and 3.40.1 (BOM `com.redhat.quarkus.platform:quarkus-bom
   - Anyone who can push to a service repository in Gitea (port 3300, fixed admin password) can apply anything
     through Flux, which runs as cluster-admin. Give each Kustomization a namespaced service account and
     `targetNamespace`, and seed a random password.
+- **CALM Hub only (after part 3).** Services no longer carry `architecture.json`: the card and upgrades read the
+  version their annotations name from CALM Hub. Two consequences:
+  - CALM Hub must be up to view or upgrade a service; the card says CALM Hub did not answer rather than showing a
+    possibly stale copy.
+  - A run whose "Store the architecture in CALM Hub" step fails after the Git push (#15 put the Hub write last, so a
+    failed render leaves nothing in the Hub) leaves a repository whose annotations name a version CALM Hub does not
+    have; its card shows the CALM Hub error. Remove it with `docs/demo/cleanup.sh` and run the Template again.
 - **A `PageBlueprint` gets a sidebar item from the plugin's `title` and `icon` and a `routeRef`**, not from the page's
   own title.
