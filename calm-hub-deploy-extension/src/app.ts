@@ -1,0 +1,114 @@
+import { CalmHubError } from '@internal/backstage-plugin-calm-common';
+import { errorReply, tabReply } from './blocks';
+import { HttpError } from './errors';
+import { AssertionError, type HubClaims, type VerifyAssertion } from './identity';
+import { readService, resolveArchitecture, findArchitecture } from './resolve';
+import { RouteTable } from './routes';
+import { readHistory, readStatus } from './status';
+import { requestDeployment, type DeployDeps } from './deploy/job';
+import { oneLine } from './deploy/kube';
+
+export interface AppDeps extends DeployDeps {
+  routes: RouteTable;
+  verify: VerifyAssertion;
+}
+
+export interface Request {
+  method: string;
+  /** Path and query exactly as received. */
+  url: string;
+  identity?: string;
+  body: Buffer;
+}
+
+export interface Response {
+  status: number;
+  body: unknown;
+}
+
+const decode = (s: string) => decodeURIComponent(s);
+
+type Handler = (deps: AppDeps, p: Record<string, string>, q: URLSearchParams, claims: HubClaims) => Promise<Response>;
+
+const handlers: Record<string, Handler> = {
+  /** The designer tab: where the service runs and whether the version on screen is the one deployed. */
+  async tab(deps, p, q) {
+    try {
+      const arch = await resolveArchitecture(deps.hub, p.namespace, p.resourceType, p.resourceId);
+      const service = (await readService(deps.gitea, deps.settings, arch.name)) ?? null;
+      const versions = await deps.hub.architectureVersions(arch.namespace, arch.name);
+      const history = await readHistory(deps.hub, arch.namespace, arch.name, versions);
+      const status = await readStatus(deps, arch.namespace, arch.name, { service, history });
+      return { status: 200, body: tabReply(status, history, q.get('version') ?? undefined) };
+    } catch (e) {
+      // A tab shows its own error rather than CALM Hub's generic "Extension request failed."
+      if (e instanceof HttpError) return { status: 200, body: errorReply(e.message) };
+      throw e;
+    }
+  },
+
+  async status(deps, p) {
+    const arch = await findArchitecture(deps.hub, p.namespace, p.architecture);
+    return { status: 200, body: await readStatus(deps, arch.namespace, arch.name) };
+  },
+
+  async history(deps, p) {
+    const arch = await findArchitecture(deps.hub, p.namespace, p.architecture);
+    const versions = await deps.hub.architectureVersions(arch.namespace, arch.name);
+    return { status: 200, body: { deployments: await readHistory(deps.hub, arch.namespace, arch.name, versions) } };
+  },
+
+  /** The "Deploy this version" action: the version on screen. */
+  async 'deploy-here'(deps, p, _q, claims) {
+    const arch = await resolveArchitecture(deps.hub, p.namespace, p.resourceType, p.resourceId);
+    const accepted = await requestDeployment(deps, { namespace: p.namespace, architecture: arch.name, version: p.version, claims });
+    return { status: 202, body: accepted };
+  },
+
+  /** The deploy command (CLI, MCP, CI). */
+  async deploy(deps, p, _q, claims) {
+    const accepted = await requestDeployment(deps, { namespace: p.namespace, architecture: p.architecture, version: p.version, claims });
+    return { status: 202, body: accepted };
+  },
+};
+
+/** Handles one request: match the route, verify CALM Hub's assertion, run the handler. */
+export async function handle(deps: AppDeps, req: Request): Promise<Response> {
+  const q = req.url.indexOf('?');
+  const pathname = q >= 0 ? req.url.slice(0, q) : req.url;
+  const query = new URLSearchParams(q >= 0 ? req.url.slice(q + 1) : '');
+  const match = deps.routes.match(req.method, pathname);
+  if (match.kind === 'not-found') return { status: 404, body: { error: 'not found' } };
+  if (match.kind === 'method-not-allowed') return { status: 405, body: { error: 'method not allowed' } };
+
+  let claims: HubClaims;
+  try {
+    claims = await deps.verify(req.identity, { method: req.method, pathAndQuery: req.url, body: req.body });
+  } catch (e) {
+    if (e instanceof AssertionError) {
+      deps.logger.warn(`Refused ${req.method} ${pathname}: ${e.message}`);
+      return { status: 401, body: { error: 'unauthorized' } };
+    }
+    throw e;
+  }
+  if (claims.route !== undefined && claims.route !== match.route.id) {
+    return { status: 401, body: { error: 'assertion is for another route' } };
+  }
+  // For scoped routes CALM Hub checked the namespace in the path: it must be the one this request acts on.
+  if (claims.ns !== undefined && match.route.path.includes('{namespace}') && claims.ns !== decode(match.params.namespace)) {
+    return { status: 403, body: { error: `scope was checked on ${claims.ns}` } };
+  }
+
+  const params = Object.fromEntries(Object.entries(match.params).map(([k, v]) => [k, decode(v)]));
+  try {
+    return await handlers[match.route.id](deps, params, query, claims);
+  } catch (e) {
+    if (e instanceof HttpError) return { status: e.status, body: { error: e.message } };
+    if (e instanceof CalmHubError) {
+      deps.logger.error(`CALM Hub call failed: ${oneLine(e)}`);
+      return { status: 502, body: { error: `CALM Hub: ${oneLine(e)}` } };
+    }
+    deps.logger.error(`${req.method} ${pathname} failed: ${oneLine(e)}`);
+    return { status: 500, body: { error: oneLine(e) } };
+  }
+}
