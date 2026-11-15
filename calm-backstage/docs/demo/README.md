@@ -42,7 +42,7 @@ the app answering, the network policies enforced and Nisshi's storage. Watch it 
 | 2 | 0:09 | The pattern | The patterns, from the CALM Hub API. | The event-streaming pattern in Backstage (its decision, the bundles that fit), then in CALM Hub. |
 | 3 | 0:23 | Starters and deployment rules | The bundles in the OCI registry and the Nisshi starter's versions. | Template Explorer: four starters (Spring Boot, Red Hat build of Quarkus, Node.js, Nisshi), a starter file, the `k8s-deploy` network policy template. |
 | 4 | 0:44 | Create, step by step | | The web-service Template's starter choice, then the event-streaming Template: name; storage decision, starter and deployment rules; the placeholders `calm generate` leaves; review. |
-| 5 | 1:07 | The Template runs | `watch-cluster.sh`: the Kustomization, then four pods ready after 12 s. | The run, then each step highlighted: generate, validate, render code and rules, Git, store in CALM Hub, build, Flux, record in CALM Hub. |
+| 5 | 1:07 | The Template runs | `watch-cluster.sh`: the Kustomization, then four pods ready after 12 s. | The run, then each step highlighted: generate, validate, render code and rules, store in CALM Hub, Git, build, Flux, record in CALM Hub. |
 | 6 | 1:45 | The service | Deployments, services, network policies with the CALM node each applies to. | The service page: bundles, Git and Flux, workloads and policies. |
 | 7 | 1:59 | In Git | The Flux source and the commit it applied. | The repository in Gitea, and `deploy/k8s/network-policy.yaml`. |
 | 8 | 2:11 | In CALM Hub | The architecture's nodes and the deployment decorator, from the CALM Hub API. | The architecture in CALM Hub and its Deployments tab. |

@@ -491,12 +491,12 @@ let onFailure = async () => {};
       'The deployment rules render the Kubernetes manifests and network policies',
     ],
     [
-      'Push the service to its Git repository',
-      'The service gets its own Git repository',
-    ],
-    [
       'Store the architecture in CALM Hub',
       'The architecture is stored in CALM Hub',
+    ],
+    [
+      'Push the service to its Git repository',
+      'The service gets its own Git repository',
     ],
     ['Build the image', 'Its image is built in the cluster'],
     ['Deploy through Git and Flux', 'Flux applies the commit to the cluster'],
