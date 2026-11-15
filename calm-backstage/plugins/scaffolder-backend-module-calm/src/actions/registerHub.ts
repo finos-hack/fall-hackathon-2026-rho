@@ -405,6 +405,20 @@ async function storePrepared(
     );
   }
 
+  // The published folder is read and may be removed: only the service folder calm:publish:local wrote qualifies.
+  if (
+    ctx.input.publishedDir &&
+    path.resolve(ctx.input.publishedDir) !== path.resolve(opts.target)
+  ) {
+    throw new Error(
+      `publishedDir must be the folder calm:publish:local wrote for ${name} (${
+        opts.target
+      }), got ${JSON.stringify(
+        ctx.input.publishedDir,
+      )}. Nothing was stored, and nothing was removed`,
+    );
+  }
+
   // Everything from here on may fail with nothing stored for this run: the folder this run published is then removed.
   let created = false;
   // Set when the POST itself failed (a network error or a 5xx): the Hub may have committed the version.
@@ -415,12 +429,7 @@ async function storePrepared(
     const publishedDir = ctx.input.publishedDir;
     if (publishedDir && !ctx.isDryRun) {
       // What was published (and pushed next) must be what is stored.
-      const published = JSON.parse(
-        await fs.readFile(
-          path.join(path.resolve(publishedDir), ARCHITECTURE_FILE),
-          'utf-8',
-        ),
-      );
+      const published = await readPublished(opts.target);
       if (!sameJson(published, read)) {
         throw new Error(
           `The published folder's ${ARCHITECTURE_FILE} differs from the one being stored (${file})`,
@@ -494,6 +503,35 @@ async function storePrepared(
 }
 
 /**
+ * The architecture.json of the published service folder. A missing or broken file gives a clear error that does not
+ * echo its content.
+ */
+async function readPublished(target: string): Promise<unknown> {
+  const publishedFile = path.join(target, ARCHITECTURE_FILE);
+  const fail = (why: string) =>
+    new Error(
+      `Could not check the published ${ARCHITECTURE_FILE} in ${target}: ${why}`,
+    );
+  let text: string;
+  try {
+    text = await fs.readFile(publishedFile, 'utf-8');
+  } catch (e) {
+    throw fail(
+      (e as NodeJS.ErrnoException).code === 'ENOENT'
+        ? 'it is missing'
+        : `it could not be read (${
+            (e as NodeJS.ErrnoException).code ?? 'error'
+          })`,
+    );
+  }
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw fail('it is not valid JSON');
+  }
+}
+
+/**
  * Removes `publishedDir` when it is the service folder calm:publish:local made (`target`) and its architecture.json
  * has the `$id` of the prepared file: proof that this run published it. Gives the removed folder, or undefined when
  * nothing was removed. Never throws: a cleanup error is logged, so it cannot hide the store error.
@@ -512,9 +550,7 @@ async function removePublished(
       );
       return undefined;
     }
-    const published = JSON.parse(
-      await fs.readFile(path.join(dir, ARCHITECTURE_FILE), 'utf-8'),
-    );
+    const published = (await readPublished(dir)) as any;
     if (published?.$id !== id) {
       ctx.logger.warn(
         `Kept ${dir}: its ${ARCHITECTURE_FILE} names ${JSON.stringify(

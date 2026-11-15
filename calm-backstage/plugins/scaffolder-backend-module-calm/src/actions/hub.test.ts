@@ -709,24 +709,56 @@ describe('with a workspace', () => {
         expect(await exists(published())).toBe(false);
       });
 
-      it('refuses to remove calm.publish.localDir itself, or a folder other than the service folder', async () => {
+      it('refuses a publishedDir other than the service folder up front: no Hub request, no read, nothing removed', async () => {
         const hub = fakeHub(base);
         await prepareAndPublish(hub);
+        const callsBefore = hub.calls.length;
         const output = path.join(workspace, 'output');
         const sub = path.join(published(), 'sub');
-        for (const dir of [output, sub]) {
-          // Each holds a copy of the prepared file, so only the target check keeps it.
-          await fs.mkdir(dir, { recursive: true });
-          await fs.copyFile(file(), path.join(dir, 'architecture.json'));
-          const c = store({ publishedDir: dir });
-          const error = await register(hub, c).catch(e => e);
-          expect(error.message).toMatch(/already holds another document/);
-          expect(error.message).not.toMatch(/removed/);
-          expect(c.logger.warn).toHaveBeenCalled();
-          expect(await exists(dir)).toBe(true);
+        const readFile = jest.spyOn(fs, 'readFile');
+        try {
+          for (const dir of [output, sub, path.join(workspace, 'elsewhere')]) {
+            // Each holds a copy of the prepared file.
+            await fs.mkdir(dir, { recursive: true });
+            await fs.copyFile(file(), path.join(dir, 'architecture.json'));
+            readFile.mockClear();
+            await expect(
+              register(hub, store({ publishedDir: dir })),
+            ).rejects.toThrow(
+              /publishedDir must be the folder calm:publish:local wrote for billing-api .*Nothing was stored/,
+            );
+            expect(readFile).not.toHaveBeenCalledWith(
+              path.join(dir, 'architecture.json'),
+              expect.anything(),
+            );
+            expect(await exists(dir)).toBe(true);
+          }
+        } finally {
+          readFile.mockRestore();
         }
+        expect(hub.calls.length).toBe(callsBefore);
         expect(await exists(published())).toBe(true);
       });
+
+      it('fails clearly, storing nothing, when the published architecture.json is missing or not JSON', async () => {
+        const hub = fakeHub(base);
+        await prepareAndPublish(hub, false);
+        const publishedFile = path.join(published(), 'architecture.json');
+        await fs.rm(publishedFile);
+        const missing = await register(hub, store()).catch(e => e);
+        expect(missing.message).toMatch(
+          /Could not check the published architecture.json in .*billing-api: it is missing/,
+        );
+        expect(missing.message).not.toMatch(/ENOENT/);
+        await fs.writeFile(publishedFile, '{"secret-content": ');
+        const broken = await register(hub, store()).catch(e => e);
+        expect(broken.message).toMatch(
+          /Could not check the published architecture.json in .*billing-api: it is not valid JSON/,
+        );
+        expect(broken.message).not.toContain('secret');
+        expect(hub.posts()).toEqual([]);
+      });
+
       const exists = (p: string) =>
         fs.stat(p).then(
           () => true,
@@ -771,20 +803,23 @@ describe('with a workspace', () => {
         expect(await exists(published())).toBe(true);
       });
 
-      it('never removes a folder outside calm.publish.localDir, and a cleanup error does not hide the store error', async () => {
+      it('a cleanup error does not hide the store error', async () => {
         const hub = fakeHub(base);
         await prepareAndPublish(hub);
-        // The workspace holds a copy of the prepared file too, but is not inside output/.
-        const c = ctx({
-          name: 'billing-api',
-          mode: 'store',
-          publishedDir: workspace,
-        });
-        const error = await register(hub, c).catch(e => e);
-        expect(error.message).toMatch(/already holds another document/);
-        expect(error.message).not.toMatch(/removed/);
-        expect(c.logger.warn).toHaveBeenCalled();
-        expect(await exists(file())).toBe(true);
+        const rm = jest
+          .spyOn(fs, 'rm')
+          .mockRejectedValueOnce(new Error('EBUSY: resource busy'));
+        try {
+          const c = store();
+          const error = await register(hub, c).catch(e => e);
+          expect(error.message).toMatch(/already holds another document/);
+          expect(error.message).not.toMatch(/removed/);
+          expect(c.logger.warn).toHaveBeenCalledWith(
+            expect.stringContaining('EBUSY'),
+          );
+        } finally {
+          rm.mockRestore();
+        }
         expect(await exists(published())).toBe(true);
       });
 
