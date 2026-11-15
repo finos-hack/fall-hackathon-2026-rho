@@ -156,7 +156,7 @@ export function createCalmDeployGitopsAction(options: {
             })
             .optional()
             .describe(
-              'The architecture version in CALM Hub (calm:register:hub output). When set and the deployment fails after it started, a deployment decorator with the status failed is recorded there, and the error is thrown as before',
+              'The architecture version in CALM Hub (calm:register:hub output). When set and the deployment fails after it started (once the commit is pushed: the Flux objects, the reconcile, the rollouts), a deployment decorator with the status failed is recorded there, and the error is thrown as before',
             ),
       },
       output: {
@@ -211,46 +211,40 @@ export function createCalmDeployGitopsAction(options: {
 
           const startTime = new Date().toISOString();
           const fluxName = fluxObjectName(name);
-          let commit: string;
-          let repo: ReturnType<typeof serviceRepository>;
+          await writeOverlay(
+            dir,
+            { name, namespace, image },
+            GITOPS_OVERLAY_HEADER,
+            { withNamespace: false },
+          );
+          // From now on the service is deployed from Git: the catalog and the upgrade Template find it by this.
+          const catalogInfo = path.join(dir, CATALOG_INFO_FILE);
+          const info = await fs
+            .readFile(catalogInfo, 'utf-8')
+            .catch(() => undefined);
+          if (info !== undefined) {
+            await fs.writeFile(catalogInfo, withGitopsAnnotations(info, name));
+          }
+          const made = await gitCommitAll(dir, `Deploy ${image}`, git);
+          const commit = made ?? (await gitHead(dir, git));
+          ctx.logger.info(
+            made
+              ? `Committed the overlay for ${image}: ${commit}`
+              : `The overlay already deploys ${image}; deploying ${commit}`,
+          );
+          // Before the push: the pushed overlay no longer holds the Namespace, and for a service deployed before that
+          // change, Flux would prune it unless it is already marked prune-disabled.
+          await applyObjects(kubectl, fluxTenantObjects({ name, namespace }), {
+            serverSide: true,
+          });
+          const repo = serviceRepository(gitops, name);
+          await gitPush(dir, repo.pushUrl, gitops.branch, gitops.auth, git);
+
+          // The deployment starts once the commit is in Git, where Flux reads it. A failure before this point (the
+          // overlay, the commit, the Namespace and Flux service account, a rejected push) deployed nothing of the
+          // service, so it is thrown without recording a failed deployment.
           let deployed: Deployed;
           try {
-            await writeOverlay(
-              dir,
-              { name, namespace, image },
-              GITOPS_OVERLAY_HEADER,
-              { withNamespace: false },
-            );
-            // From now on the service is deployed from Git: the catalog and the upgrade Template find it by this.
-            const catalogInfo = path.join(dir, CATALOG_INFO_FILE);
-            const info = await fs
-              .readFile(catalogInfo, 'utf-8')
-              .catch(() => undefined);
-            if (info !== undefined) {
-              await fs.writeFile(
-                catalogInfo,
-                withGitopsAnnotations(info, name),
-              );
-            }
-            const made = await gitCommitAll(dir, `Deploy ${image}`, git);
-            commit = made ?? (await gitHead(dir, git));
-            ctx.logger.info(
-              made
-                ? `Committed the overlay for ${image}: ${commit}`
-                : `The overlay already deploys ${image}; deploying ${commit}`,
-            );
-            // Before the push: the pushed overlay no longer holds the Namespace, and for a service deployed before that
-            // change, Flux would prune it unless it is already marked prune-disabled.
-            await applyObjects(
-              kubectl,
-              fluxTenantObjects({ name, namespace }),
-              {
-                serverSide: true,
-              },
-            );
-            repo = serviceRepository(gitops, name);
-            await gitPush(dir, repo.pushUrl, gitops.branch, gitops.auth, git);
-
             await applyObjects(
               kubectl,
               fluxObjects({
