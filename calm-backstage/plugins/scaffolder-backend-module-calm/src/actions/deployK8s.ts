@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import { createTemplateAction } from '@backstage/plugin-scaffolder-node';
 import { publishedFolder } from './publishedFolder';
@@ -7,10 +8,12 @@ import {
   CalmHubWriteClient,
   KUBERNETES_ID_LABEL,
   deployNamespace,
+  namespaceManifest,
   workloadNode,
 } from '@internal/backstage-plugin-calm-common';
 import {
   KubernetesDeploySettings,
+  KubernetesRunOptions,
   kubectlCommand,
   requireKubernetesDeploy,
   runKubectl,
@@ -41,37 +44,25 @@ export function parseImage(image: string): { newName: string; newTag: string } {
   return { newName, newTag };
 }
 
-/** The Namespace of a service: found again by the Kubernetes plugin's label, and marked as made for this service. */
-export function namespaceManifest(name: string, namespace: string): object {
-  return {
-    apiVersion: 'v1',
-    kind: 'Namespace',
-    metadata: {
-      name: namespace,
-      labels: {
-        [KUBERNETES_ID_LABEL]: name,
-        [CALM_KUBERNETES.serviceLabel]: name,
-      },
-    },
-  };
-}
-
 /**
  * The overlay over the bundle's kustomize base: the namespace, the image built for this service in place of the
  * bundle's placeholder, and the `backstage.io/kubernetes-id` label on every object and pod template (not on
- * selectors, so the bundle's own selectors and NetworkPolicy peers stay as rendered).
+ * selectors, so the bundle's own selectors and NetworkPolicy peers stay as rendered). It lists the Namespace object
+ * (`namespace.yaml`) unless `withNamespace` is false.
  */
 export function overlayKustomization(opts: {
   name: string;
   namespace: string;
   image: string;
+  withNamespace?: boolean;
 }): object {
   const { newName, newTag } = parseImage(opts.image);
+  const base = `../${path.posix.basename(BASE_DIR)}`;
   return {
     apiVersion: 'kustomize.config.k8s.io/v1beta1',
     kind: 'Kustomization',
     namespace: opts.namespace,
-    resources: [NAMESPACE_FILE, `../${path.posix.basename(BASE_DIR)}`],
+    resources: opts.withNamespace === false ? [base] : [NAMESPACE_FILE, base],
     images: [{ name: PLACEHOLDER_IMAGE, newName, newTag }],
     labels: [
       { pairs: { [KUBERNETES_ID_LABEL]: opts.name }, includeTemplates: true },
@@ -127,22 +118,32 @@ export async function requireBase(dir: string): Promise<void> {
 
 /**
  * Writes `deploy/k8s-overlay` (the namespace and the kustomization over the bundle's base) in a published folder and
- * returns its path. `header` is the comment line at the top of the kustomization.
+ * returns its path. `header` is the comment line at the top of the kustomization. With `withNamespace: false` the
+ * overlay leaves the Namespace out and a `namespace.yaml` an earlier deploy wrote is deleted: Flux applies the
+ * overlay as a service account that cannot create Namespaces, so `calm:deploy:gitops` applies it instead.
  */
 export async function writeOverlay(
   dir: string,
   opts: { name: string; namespace: string; image: string },
   header: string,
+  { withNamespace = true }: { withNamespace?: boolean } = {},
 ): Promise<string> {
   const overlayDir = path.join(dir, OVERLAY_DIR);
   await fs.mkdir(overlayDir, { recursive: true });
-  await fs.writeFile(
-    path.join(overlayDir, NAMESPACE_FILE),
-    YAML.stringify(namespaceManifest(opts.name, opts.namespace)),
-  );
+  const namespaceFile = path.join(overlayDir, NAMESPACE_FILE);
+  if (withNamespace) {
+    await fs.writeFile(
+      namespaceFile,
+      YAML.stringify(namespaceManifest(opts.name, opts.namespace)),
+    );
+  } else {
+    await fs.rm(namespaceFile, { force: true });
+  }
   await fs.writeFile(
     path.join(overlayDir, 'kustomization.yaml'),
-    `${header}\n${YAML.stringify(overlayKustomization(opts))}`,
+    `${header}\n${YAML.stringify(
+      overlayKustomization({ ...opts, withNamespace }),
+    )}`,
   );
   return overlayDir;
 }
@@ -166,6 +167,71 @@ export async function readOverlayImage(
 
 /** Runs kubectl with the given arguments and returns stdout (quiet: stdout is data, kept out of the log). */
 export type Kubectl = (args: string[], quiet?: boolean) => Promise<string>;
+
+/** A `Kubectl` that runs kubectl against the configured cluster in `cwd`. */
+export function clusterKubectl(
+  settings: KubernetesDeploySettings,
+  opts: Omit<KubernetesRunOptions, 'quietStdout'>,
+): Kubectl {
+  return async (args, quiet) =>
+    (await runKubectl(settings, args, { ...opts, quietStdout: quiet })).stdout;
+}
+
+/** Reads the Namespace `namespace` and refuses it when it exists and was not made for the service `name`. */
+export async function checkNamespace(
+  kubectl: Kubectl,
+  namespace: string,
+  name: string,
+): Promise<void> {
+  const existing = (
+    await kubectl(
+      ['get', 'namespace', namespace, '--ignore-not-found', '-o', 'json'],
+      true,
+    )
+  ).trim();
+  checkExistingNamespace(
+    namespace,
+    name,
+    existing ? JSON.parse(existing) : undefined,
+  );
+}
+
+/** The field manager `applyObjects` uses with `serverSide`: not one of kubectl's, which Flux takes over. */
+const FIELD_MANAGER = 'calm-backstage';
+
+/**
+ * Applies `objects` with `kubectl apply -f` from a temporary file: they are cluster state, not part of a repository.
+ * With `serverSide`, it uses server-side apply under the field manager `FIELD_MANAGER`: Flux's kustomize-controller
+ * takes over the fields that kubectl's own managers own on objects it applies, and can drop them.
+ */
+export async function applyObjects(
+  kubectl: Kubectl,
+  objects: object[],
+  options: { serverSide?: boolean } = {},
+): Promise<void> {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'calm-objects-'));
+  try {
+    const file = path.join(tmp, 'objects.yaml');
+    await fs.writeFile(
+      file,
+      objects.map(o => `---\n${YAML.stringify(o)}`).join(''),
+    );
+    await kubectl([
+      'apply',
+      ...(options.serverSide
+        ? [
+            '--server-side',
+            `--field-manager=${FIELD_MANAGER}`,
+            '--force-conflicts',
+          ]
+        : []),
+      '-f',
+      file,
+    ]);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+}
 
 /** Lists the Deployments, NetworkPolicies and Services in `namespace` and waits for every Deployment to roll out. */
 export async function listAndWaitForRollouts(

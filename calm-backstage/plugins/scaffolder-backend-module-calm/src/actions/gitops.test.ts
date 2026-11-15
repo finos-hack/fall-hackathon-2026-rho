@@ -12,6 +12,7 @@ import {
   createCalmDeployGitopsAction,
   waitForKustomization,
 } from './deployGitops';
+import { GITOPS_OVERLAY_HEADER, writeOverlay } from './deployK8s';
 import {
   createCalmGitPublishAction,
   withGitAnnotations,
@@ -167,18 +168,46 @@ function fakeKubectl(opts: {
   remote: string;
   namespace?: any;
   failFlux?: string;
-  /** Fails `kubectl apply -f` of the Flux objects with this message. */
+  /** Fails `kubectl apply -f` of the Flux objects (the apply after the push) with this message. */
   failApply?: string;
+  /** Fails the server-side apply of the Namespace and Flux service account (before the push) with this message. */
+  failTenantApply?: string;
 }) {
   const calls: string[][] = [];
+  /** What each `apply` applied, its arguments before `-f`, and the remote's main at that moment. */
+  const applied: {
+    objects: any[];
+    flags: string[];
+    remoteMain: string;
+    call: number;
+  }[] = [];
   const kubectl = async (args: string[]) => {
     calls.push(args);
     const a = args.join(' ');
+    if (args[0] === 'apply') {
+      const f = args.indexOf('-f');
+      const flags = args.slice(1, f);
+      applied.push({
+        objects: YAML.parseAllDocuments(await fs.readFile(args[f + 1], 'utf-8'))
+          .map(d => d.toJSON())
+          .filter(Boolean),
+        flags,
+        // Empty when a test removed the remote to make the push fail.
+        remoteMain: await git(opts.remote, ['rev-parse', 'main']).catch(
+          () => '',
+        ),
+        call: calls.length - 1,
+      });
+      const failure = flags.includes('--server-side')
+        ? opts.failTenantApply
+        : opts.failApply;
+      if (failure) {
+        throw new Error(failure);
+      }
+      return '';
+    }
     if (a.startsWith('get namespace')) {
       return opts.namespace ? JSON.stringify(opts.namespace) : '';
-    }
-    if (a.startsWith('apply -f') && opts.failApply) {
-      throw new Error(opts.failApply);
     }
     if (a.includes('get kustomization')) {
       const sha = await git(opts.remote, ['rev-parse', 'main']);
@@ -215,7 +244,7 @@ function fakeKubectl(opts: {
     }
     return '';
   };
-  return { calls, kubectl };
+  return { calls, applied, kubectl };
 }
 
 describe('calm:deploy:gitops', () => {
@@ -270,6 +299,79 @@ describe('calm:deploy:gitops', () => {
     );
     expect(annotate.at(-1)).toMatch(/^reconcile\.fluxcd\.io\/requestedAt=/);
     expect(fake.calls.some(c2 => c2.includes('rollout'))).toBe(true);
+  });
+
+  it('applies the prune-disabled namespace, service account and role binding before the push that drops namespace.yaml, and Flux applies as that account', async () => {
+    const { remote, dir } = await published('orders');
+    // Deployed before Flux had a service account: the overlay on main holds the Namespace.
+    await writeOverlay(
+      dir,
+      { name: 'orders', namespace: 'calm-orders', image: 'orders:old' },
+      GITOPS_OVERLAY_HEADER,
+    );
+    await gitCommitAll(dir, 'Deploy orders:old');
+    await gitPush(dir, `file://${remote}`, 'main');
+    const before = await git(remote, ['rev-parse', 'main']);
+    expect(
+      await git(remote, ['show', 'main:deploy/k8s-overlay/namespace.yaml']),
+    ).toContain('kind: Namespace');
+    const fake = fakeKubectl({ remote });
+    const c = ctx({ dir, name: 'orders', image: 'orders:abc123' });
+    await createCalmDeployGitopsAction({
+      settings: settings(),
+      gitops: gitops(),
+      localDir,
+      kubectl: () => fake.kubectl,
+      wait: { pollMs: 1, timeoutMs: 1000 },
+    }).handler(c);
+    const kinds = fake.applied.map(x => x.objects.map(o => o.kind));
+    expect(kinds).toEqual([
+      [
+        'Namespace',
+        'ServiceAccount',
+        'RoleBinding',
+        'ClusterRole',
+        'ClusterRoleBinding',
+      ],
+      ['GitRepository', 'Kustomization'],
+    ]);
+    const [tenant, flux] = fake.applied;
+    // The prune-disabled Namespace is on the cluster before Flux sees an overlay without it.
+    expect(tenant.remoteMain).toBe(before);
+    // Server-side apply under its own field manager: Flux takes over fields owned by kubectl's managers.
+    expect(tenant.flags).toEqual([
+      '--server-side',
+      '--field-manager=calm-backstage',
+      '--force-conflicts',
+    ]);
+    expect(flux.flags).toEqual([]);
+    expect(tenant.objects[0]).toMatchObject({
+      metadata: {
+        name: 'calm-orders',
+        labels: { 'calm.finos.org/service': 'orders' },
+        annotations: { 'kustomize.toolkit.fluxcd.io/prune': 'disabled' },
+      },
+    });
+    expect(flux.remoteMain).toBe(outputs(c).commit);
+    expect(flux.objects[1].spec).toMatchObject({
+      serviceAccountName: 'calm-orders',
+      targetNamespace: 'calm-orders',
+    });
+    const annotate = fake.calls.findIndex(c2 => c2.includes('annotate'));
+    expect(tenant.call).toBeLessThan(flux.call);
+    expect(flux.call).toBeLessThan(annotate);
+    expect(
+      await git(remote, [
+        'ls-tree',
+        '--name-only',
+        'main',
+        'deploy/k8s-overlay/',
+      ]),
+    ).toBe('deploy/k8s-overlay/kustomization.yaml');
+    const overlay = YAML.parse(
+      await git(remote, ['show', 'main:deploy/k8s-overlay/kustomization.yaml']),
+    );
+    expect(overlay.resources).toEqual(['../k8s']);
   });
 
   it('makes no commit when the overlay already deploys the image', async () => {
@@ -416,6 +518,7 @@ describe('calm:deploy:gitops: a failed deployment', () => {
     failFlux?: string;
     branch?: string;
     failApply?: string;
+    failTenantApply?: string;
     /** Breaks the working copy or the remote before the action runs. */
     before?: (dir: string, remote: string) => Promise<void>;
   }) => {
@@ -428,6 +531,7 @@ describe('calm:deploy:gitops: a failed deployment', () => {
       remote,
       failFlux: opts.failFlux ?? 'kustomize build failed',
       failApply: opts.failApply,
+      failTenantApply: opts.failTenantApply,
       namespace: opts.namespace,
     });
     const c = ctx({
@@ -446,7 +550,7 @@ describe('calm:deploy:gitops: a failed deployment', () => {
       hub: opts.hub,
       appBaseUrl: 'http://localhost:3100',
     }).handler(c);
-    return { result, c };
+    return { result, c, remote };
   };
   it('records a failed decorator when Flux does not apply the commit, and rethrows', async () => {
     const { hub, posted } = fakeRecordingHub();
@@ -536,6 +640,23 @@ describe('calm:deploy:gitops: a failed deployment', () => {
         fs.writeFile(path.join(dir, '.git', 'index.lock'), ''),
     });
     await expect(result).rejects.toThrow(/index\.lock/);
+    expect(hub.architectures).not.toHaveBeenCalled();
+    expect(hub.createDecorator).not.toHaveBeenCalled();
+  });
+
+  it('records nothing when the Namespace and Flux service account cannot be applied: the push has not happened', async () => {
+    const { hub } = fakeRecordingHub();
+    const { result, remote } = await run({
+      input: { record },
+      hub,
+      failTenantApply: 'error: namespaces "calm-orders" is forbidden',
+    });
+    await expect(result).rejects.toThrow(
+      /namespaces "calm-orders" is forbidden/,
+    );
+    expect(await git(remote, ['log', '-1', '--format=%s', 'main'])).not.toBe(
+      'Deploy orders:abc',
+    );
     expect(hub.architectures).not.toHaveBeenCalled();
     expect(hub.createDecorator).not.toHaveBeenCalled();
   });
