@@ -29,10 +29,10 @@ const defaultClient: BundleRegistryClient = {
 };
 
 /**
- * How many refreshes in a row `lastGoodRegistryReader` keeps an earlier copy of a bundle it can neither read nor
- * check with a HEAD on its manifest (the registry restarting, say). At the default 60 s refresh, about three minutes.
+ * How many refreshes in a row `lastGoodRegistryReader` keeps an earlier copy of a bundle it cannot read, before it
+ * drops it. At the default 60 s refresh, about three minutes.
  */
-export const MAX_UNCHECKED_REFRESHES = 3;
+export const MAX_KEPT_REFRESHES = 3;
 
 /** A tag the registry lists. */
 export interface BundleTag {
@@ -105,46 +105,57 @@ export async function readRegistryBundles(
   return { bundles, warnings, unread };
 }
 
-/** A tag's bundle for this refresh, if any, with a warning when it was not read and how often it went unchecked. */
-type Outcome = { bundle?: BundleInfo; warning?: string; unchecked?: number };
+/** A tag's bundle for this refresh, if any; a warning when it was not read; how many refreshes in a row it was kept. */
+type Outcome = {
+  key: string;
+  bundle?: BundleInfo;
+  warning?: string;
+  kept?: number;
+};
 
-/** What becomes of a listed tag that could not be read but has a copy from an earlier read. */
+/**
+ * What becomes of a listed tag that could not be read but has a copy from an earlier read, kept `keptBefore`
+ * refreshes in a row until now.
+ */
 async function keepOrDrop(
   client: BundleRegistryClient,
   tag: TagRead & { error: unknown },
   kept: BundleInfo,
-  unchecked: number,
+  keptBefore: number,
 ): Promise<Outcome> {
+  const key = tagKey(tag);
   const notRead = `bundle ${tag.ref} not read: ${tag.error}`;
-  let digest: string | undefined;
+  const count = keptBefore + 1;
+  if (count > MAX_KEPT_REFRESHES) {
+    return {
+      key,
+      warning: `${notRead}; skipped, not read for ${count} refreshes in a row`,
+    };
+  }
+  let checked: string;
   try {
-    digest = await client.headBundleDigest(tag.ref);
-  } catch (e) {
-    const count = unchecked + 1;
-    if (count > MAX_UNCHECKED_REFRESHES) {
+    const digest = await client.headBundleDigest(tag.ref);
+    if (digest === undefined) {
       return {
-        warning: `${notRead}; skipped, its manifest could not be checked for ${count} refreshes in a row: ${e}`,
+        key,
+        warning: `${notRead}; skipped, the registry has no manifest under the tag`,
       };
     }
-    return {
-      bundle: kept,
-      warning: `${notRead}; keeping the copy from an earlier read, unchecked (${count} of ${MAX_UNCHECKED_REFRESHES}): ${e}`,
-      unchecked: count,
-    };
-  }
-  if (digest === undefined) {
-    return {
-      warning: `${notRead}; skipped, the registry has no manifest under the tag`,
-    };
-  }
-  if (digest !== kept.digest) {
-    return {
-      warning: `${notRead}; skipped, the tag now has manifest ${digest}, the earlier copy is of ${kept.digest}`,
-    };
+    if (digest !== kept.digest) {
+      return {
+        key,
+        warning: `${notRead}; skipped, the tag now has manifest ${digest}, the earlier copy is of ${kept.digest}`,
+      };
+    }
+    checked = `the tag still has manifest ${digest}`;
+  } catch (e) {
+    checked = `its manifest could not be checked: ${e}`;
   }
   return {
+    key,
     bundle: kept,
-    warning: `${notRead}; keeping the copy from an earlier read, the tag still has manifest ${digest}`,
+    kept: count,
+    warning: `${notRead}; keeping the copy from an earlier read (${count} of ${MAX_KEPT_REFRESHES}), ${checked}`,
   };
 }
 
@@ -152,19 +163,18 @@ async function keepOrDrop(
  * Reads the registry on each call and keeps the bundles of the last read that worked. When the registry cannot be
  * listed it gives those instead, with `failed` set, so a registry restart does not empty the catalog's bundles.
  *
- * A tag the registry still lists but cannot read (on a second try either) keeps its bundle from the last read only
- * while a HEAD on its manifest gives the digest of that copy. A HEAD that gives another digest (the tag was pushed
- * over) or 404 (the manifest is gone) drops it. A HEAD that fails keeps it for up to `MAX_UNCHECKED_REFRESHES`
- * refreshes in a row, then drops it. Every kept or dropped copy comes with a warning. A tag the registry no longer
- * lists is dropped.
+ * A tag the registry still lists but cannot read (on a second try either) keeps its bundle from the last read for up
+ * to `MAX_KEPT_REFRESHES` refreshes in a row, with a warning each time, while a HEAD on its manifest gives the digest
+ * of that copy or cannot be answered (the registry restarting, say). A HEAD that gives another digest (the tag was
+ * pushed over) or 404 (the manifest is gone) drops it at once. A tag the registry no longer lists is dropped.
  */
 export function lastGoodRegistryReader(
   registry: BundleRegistrySettings,
   client: BundleRegistryClient = defaultClient,
 ) {
   let last: BundleInfo[] = [];
-  /** Per tag key: the refreshes in a row its copy was kept without a HEAD to check it. */
-  let unchecked = new Map<string, number>();
+  /** Per tag key: the refreshes in a row its copy has been kept. */
+  let keptFor = new Map<string, number>();
   return async (): Promise<{
     bundles: BundleInfo[];
     warnings: string[];
@@ -179,32 +189,32 @@ export function lastGoodRegistryReader(
     const previous = new Map(last.map(b => [tagKey(b), b]));
     const results = await Promise.all(
       tags.map(async (tag): Promise<Outcome> => {
+        const key = tagKey(tag);
         if ('bundle' in tag) {
-          return { bundle: tag.bundle };
+          return { key, bundle: tag.bundle };
         }
-        const kept = previous.get(tagKey(tag));
+        const kept = previous.get(key);
         if (!kept) {
-          return { warning: `bundle ${tag.ref} skipped: ${tag.error}` };
+          return { key, warning: `bundle ${tag.ref} skipped: ${tag.error}` };
         }
-        return keepOrDrop(client, tag, kept, unchecked.get(tagKey(tag)) ?? 0);
+        return keepOrDrop(client, tag, kept, keptFor.get(key) ?? 0);
       }),
     );
     const bundles: BundleInfo[] = [];
     const warnings: string[] = [];
-    const nextUnchecked = new Map<string, number>();
-    results.forEach((r, i) => {
+    keptFor = new Map();
+    for (const r of results) {
       if (r.bundle) {
         bundles.push(r.bundle);
       }
       if (r.warning) {
         warnings.push(r.warning);
       }
-      if (r.unchecked) {
-        nextUnchecked.set(tagKey(tags[i]), r.unchecked);
+      if (r.kept !== undefined) {
+        keptFor.set(r.key, r.kept);
       }
-    });
+    }
     last = bundles;
-    unchecked = nextUnchecked;
     return { bundles, warnings };
   };
 }

@@ -2,7 +2,7 @@ import { CALM_ANNOTATIONS as ANN } from '@internal/backstage-plugin-calm-common'
 import { OciError } from '@internal/backstage-plugin-calm-node';
 import {
   BundleRegistryClient,
-  MAX_UNCHECKED_REFRESHES,
+  MAX_KEPT_REFRESHES,
   mergeBundles,
   lastGoodRegistryReader,
   readRegistryBundles,
@@ -212,7 +212,7 @@ describe('lastGoodRegistryReader', () => {
     expect(heads).toEqual([]);
   });
 
-  it('keeps the last copy of a bundle that cannot be read while a HEAD gives its digest, for as long as that lasts', async () => {
+  it(`keeps the last copy of a bundle that cannot be read while a HEAD gives its digest, for ${MAX_KEPT_REFRESHES} refreshes`, async () => {
     let broken = false;
     const heads: string[] = [];
     const read = lastGoodRegistryReader(
@@ -230,16 +230,24 @@ describe('lastGoodRegistryReader', () => {
     expect(first.warnings).toEqual([]);
 
     broken = true;
-    for (let i = 0; i < MAX_UNCHECKED_REFRESHES + 2; i++) {
+    for (let n = 1; n <= MAX_KEPT_REFRESHES; n++) {
       const next = await read();
       expect(next.failed).toBeUndefined();
       expect(next.bundles).toEqual(first.bundles);
       expect(next.bundles[0]).toBe(first.bundles[0]);
       expect(next.warnings).toEqual([
-        `bundle ${ref1} not read: Error: Digest mismatch; keeping the copy from an earlier read, the tag still has manifest sha256:aaa`,
+        `bundle ${ref1} not read: Error: Digest mismatch; keeping the copy from an earlier read (${n} of ${MAX_KEPT_REFRESHES}), the tag still has manifest sha256:aaa`,
       ]);
     }
-    expect(heads).toEqual(Array(MAX_UNCHECKED_REFRESHES + 2).fill(ref1));
+    expect(heads).toEqual(Array(MAX_KEPT_REFRESHES).fill(ref1));
+
+    const dropped = await read();
+    expect(dropped.bundles.map(b => b.version)).toEqual(['2.0.0']);
+    expect(dropped.warnings).toEqual([
+      `bundle ${ref1} not read: Error: Digest mismatch; skipped, not read for ${
+        MAX_KEPT_REFRESHES + 1
+      } refreshes in a row`,
+    ]);
   });
 
   it('keeps the copy when the config blob answers 404 but the manifest is still there', async () => {
@@ -259,7 +267,7 @@ describe('lastGoodRegistryReader', () => {
     const second = await read();
     expect(second.bundles).toEqual(first.bundles);
     expect(second.warnings).toEqual([
-      `bundle ${ref1} not read: OciError: GET ${blob} -> 404; keeping the copy from an earlier read, the tag still has manifest sha256:aaa`,
+      `bundle ${ref1} not read: OciError: GET ${blob} -> 404; keeping the copy from an earlier read (1 of ${MAX_KEPT_REFRESHES}), the tag still has manifest sha256:aaa`,
     ]);
   });
 
@@ -313,7 +321,7 @@ describe('lastGoodRegistryReader', () => {
     expect((await read()).bundles).toEqual(second.bundles);
   });
 
-  it(`keeps the copy for ${MAX_UNCHECKED_REFRESHES} refreshes while the HEAD fails too, then drops it`, async () => {
+  it(`keeps the copy for ${MAX_KEPT_REFRESHES} refreshes while the HEAD fails too, then drops it`, async () => {
     let state: 'up' | 'broken' | 'down' = 'up';
     const headError = new OciError(
       0,
@@ -343,19 +351,19 @@ describe('lastGoodRegistryReader', () => {
     );
     const first = await read();
     state = 'broken';
-    for (let n = 1; n <= MAX_UNCHECKED_REFRESHES; n++) {
+    for (let n = 1; n <= MAX_KEPT_REFRESHES; n++) {
       const next = await read();
       expect(next.bundles).toEqual(first.bundles);
       expect(next.warnings).toEqual([
-        `bundle ${ref1} not read: Error: read ECONNRESET; keeping the copy from an earlier read, unchecked (${n} of ${MAX_UNCHECKED_REFRESHES}): ${headError}`,
+        `bundle ${ref1} not read: Error: read ECONNRESET; keeping the copy from an earlier read (${n} of ${MAX_KEPT_REFRESHES}), its manifest could not be checked: ${headError}`,
       ]);
     }
     const dropped = await read();
     expect(dropped.bundles.map(b => b.version)).toEqual(['2.0.0']);
     expect(dropped.warnings).toEqual([
-      `bundle ${ref1} not read: Error: read ECONNRESET; skipped, its manifest could not be checked for ${
-        MAX_UNCHECKED_REFRESHES + 1
-      } refreshes in a row: ${headError}`,
+      `bundle ${ref1} not read: Error: read ECONNRESET; skipped, not read for ${
+        MAX_KEPT_REFRESHES + 1
+      } refreshes in a row`,
     ]);
 
     // Gone from the last good read, so a listing failure does not bring it back.
@@ -363,7 +371,7 @@ describe('lastGoodRegistryReader', () => {
     expect((await read()).bundles).toEqual(dropped.bundles);
   });
 
-  it('counts unchecked refreshes again from one after a good read', async () => {
+  it('counts kept refreshes again from one after a good read', async () => {
     let broken = false;
     const read = lastGoodRegistryReader(
       registry,
@@ -376,7 +384,7 @@ describe('lastGoodRegistryReader', () => {
     );
     await read();
     broken = true;
-    for (let n = 1; n < MAX_UNCHECKED_REFRESHES; n++) {
+    for (let n = 1; n < MAX_KEPT_REFRESHES; n++) {
       await read();
     }
     broken = false;
@@ -385,7 +393,7 @@ describe('lastGoodRegistryReader', () => {
     const again = await read();
     expect(again.bundles.map(b => b.version)).toEqual(['1.0.0', '2.0.0']);
     expect(again.warnings).toEqual([
-      `bundle ${ref1} not read: Error: read ECONNRESET; keeping the copy from an earlier read, unchecked (1 of ${MAX_UNCHECKED_REFRESHES}): Error: HEAD failed`,
+      `bundle ${ref1} not read: Error: read ECONNRESET; keeping the copy from an earlier read (1 of ${MAX_KEPT_REFRESHES}), its manifest could not be checked: Error: HEAD failed`,
     ]);
   });
 
