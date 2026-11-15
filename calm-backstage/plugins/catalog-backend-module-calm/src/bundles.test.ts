@@ -2,6 +2,7 @@ import { CALM_ANNOTATIONS as ANN } from '@internal/backstage-plugin-calm-common'
 import { OciError } from '@internal/backstage-plugin-calm-node';
 import {
   BundleRegistryClient,
+  MAX_UNCHECKED_REFRESHES,
   mergeBundles,
   lastGoodRegistryReader,
   readRegistryBundles,
@@ -13,6 +14,11 @@ const registry = {
   repositoryPrefix: 'calm-bundles',
 };
 const pattern = { namespace: 'hackathon', patternId: 'web-service' };
+const ref1 = 'localhost:5050/calm-bundles/web-service:1.0.0';
+const manifest1 =
+  'http://localhost:5050/v2/calm-bundles/web-service/manifests/1.0.0';
+const digestOf = (ref: string) =>
+  `sha256:${ref.endsWith('1.0.0') ? 'aaa' : 'bbb'}`;
 
 function fakeClient(
   overrides: Partial<BundleRegistryClient> = {},
@@ -25,9 +31,10 @@ function fakeClient(
     },
     listTags: async () => ['1.0.0', '2.0.0'],
     readBundleConfig: async ref => ({
-      digest: `sha256:${ref.endsWith('1.0.0') ? 'aaa' : 'bbb'}`,
+      digest: digestOf(ref),
       config: { description: `bundle at ${ref}`, pattern },
     }),
+    headBundleDigest: async ref => digestOf(ref),
     ...overrides,
   };
 }
@@ -79,6 +86,35 @@ describe('readRegistryBundles', () => {
     expect(read.unread).toEqual([{ name: 'web-service', version: '1.0.0' }]);
   });
 
+  it('reads a tag a second time when the first read fails', async () => {
+    const reads: string[] = [];
+    const heads: string[] = [];
+    const read = await readRegistryBundles(
+      registry,
+      fakeClient({
+        readBundleConfig: async ref => {
+          reads.push(ref);
+          if (ref === ref1 && reads.filter(r => r === ref1).length === 1) {
+            throw new Error('read ECONNRESET');
+          }
+          return { digest: digestOf(ref), config: {} };
+        },
+        headBundleDigest: async ref => {
+          heads.push(ref);
+          return digestOf(ref);
+        },
+      }),
+    );
+    expect(read.bundles.map(b => [b.version, b.digest])).toEqual([
+      ['1.0.0', 'sha256:aaa'],
+      ['2.0.0', 'sha256:bbb'],
+    ]);
+    expect(read.warnings).toEqual([]);
+    expect(read.unread).toEqual([]);
+    expect(reads.filter(r => r === ref1)).toHaveLength(2);
+    expect(heads).toEqual([]);
+  });
+
   it('throws when the registry cannot be listed', async () => {
     await expect(
       readRegistryBundles(
@@ -94,6 +130,28 @@ describe('readRegistryBundles', () => {
 });
 
 describe('lastGoodRegistryReader', () => {
+  /** A client whose 1.0.0 read fails while `broken()` says so, with a HEAD that `head` answers. */
+  function brokenClient(
+    broken: () => boolean,
+    head: (ref: string) => Promise<string | undefined>,
+    error: unknown = new Error('read ECONNRESET'),
+    overrides: Partial<BundleRegistryClient> = {},
+  ) {
+    return fakeClient({
+      readBundleConfig: async ref => {
+        if (broken() && ref === ref1) {
+          throw error;
+        }
+        return {
+          digest: digestOf(ref),
+          config: { description: `bundle at ${ref}`, pattern },
+        };
+      },
+      headBundleDigest: head,
+      ...overrides,
+    });
+  }
+
   it('keeps the bundles of the last read that worked while the registry cannot be listed', async () => {
     let down = false;
     const read = lastGoodRegistryReader(
@@ -129,41 +187,206 @@ describe('lastGoodRegistryReader', () => {
     expect((await read()).bundles).toEqual([]);
   });
 
-  it('keeps the last copy of a bundle that is still listed but cannot be read, and says so', async () => {
-    let broken = false;
+  it('serves a fresh read when a tag reads on the second try, without a HEAD', async () => {
+    let failNext = false;
+    const heads: string[] = [];
     const read = lastGoodRegistryReader(
       registry,
-      fakeClient({
-        readBundleConfig: async ref => {
-          if (broken && ref.endsWith(':1.0.0')) {
-            throw new Error('read ECONNRESET');
-          }
-          return {
-            digest: `sha256:${broken ? 'new' : 'old'}-${ref.slice(-5)}`,
-            config: { description: `bundle at ${ref}`, pattern },
-          };
+      brokenClient(
+        () => {
+          const fail = failNext;
+          failNext = false;
+          return fail;
         },
-      }),
+        async ref => {
+          heads.push(ref);
+          return digestOf(ref);
+        },
+      ),
+    );
+    await read();
+    failNext = true;
+    const second = await read();
+    expect(second.bundles.map(b => b.version)).toEqual(['1.0.0', '2.0.0']);
+    expect(second.warnings).toEqual([]);
+    expect(heads).toEqual([]);
+  });
+
+  it('keeps the last copy of a bundle that cannot be read while a HEAD gives its digest, for as long as that lasts', async () => {
+    let broken = false;
+    const heads: string[] = [];
+    const read = lastGoodRegistryReader(
+      registry,
+      brokenClient(
+        () => broken,
+        async ref => {
+          heads.push(ref);
+          return digestOf(ref);
+        },
+        new Error('Digest mismatch'),
+      ),
     );
     const first = await read();
     expect(first.warnings).toEqual([]);
 
     broken = true;
+    for (let i = 0; i < MAX_UNCHECKED_REFRESHES + 2; i++) {
+      const next = await read();
+      expect(next.failed).toBeUndefined();
+      expect(next.bundles).toEqual(first.bundles);
+      expect(next.bundles[0]).toBe(first.bundles[0]);
+      expect(next.warnings).toEqual([
+        `bundle ${ref1} not read: Error: Digest mismatch; keeping the copy from an earlier read, the tag still has manifest sha256:aaa`,
+      ]);
+    }
+    expect(heads).toEqual(Array(MAX_UNCHECKED_REFRESHES + 2).fill(ref1));
+  });
+
+  it('keeps the copy when the config blob answers 404 but the manifest is still there', async () => {
+    const blob =
+      'http://localhost:5050/v2/calm-bundles/web-service/blobs/sha256:ccc';
+    let broken = false;
+    const read = lastGoodRegistryReader(
+      registry,
+      brokenClient(
+        () => broken,
+        async ref => digestOf(ref),
+        new OciError(404, blob, `GET ${blob} -> 404`),
+      ),
+    );
+    const first = await read();
+    broken = true;
     const second = await read();
-    expect(second.failed).toBeUndefined();
-    expect(second.bundles.map(b => [b.version, b.digest])).toEqual([
-      ['1.0.0', 'sha256:old-1.0.0'],
-      ['2.0.0', 'sha256:new-2.0.0'],
-    ]);
-    expect(second.bundles[0]).toBe(first.bundles[0]);
+    expect(second.bundles).toEqual(first.bundles);
     expect(second.warnings).toEqual([
-      'bundle localhost:5050/calm-bundles/web-service:1.0.0 not read, keeping the copy from an earlier read: Error: read ECONNRESET',
+      `bundle ${ref1} not read: OciError: GET ${blob} -> 404; keeping the copy from an earlier read, the tag still has manifest sha256:aaa`,
+    ]);
+  });
+
+  it('drops the copy when a HEAD shows the tag was pushed over', async () => {
+    let broken = false;
+    const read = lastGoodRegistryReader(
+      registry,
+      brokenClient(
+        () => broken,
+        async ref => (broken && ref === ref1 ? 'sha256:new' : digestOf(ref)),
+      ),
+    );
+    await read();
+    broken = true;
+    const second = await read();
+    expect(second.bundles.map(b => b.version)).toEqual(['2.0.0']);
+    expect(second.warnings).toEqual([
+      `bundle ${ref1} not read: Error: read ECONNRESET; skipped, the tag now has manifest sha256:new, the earlier copy is of sha256:aaa`,
+    ]);
+  });
+
+  it('drops the copy when the manifest answers 404 to the read and to a HEAD, and a listing failure does not bring it back', async () => {
+    let state: 'up' | 'gone' | 'down' = 'up';
+    const read = lastGoodRegistryReader(
+      registry,
+      brokenClient(
+        () => state !== 'up',
+        async ref =>
+          state !== 'up' && ref === ref1 ? undefined : digestOf(ref),
+        new OciError(404, manifest1, `GET ${manifest1} -> 404`),
+        {
+          listRepositories: async () => {
+            if (state === 'down') {
+              throw new Error('connect ECONNREFUSED');
+            }
+            return ['calm-bundles/web-service'];
+          },
+        },
+      ),
+    );
+    await read();
+
+    state = 'gone';
+    const second = await read();
+    expect(second.bundles.map(b => b.version)).toEqual(['2.0.0']);
+    expect(second.warnings).toEqual([
+      `bundle ${ref1} not read: OciError: GET ${manifest1} -> 404; skipped, the registry has no manifest under the tag`,
     ]);
 
-    // The kept copy is part of the last good read, so it survives a second failure too.
-    const third = await read();
-    expect(third.bundles).toEqual(second.bundles);
-    expect(third.warnings).toEqual(second.warnings);
+    state = 'down';
+    expect((await read()).bundles).toEqual(second.bundles);
+  });
+
+  it(`keeps the copy for ${MAX_UNCHECKED_REFRESHES} refreshes while the HEAD fails too, then drops it`, async () => {
+    let state: 'up' | 'broken' | 'down' = 'up';
+    const headError = new OciError(
+      0,
+      manifest1,
+      `HEAD ${manifest1} failed: ECONNREFUSED`,
+    );
+    const read = lastGoodRegistryReader(
+      registry,
+      brokenClient(
+        () => state !== 'up',
+        async ref => {
+          if (ref === ref1) {
+            throw headError;
+          }
+          return digestOf(ref);
+        },
+        new Error('read ECONNRESET'),
+        {
+          listRepositories: async () => {
+            if (state === 'down') {
+              throw new Error('connect ECONNREFUSED');
+            }
+            return ['calm-bundles/web-service'];
+          },
+        },
+      ),
+    );
+    const first = await read();
+    state = 'broken';
+    for (let n = 1; n <= MAX_UNCHECKED_REFRESHES; n++) {
+      const next = await read();
+      expect(next.bundles).toEqual(first.bundles);
+      expect(next.warnings).toEqual([
+        `bundle ${ref1} not read: Error: read ECONNRESET; keeping the copy from an earlier read, unchecked (${n} of ${MAX_UNCHECKED_REFRESHES}): ${headError}`,
+      ]);
+    }
+    const dropped = await read();
+    expect(dropped.bundles.map(b => b.version)).toEqual(['2.0.0']);
+    expect(dropped.warnings).toEqual([
+      `bundle ${ref1} not read: Error: read ECONNRESET; skipped, its manifest could not be checked for ${
+        MAX_UNCHECKED_REFRESHES + 1
+      } refreshes in a row: ${headError}`,
+    ]);
+
+    // Gone from the last good read, so a listing failure does not bring it back.
+    state = 'down';
+    expect((await read()).bundles).toEqual(dropped.bundles);
+  });
+
+  it('counts unchecked refreshes again from one after a good read', async () => {
+    let broken = false;
+    const read = lastGoodRegistryReader(
+      registry,
+      brokenClient(
+        () => broken,
+        async () => {
+          throw new Error('HEAD failed');
+        },
+      ),
+    );
+    await read();
+    broken = true;
+    for (let n = 1; n < MAX_UNCHECKED_REFRESHES; n++) {
+      await read();
+    }
+    broken = false;
+    expect((await read()).warnings).toEqual([]);
+    broken = true;
+    const again = await read();
+    expect(again.bundles.map(b => b.version)).toEqual(['1.0.0', '2.0.0']);
+    expect(again.warnings).toEqual([
+      `bundle ${ref1} not read: Error: read ECONNRESET; keeping the copy from an earlier read, unchecked (1 of ${MAX_UNCHECKED_REFRESHES}): Error: HEAD failed`,
+    ]);
   });
 
   it('drops a bundle whose tag the registry no longer lists', async () => {
@@ -183,79 +406,45 @@ describe('lastGoodRegistryReader', () => {
     expect(second.warnings).toEqual([]);
   });
 
-  it('drops a bundle whose tag is still listed but whose manifest the registry answers with 404', async () => {
-    let state: 'up' | 'gone' | 'down' = 'up';
-    const manifest =
-      'http://localhost:5050/v2/calm-bundles/web-service/manifests/1.0.0';
-    const read = lastGoodRegistryReader(
-      registry,
-      fakeClient({
-        listRepositories: async () => {
-          if (state === 'down') {
-            throw new Error('connect ECONNREFUSED');
-          }
-          return ['calm-bundles/web-service'];
-        },
-        readBundleConfig: async ref => {
-          if (state !== 'up' && ref.endsWith(':1.0.0')) {
-            throw new OciError(404, manifest, `GET ${manifest} -> 404`);
-          }
-          return { digest: `sha256:${ref.slice(-5)}`, config: {} };
-        },
-      }),
-    );
-    await read();
-
-    state = 'gone';
-    const second = await read();
-    expect(second.bundles.map(b => b.version)).toEqual(['2.0.0']);
-    expect(second.warnings).toEqual([
-      `bundle localhost:5050/calm-bundles/web-service:1.0.0 skipped: OciError: GET ${manifest} -> 404`,
-    ]);
-
-    // Nor does a later listing failure bring it back.
-    state = 'down';
-    expect((await read()).bundles).toEqual(second.bundles);
-  });
-
   it('leaves out a bundle that cannot be read and was never read before', async () => {
+    const heads: string[] = [];
     const read = lastGoodRegistryReader(
       registry,
-      fakeClient({
-        readBundleConfig: async ref => {
-          if (ref.endsWith(':1.0.0')) {
-            throw new Error('Digest mismatch');
-          }
-          return { digest: 'sha256:bbb', config: {} };
+      brokenClient(
+        () => true,
+        async ref => {
+          heads.push(ref);
+          return digestOf(ref);
         },
-      }),
+        new Error('Digest mismatch'),
+      ),
     );
     const first = await read();
     expect(first.failed).toBeUndefined();
     expect(first.bundles.map(b => b.version)).toEqual(['2.0.0']);
     expect(first.warnings).toEqual([
-      'bundle localhost:5050/calm-bundles/web-service:1.0.0 skipped: Error: Digest mismatch',
+      `bundle ${ref1} skipped: Error: Digest mismatch`,
     ]);
+    expect(heads).toEqual([]);
   });
 
   it('still gives the last good bundles, kept copies included, when the registry then cannot be listed', async () => {
     let state: 'up' | 'one-unreadable' | 'down' = 'up';
     const read = lastGoodRegistryReader(
       registry,
-      fakeClient({
-        listRepositories: async () => {
-          if (state === 'down') {
-            throw new Error('connect ECONNREFUSED');
-          }
-          return ['calm-bundles/web-service'];
+      brokenClient(
+        () => state === 'one-unreadable',
+        async ref => digestOf(ref),
+        new Error('read ECONNRESET'),
+        {
+          listRepositories: async () => {
+            if (state === 'down') {
+              throw new Error('connect ECONNREFUSED');
+            }
+            return ['calm-bundles/web-service'];
+          },
         },
-        readBundleConfig: async ref => {
-          if (state === 'one-unreadable' && ref.endsWith(':2.0.0')) {
-            throw new Error('read ECONNRESET');
-          }
-          return { digest: `sha256:${ref.slice(-5)}`, config: {} };
-        },
-      }),
+      ),
     );
     const first = await read();
     state = 'one-unreadable';

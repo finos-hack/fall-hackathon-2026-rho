@@ -14,6 +14,7 @@ import {
   OciError,
   bundleRef,
   extractBundle,
+  headBundleDigest,
   listRepositories,
   listTags,
   packBundle,
@@ -406,6 +407,19 @@ describe('bundles in a registry', () => {
     ).rejects.toMatchObject({ name: 'OciError', status: 404 });
   });
 
+  it('gives the manifest digest on a HEAD, and undefined for a tag that is not there', async () => {
+    const ref = `${host}/calm-bundles/web-service:2.0.0`;
+    const pushed = await pushBundle({ dir: bundleDir, ref });
+    const before = registry.requests.length;
+    expect(await headBundleDigest(ref)).toBe(pushed.digest);
+    expect(registry.requests.slice(before)).toEqual([
+      'HEAD /v2/calm-bundles/web-service/manifests/2.0.0',
+    ]);
+    expect(
+      await headBundleDigest(`${host}/calm-bundles/web-service:9.9.9`),
+    ).toBeUndefined();
+  });
+
   it('refuses a config blob that does not match its digest', async () => {
     const ref = `${host}/calm-bundles/web-service:2.0.0`;
     await pushBundle({ dir: bundleDir, ref });
@@ -510,6 +524,9 @@ describe('bundles in a registry', () => {
     await expect(listRepositories(`http://${host}`)).rejects.toBeInstanceOf(
       OciError,
     );
+    await expect(
+      headBundleDigest(`${host}/calm-bundles/web-service:2.0.0`),
+    ).rejects.toBeInstanceOf(OciError);
     await registry.start();
   });
 });

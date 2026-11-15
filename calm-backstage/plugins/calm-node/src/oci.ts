@@ -565,6 +565,32 @@ export async function resolveBundleDigest(ref: string): Promise<string> {
   return (await readManifest(parseRef(ref))).digest;
 }
 
+/**
+ * The manifest digest the registry gives for a bundle's tag on a HEAD request (its `Docker-Content-Digest`), with
+ * the same Accept header as the manifest GET; `undefined` when the registry answers 404 (no manifest under that
+ * tag). Any other answer, or a 200 without the header, throws: the digest could not be checked.
+ */
+export async function headBundleDigest(
+  ref: string,
+): Promise<string | undefined> {
+  const parsed = parseRef(ref);
+  const url = `${parsed.baseUrl}/v2/${parsed.repository}/manifests/${parsed.tag}`;
+  const res = await expect(
+    'HEAD',
+    url,
+    { headers: { Accept: OCI_MANIFEST_MEDIA_TYPE } },
+    [200, 404],
+  );
+  if (res.status === 404) {
+    return undefined;
+  }
+  const digest = res.headers.get('docker-content-digest');
+  if (!digest) {
+    throw new Error(`HEAD ${url} gave no Docker-Content-Digest header`);
+  }
+  return digest;
+}
+
 async function exists(p: string): Promise<boolean> {
   return fs
     .stat(p)
