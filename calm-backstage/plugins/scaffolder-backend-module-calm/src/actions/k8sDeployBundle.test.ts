@@ -318,5 +318,52 @@ describe('k8s-deploy 1.3.1', () => {
     expect(conf).toContain('proxy_pass https://orders-service:443;');
     expect(conf).toContain('proxy_ssl_name orders-service;');
     expect(conf).not.toContain('Orders_Service');
+
+    // The TLS objects trace back to the CALM node, like the workloads.
+    const certificate = tls.find(
+      (o: any) =>
+        o.kind === 'Certificate' && o.metadata.name === 'orders-service-tls',
+    );
+    expect(certificate.metadata.annotations).toEqual({
+      'calm.finos.org/unique-id': 'Orders_Service',
+    });
+    expect(
+      tls.find(
+        (o: any) =>
+          o.kind === 'ConfigMap' &&
+          o.metadata.name === 'orders-service-tls-proxy',
+      ).metadata.annotations,
+    ).toEqual({ 'calm.finos.org/unique-id': 'Orders_Service' });
+
+    // The Service and the policies select the pods by the converted name, so none of them selects nothing.
+    const node = (name: string) => ({
+      matchLabels: { 'calm.finos.org/node': name },
+    });
+    expect(
+      renamed['workloads.yaml'].find(
+        o => o.kind === 'Service' && o.metadata.name === 'orders-service',
+      ).spec.selector,
+    ).toEqual(node('orders-service').matchLabels);
+    const policy = (name: string) =>
+      renamed['network-policy.yaml'].find(o => o.metadata.name === name).spec;
+    const ingress = policy('api-gateway-web-service-ingress');
+    expect(ingress.podSelector).toEqual(node('orders-service'));
+    expect(ingress.ingress[0].from).toEqual([
+      { podSelector: node('api-gateway') },
+    ]);
+    expect(ingress.ingress[0].ports).toEqual([{ protocol: 'TCP', port: 8443 }]);
+    const egress = policy('api-gateway-web-service-egress');
+    expect(egress.podSelector).toEqual(node('api-gateway'));
+    expect(egress.egress[0].to).toEqual([
+      { podSelector: node('orders-service') },
+    ]);
+    expect(egress.egress[0].ports).toEqual([{ protocol: 'TCP', port: 8443 }]);
+    // The service is the source of the database and cache relationships.
+    expect(policy('web-service-postgres-egress').podSelector).toEqual(
+      node('orders-service'),
+    );
+    expect(policy('web-service-cache-egress').podSelector).toEqual(
+      node('orders-service'),
+    );
   });
 });

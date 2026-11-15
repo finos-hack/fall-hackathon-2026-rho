@@ -40,6 +40,10 @@ apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:
   name: {{tls.secretName}}
+{{#if renamed}}
+  annotations:
+    calm.finos.org/unique-id: {{{json id}}}
+{{/if}}
   labels:
     calm.finos.org/node: {{k8sName}}
 spec:
@@ -58,6 +62,10 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: {{tls.configMap}}
+{{#if renamed}}
+  annotations:
+    calm.finos.org/unique-id: {{{json id}}}
+{{/if}}
   labels:
     calm.finos.org/node: {{k8sName}}
 data:
