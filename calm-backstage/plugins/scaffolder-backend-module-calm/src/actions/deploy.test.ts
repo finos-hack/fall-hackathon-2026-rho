@@ -696,3 +696,119 @@ describe('calm:deploy:k8s: a failed deployment', () => {
     expect(posted[0].data.status).toBe('failed');
   });
 });
+
+describe('calm:deploy:k8s: a dry run', () => {
+  let root: string;
+  let dir: string;
+  const localDir = () => path.join(root, 'output');
+  const settings = () => ({
+    kubeconfig: path.join(root, 'kubeconfig'),
+    context: 'calm-backstage',
+    minikubeProfile: 'calm-backstage',
+    namespacePrefix: 'calm-',
+  });
+  beforeEach(async () => {
+    root = await fs.mkdtemp(path.join(os.tmpdir(), 'calm-deploy-dry-'));
+    await fs.writeFile(path.join(root, 'kubeconfig'), '');
+    dir = path.join(root, 'dry-run-output', 'orders');
+    await fs.mkdir(path.join(dir, 'deploy', 'k8s'), { recursive: true });
+    await fs.writeFile(
+      path.join(dir, 'deploy', 'k8s', 'kustomization.yaml'),
+      'resources: []\n',
+    );
+    await fs.writeFile(
+      path.join(dir, 'deploy', 'k8s', 'workloads.yaml'),
+      [
+        'apiVersion: apps/v1',
+        'kind: Deployment',
+        'metadata:',
+        '  name: web-deployment',
+        '  annotations:',
+        '    calm.finos.org/unique-id: web-service',
+        '---',
+        'apiVersion: v1',
+        'kind: Service',
+        'metadata:',
+        '  name: web',
+        'spec:',
+        '  ports:',
+        '    - port: 8080',
+        '---',
+        'apiVersion: networking.k8s.io/v1',
+        'kind: NetworkPolicy',
+        'metadata:',
+        '  name: web-policy',
+        '',
+      ].join('\n'),
+    );
+  });
+  afterEach(async () => {
+    await fs.rm(root, { recursive: true, force: true });
+  });
+
+  const context = (input: object = {}) =>
+    ({
+      input: { dir, name: 'orders', image: 'orders:dry-run', ...input },
+      logger: { info: jest.fn(), warn: jest.fn() },
+      output: jest.fn(),
+      workspacePath: root,
+      task: { id: 'task-1' },
+      isDryRun: true,
+    } as any);
+  const outs = (c: any) =>
+    Object.fromEntries(c.output.mock.calls.map((x: any[]) => [x[0], x[1]]));
+
+  it('calls no kubectl, writes the overlay in the dry-run folder and derives the outputs from the base', async () => {
+    const kubectl = jest.fn(async () => '');
+    const c = context();
+    await createCalmDeployK8sAction({
+      settings: settings(),
+      localDir: localDir(),
+      kubectl: () => kubectl,
+    }).handler(c);
+    expect(kubectl).not.toHaveBeenCalled();
+    expect(outs(c)).toMatchObject({
+      namespace: 'calm-orders',
+      deployments: ['web-deployment'],
+      nodes: ['web-service'],
+      networkPolicies: ['web-policy'],
+      services: ['web:8080'],
+      cluster: 'calm-backstage',
+      kubectl: expect.stringContaining('-n calm-orders'),
+      startTime: expect.any(String),
+      endTime: expect.any(String),
+    });
+    expect(await fs.readdir(path.join(dir, 'deploy', 'k8s-overlay'))).toContain(
+      'kustomization.yaml',
+    );
+    const logged = c.logger.info.mock.calls.map((x: any[]) => x[0]);
+    expect(
+      logged.every((l: string) => /^(Dry run: would |Wrote )/.test(l)),
+    ).toBe(true);
+    expect(logged.join('\n')).toMatch(
+      /Dry run: would apply 3 objects into calm-orders: Deployment\/web-deployment, Service\/web/,
+    );
+    expect(logged.join('\n')).toMatch(
+      /Dry run: would run .*kubectl.* apply -k/,
+    );
+  });
+
+  it('still fails without the cluster settings, with a missing base, and outside both folders', async () => {
+    await expect(
+      createCalmDeployK8sAction({ localDir: localDir() }).handler(context()),
+    ).rejects.toThrow(/are not set/);
+    await fs.rm(path.join(dir, 'deploy', 'k8s', 'kustomization.yaml'));
+    await expect(
+      createCalmDeployK8sAction({
+        settings: settings(),
+        localDir: localDir(),
+      }).handler(context()),
+    ).rejects.toThrow(/no kustomization.yaml/);
+    await expect(
+      createCalmDeployK8sAction({
+        settings: settings(),
+        localDir: localDir(),
+      }).handler(context({ dir: path.join(root, 'elsewhere') })),
+    ).rejects.toThrow(/outside/i);
+  });
+});

@@ -735,3 +735,102 @@ describe('calm:deploy:gitops: a failed deployment', () => {
     );
   });
 });
+
+describe('calm:deploy:gitops: a dry run', () => {
+  async function dryService() {
+    const dir = path.join(root, 'dry-run-output', 'orders');
+    await fs.mkdir(path.join(dir, 'deploy', 'k8s'), { recursive: true });
+    await fs.writeFile(
+      path.join(dir, 'deploy', 'k8s', 'kustomization.yaml'),
+      'resources: []\n',
+    );
+    await fs.writeFile(
+      path.join(dir, 'deploy', 'k8s', 'workloads.yaml'),
+      [
+        'apiVersion: apps/v1',
+        'kind: Deployment',
+        'metadata:',
+        '  name: web-deployment',
+        '  annotations:',
+        '    calm.finos.org/unique-id: web-service',
+        '---',
+        'apiVersion: v1',
+        'kind: Service',
+        'metadata:',
+        '  name: web',
+        'spec:',
+        '  ports:',
+        '    - port: 8080',
+        '',
+      ].join('\n'),
+    );
+    return dir;
+  }
+  const dryCtx = (dir: string) => ({
+    ...ctx({ dir, name: 'orders', image: 'orders:dry-run' }),
+    isDryRun: true,
+  });
+
+  it('runs no kubectl and no git, and derives the outputs from the base', async () => {
+    const dir = await dryService();
+    const kubectl = jest.fn(async () => '');
+    const c = dryCtx(dir);
+    await createCalmDeployGitopsAction({
+      settings: settings(),
+      gitops: gitops(),
+      localDir,
+      kubectl: () => kubectl,
+    }).handler(c);
+    expect(kubectl).not.toHaveBeenCalled();
+    expect(await fs.readdir(dir)).not.toContain('.git');
+    expect(outputs(c)).toMatchObject({
+      namespace: 'calm-orders',
+      deployments: ['web-deployment'],
+      nodes: ['web-service'],
+      networkPolicies: [],
+      services: ['web:8080'],
+      cluster: 'calm-backstage',
+      repoUrl: `file://${remoteBase}/calm-services/orders`,
+      commit: 'dry-run',
+      kustomization: 'flux-system/calm-orders',
+      startTime: expect.any(String),
+      endTime: expect.any(String),
+    });
+    expect(await fs.readdir(path.join(dir, 'deploy', 'k8s-overlay'))).toEqual([
+      'kustomization.yaml',
+    ]);
+    expect(await fs.readdir(path.join(remoteBase, 'calm-services'))).toEqual(
+      [],
+    );
+    expect(
+      c.logger.info.mock.calls.every((x: any[]) =>
+        /^(Dry run: would |Wrote the overlay )/.test(x[0]),
+      ),
+    ).toBe(true);
+  });
+
+  it('still fails without the gitops config, with a missing base, and outside both folders', async () => {
+    const dir = await dryService();
+    await expect(
+      createCalmDeployGitopsAction({
+        settings: settings(),
+        localDir,
+      }).handler(dryCtx(dir)),
+    ).rejects.toThrow(/calm.gitops is not configured/);
+    await expect(
+      createCalmDeployGitopsAction({
+        settings: settings(),
+        gitops: gitops(),
+        localDir,
+      }).handler(dryCtx(path.join(root, 'elsewhere'))),
+    ).rejects.toThrow(/outside/i);
+    await fs.rm(path.join(dir, 'deploy', 'k8s', 'kustomization.yaml'));
+    await expect(
+      createCalmDeployGitopsAction({
+        settings: settings(),
+        gitops: gitops(),
+        localDir,
+      }).handler(dryCtx(dir)),
+    ).rejects.toThrow(/no kustomization.yaml/);
+  });
+});

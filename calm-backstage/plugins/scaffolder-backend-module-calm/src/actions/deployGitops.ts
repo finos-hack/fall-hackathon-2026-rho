@@ -33,6 +33,7 @@ import {
   checkNamespace,
   clusterKubectl,
   listAndWaitForRollouts,
+  planFromBase,
   requireBase,
   writeOverlay,
 } from './deployK8s';
@@ -130,8 +131,9 @@ export function createCalmDeployGitopsAction(options: {
 }) {
   return createTemplateAction({
     id: 'calm:deploy:gitops',
+    supportsDryRun: true,
     description:
-      'Deploys a published service through Git and Flux: commits deploy/k8s-overlay with the image, pushes it, points a Flux Kustomization at the repository and waits until Flux has applied the commit and the pods are rolled out.',
+      'Deploys a published service through Git and Flux: commits deploy/k8s-overlay with the image, pushes it, points a Flux Kustomization at the repository and waits until Flux has applied the commit and the pods are rolled out. In a dry run it writes the overlay in the dry-run folder and logs what it would commit and apply, without git, kubectl or Flux; the outputs come from the rendered manifests, and the commit is dry-run.',
     schema: {
       input: {
         dir: z =>
@@ -170,7 +172,8 @@ export function createCalmDeployGitopsAction(options: {
         startTime: z => z.string(),
         endTime: z => z.string(),
         repoUrl: z => z.string().describe('Web URL of the repository'),
-        commit: z => z.string().describe('The commit Flux applied'),
+        commit: z =>
+          z.string().describe('The commit Flux applied (dry-run in a dry run)'),
         kustomization: z =>
           z.string().describe('<namespace>/<name> of the Flux Kustomization'),
       },
@@ -179,7 +182,13 @@ export function createCalmDeployGitopsAction(options: {
       await withServiceLock(
         outer,
         {
-          dir: publishedFolder(options.localDir, outer.input.dir),
+          dir: publishedFolder(
+            options.localDir,
+            outer.input.dir,
+            outer.isDryRun
+              ? { dryRunWorkspace: outer.workspacePath }
+              : undefined,
+          ),
         },
         async ctx => {
           const settings = await requireKubernetesDeploy(options.settings);
@@ -189,8 +198,56 @@ export function createCalmDeployGitopsAction(options: {
           }
           const { name, image } = ctx.input;
           const namespace = deployNamespace(settings.namespacePrefix, name);
-          const dir = publishedFolder(options.localDir, ctx.input.dir);
+          const dir = publishedFolder(
+            options.localDir,
+            ctx.input.dir,
+            ctx.isDryRun ? { dryRunWorkspace: ctx.workspacePath } : undefined,
+          );
           await requireBase(dir);
+          if (ctx.isDryRun) {
+            const overlayDir = await writeOverlay(
+              dir,
+              { name, namespace, image },
+              GITOPS_OVERLAY_HEADER,
+              { withNamespace: false },
+            );
+            const catalogInfo = path.join(dir, CATALOG_INFO_FILE);
+            const info = await fs
+              .readFile(catalogInfo, 'utf-8')
+              .catch(() => undefined);
+            if (info !== undefined) {
+              await fs.writeFile(
+                catalogInfo,
+                withGitopsAnnotations(info, name),
+              );
+            }
+            const { deployed, objects } = await planFromBase(dir);
+            const repo = serviceRepository(gitops, name);
+            const fluxName = fluxObjectName(name);
+            ctx.logger.info(`Wrote the overlay ${overlayDir}`);
+            ctx.logger.info(
+              `Dry run: would commit the overlay for ${image} and push it to ${repo.webUrl} on ${gitops.branch}`,
+            );
+            ctx.logger.info(
+              `Dry run: would apply the Flux objects ${FLUX_NAMESPACE}/${fluxName} and ${
+                objects.length
+              } objects into ${namespace}: ${objects.join(', ')}`,
+            );
+            const now = new Date().toISOString();
+            ctx.output('namespace', namespace);
+            ctx.output('deployments', deployed.deployments);
+            ctx.output('nodes', deployed.nodes);
+            ctx.output('networkPolicies', deployed.networkPolicies);
+            ctx.output('services', deployed.services);
+            ctx.output('kubectl', kubectlCommand(settings, ['-n', namespace]));
+            ctx.output('cluster', settings.context);
+            ctx.output('startTime', now);
+            ctx.output('endTime', now);
+            ctx.output('repoUrl', repo.webUrl);
+            ctx.output('commit', 'dry-run');
+            ctx.output('kustomization', `${FLUX_NAMESPACE}/${fluxName}`);
+            return;
+          }
           const kubectl: Kubectl = options.kubectl
             ? options.kubectl(settings, dir)
             : clusterKubectl(settings, {
