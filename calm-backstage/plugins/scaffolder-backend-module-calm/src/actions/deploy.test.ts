@@ -454,7 +454,7 @@ describe('calm:deploy:k8s: a failed deployment', () => {
     await fs.mkdir(path.join(dir, 'deploy', 'k8s'), { recursive: true });
     await fs.writeFile(
       path.join(dir, 'deploy', 'k8s', 'kustomization.yaml'),
-      'resources: []\n',
+      'resources:\n  - workloads.yaml\n',
     );
     await fs.writeFile(
       path.join(dir, 'deploy', 'k8s', 'workloads.yaml'),
@@ -726,7 +726,7 @@ describe('calm:deploy:k8s: a dry run', () => {
     await fs.mkdir(path.join(dir, 'deploy', 'k8s'), { recursive: true });
     await fs.writeFile(
       path.join(dir, 'deploy', 'k8s', 'kustomization.yaml'),
-      'resources: []\n',
+      'resources:\n  - workloads.yaml\n',
     );
     await fs.writeFile(
       path.join(dir, 'deploy', 'k8s', 'workloads.yaml'),
@@ -907,17 +907,126 @@ describe('calm:deploy:k8s: a dry run', () => {
 });
 
 describe('planFromBase', () => {
-  it('names an object without a metadata.name as Kind/?', async () => {
-    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'calm-plan-'));
-    try {
-      await fs.mkdir(path.join(dir, 'deploy', 'k8s'), { recursive: true });
-      await fs.writeFile(
-        path.join(dir, 'deploy', 'k8s', 'objects.yaml'),
-        'apiVersion: v1\nkind: ConfigMap\n',
-      );
-      expect((await planFromBase(dir)).objects).toEqual(['ConfigMap/?']);
-    } finally {
-      await fs.rm(dir, { recursive: true, force: true });
+  let dir: string;
+  beforeEach(async () => {
+    dir = await fs.mkdtemp(path.join(os.tmpdir(), 'calm-plan-'));
+  });
+  afterEach(async () => {
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+  /** Writes files under `dir` by relative path; `kustomization.yaml` of the base lists `resources`. */
+  const put = async (files: Record<string, string>) => {
+    for (const [rel, text] of Object.entries(files)) {
+      await fs.mkdir(path.dirname(path.join(dir, rel)), { recursive: true });
+      await fs.writeFile(path.join(dir, rel), text);
     }
+  };
+  const kustomization = (...resources: string[]) =>
+    `resources:\n${resources.map(r => `  - ${r}\n`).join('')}`;
+  const cm = (name: string) =>
+    `apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: ${name}\n`;
+
+  it('names an object without a metadata.name as Kind/?', async () => {
+    await put({
+      'deploy/k8s/kustomization.yaml': kustomization('objects.yaml'),
+      'deploy/k8s/objects.yaml': 'apiVersion: v1\nkind: ConfigMap\n',
+    });
+    expect((await planFromBase(dir)).objects).toEqual(['ConfigMap/?']);
+  });
+
+  it('follows the resources in the order they are listed, not the file names', async () => {
+    await put({
+      'deploy/k8s/kustomization.yaml': kustomization('b.yaml', 'a.yaml'),
+      'deploy/k8s/a.yaml': cm('a'),
+      'deploy/k8s/b.yaml': `${cm('b1')}---\n${cm('b2')}`,
+    });
+    expect((await planFromBase(dir)).objects).toEqual([
+      'ConfigMap/b1',
+      'ConfigMap/b2',
+      'ConfigMap/a',
+    ]);
+  });
+
+  it('does not count a yaml file the kustomization does not list', async () => {
+    await put({
+      'deploy/k8s/kustomization.yaml': kustomization('listed.yaml'),
+      'deploy/k8s/listed.yaml': cm('listed'),
+      'deploy/k8s/unlisted.yaml': cm('unlisted'),
+    });
+    expect((await planFromBase(dir)).objects).toEqual(['ConfigMap/listed']);
+  });
+
+  it('does not count a kustomization.yml in the base as an object file', async () => {
+    await put({
+      'deploy/k8s/kustomization.yaml': kustomization('listed.yaml'),
+      'deploy/k8s/listed.yaml': cm('listed'),
+      'deploy/k8s/kustomization.yml': `apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\n`,
+    });
+    expect((await planFromBase(dir)).objects).toEqual(['ConfigMap/listed']);
+  });
+
+  it('gives no objects without resources', async () => {
+    await put({
+      'deploy/k8s/kustomization.yaml': 'namespace: x\n',
+      'deploy/k8s/a.yaml': cm('a'),
+    });
+    expect((await planFromBase(dir)).objects).toEqual([]);
+    await put({ 'deploy/k8s/kustomization.yaml': 'resources: []\n' });
+    expect((await planFromBase(dir)).objects).toEqual([]);
+  });
+
+  it('takes the objects of a listed subdirectory from its own kustomization', async () => {
+    await put({
+      'deploy/k8s/kustomization.yaml': kustomization('first.yaml', 'extra'),
+      'deploy/k8s/first.yaml': cm('first'),
+      'deploy/k8s/extra/kustomization.yaml': kustomization('more.yaml'),
+      'deploy/k8s/extra/more.yaml': cm('more'),
+      'deploy/k8s/extra/unlisted.yaml': cm('unlisted'),
+    });
+    expect((await planFromBase(dir)).objects).toEqual([
+      'ConfigMap/first',
+      'ConfigMap/more',
+    ]);
+  });
+
+  it('throws for an entry that leaves the published folder', async () => {
+    await put({
+      'deploy/k8s/kustomization.yaml': kustomization('../../../x.yaml'),
+      'x.yaml': cm('x'),
+    });
+    await expect(planFromBase(dir)).rejects.toThrow(
+      /\.\.\/\.\.\/\.\.\/x\.yaml/,
+    );
+  });
+
+  it('throws for a remote entry, saying a dry run cannot read it', async () => {
+    await put({
+      'deploy/k8s/kustomization.yaml': kustomization(
+        'https://example.com/x.yaml',
+      ),
+    });
+    await expect(planFromBase(dir)).rejects.toThrow(
+      /https:\/\/example\.com\/x\.yaml.*remote|remote.*https:\/\/example\.com\/x\.yaml/s,
+    );
+  });
+
+  it('throws naming a listed file that does not exist, and a directory without a kustomization', async () => {
+    await put({
+      'deploy/k8s/kustomization.yaml': kustomization('missing.yaml'),
+    });
+    await expect(planFromBase(dir)).rejects.toThrow(/missing\.yaml/);
+    await put({
+      'deploy/k8s/kustomization.yaml': kustomization('sub'),
+      'deploy/k8s/sub/a.yaml': cm('a'),
+    });
+    await expect(planFromBase(dir)).rejects.toThrow(/sub/);
+  });
+
+  it('throws on a directory listed in a cycle', async () => {
+    await put({
+      'deploy/k8s/kustomization.yaml': kustomization('sub'),
+      'deploy/k8s/sub/kustomization.yaml': kustomization('..'),
+    });
+    await expect(planFromBase(dir)).rejects.toThrow(/cycle|twice/i);
   });
 });

@@ -87,7 +87,7 @@ async function service(name: string) {
   await fs.mkdir(path.join(dir, 'deploy', 'k8s'), { recursive: true });
   await fs.writeFile(
     path.join(dir, 'deploy', 'k8s', 'kustomization.yaml'),
-    'resources: []\n',
+    'resources:\n  - workloads.yaml\n',
   );
   await fs.writeFile(
     path.join(dir, 'catalog-info.yaml'),
@@ -754,7 +754,7 @@ describe('calm:deploy:gitops: a dry run', () => {
     await fs.mkdir(path.join(dir, 'deploy', 'k8s'), { recursive: true });
     await fs.writeFile(
       path.join(dir, 'deploy', 'k8s', 'kustomization.yaml'),
-      'resources: []\n',
+      'resources:\n  - workloads.yaml\n',
     );
     await fs.writeFile(
       path.join(dir, 'deploy', 'k8s', 'workloads.yaml'),

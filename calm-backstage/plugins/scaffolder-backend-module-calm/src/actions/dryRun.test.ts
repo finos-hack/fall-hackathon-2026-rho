@@ -60,7 +60,7 @@ beforeEach(async () => {
   await write('rendered/Dockerfile', 'FROM scratch\n');
   await write(
     'rendered-deploy/deploy/k8s/kustomization.yaml',
-    'resources: []\n',
+    'resources:\n  - workloads.yaml\n',
   );
   await write(
     'rendered-deploy/deploy/k8s/workloads.yaml',
