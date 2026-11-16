@@ -1,4 +1,9 @@
-import { deployNamespace, isDnsLabel, workloadNode } from './deploy';
+import {
+  deployNamespace,
+  isDnsLabel,
+  namespaceManifest,
+  workloadNode,
+} from './deploy';
 
 describe('deployNamespace', () => {
   it('puts the prefix before the service name', () => {
@@ -57,5 +62,18 @@ describe('workloadNode', () => {
     );
     expect(workloadNode({ metadata: { name: 'x' } })).toBeUndefined();
     expect(workloadNode(undefined)).toBeUndefined();
+  });
+});
+
+describe('namespaceManifest', () => {
+  it('enforces and warns Pod Security baseline, next to the service labels', () => {
+    expect(
+      namespaceManifest('stock-api', 'calm-stock-api').metadata.labels,
+    ).toEqual({
+      'backstage.io/kubernetes-id': 'stock-api',
+      'calm.finos.org/service': 'stock-api',
+      'pod-security.kubernetes.io/enforce': 'baseline',
+      'pod-security.kubernetes.io/warn': 'baseline',
+    });
   });
 });

@@ -69,6 +69,8 @@ describe('overlay', () => {
         labels: {
           'backstage.io/kubernetes-id': 'stock-api',
           'calm.finos.org/service': 'stock-api',
+          'pod-security.kubernetes.io/enforce': 'baseline',
+          'pod-security.kubernetes.io/warn': 'baseline',
         },
       },
     });
@@ -112,6 +114,18 @@ describe('writeOverlay', () => {
       'namespace.yaml',
       '../k8s',
     ]);
+  });
+
+  it('enforces Pod Security baseline on the Namespace kubectl applies', async () => {
+    const overlayDir = await writeOverlay(dir, opts, '# kubectl');
+    const ns = YAML.parse(
+      await fs.readFile(path.join(overlayDir, 'namespace.yaml'), 'utf-8'),
+    );
+    expect(ns.kind).toBe('Namespace');
+    expect(ns.metadata.labels).toMatchObject({
+      'pod-security.kubernetes.io/enforce': 'baseline',
+      'pod-security.kubernetes.io/warn': 'baseline',
+    });
   });
 
   it('leaves the Namespace out of the overlay Flux applies, and removes one an earlier deploy wrote', async () => {

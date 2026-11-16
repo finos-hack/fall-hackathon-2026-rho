@@ -239,7 +239,8 @@ build of Quarkus 3.33.4 and 3.40.1 (BOM `com.redhat.quarkus.platform:quarkus-bom
     (kustomize-controller runs with `--default-service-account=default`), so a service deployed before #12 stops
     reconciling until it is redeployed (its workloads keep running). Redeploy it before `docs/demo/cleanup.sh` too:
     Flux cannot prune it as that account. Pod Security `baseline` is enforced on a
-    pre-existing service namespace the next time the service is deployed; a workload that needs more (privileged,
+    pre-existing service namespace the next time the service is deployed (either path, `calm:deploy:k8s` or
+    `calm:deploy:gitops`); a workload that needs more (privileged,
     host namespaces, paths or ports) then fails admission.
     Gitea is published on 127.0.0.1:3300, so by default that is anyone on this machine, not the network; with
     `GITEA_BIND=0.0.0.0` (Linux) it is the network again unless a firewall blocks 3300. Seed a random password.
