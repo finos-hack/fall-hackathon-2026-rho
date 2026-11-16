@@ -14,12 +14,24 @@ export function publishedFolder(
   options?: { dryRunWorkspace?: string },
 ): string {
   const abs = path.resolve(dir);
-  if (options?.dryRunWorkspace) {
+  if (
+    options?.dryRunWorkspace &&
+    isDryRunFolder(abs, options.dryRunWorkspace)
+  ) {
     const dryRoot = path.join(options.dryRunWorkspace, DRY_RUN_OUTPUT_DIR);
-    const rel = path.relative(dryRoot, abs);
-    if (rel && !rel.startsWith('..') && !path.isAbsolute(rel)) {
-      return resolveSafeChildPath(dryRoot, rel);
-    }
+    return resolveSafeChildPath(dryRoot, path.relative(dryRoot, abs));
   }
   return resolveSafeChildPath(localDir, path.relative(localDir, abs));
+}
+
+/**
+ * Whether `dir` is inside `<workspacePath>/dry-run-output`, where a dry run may write. A dry run given a folder in
+ * `localDir` must not write there.
+ */
+export function isDryRunFolder(dir: string, workspacePath: string): boolean {
+  const rel = path.relative(
+    path.join(workspacePath, DRY_RUN_OUTPUT_DIR),
+    path.resolve(dir),
+  );
+  return Boolean(rel) && !rel.startsWith('..') && !path.isAbsolute(rel);
 }

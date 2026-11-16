@@ -1,5 +1,9 @@
 import path from 'node:path';
-import { DRY_RUN_OUTPUT_DIR, publishedFolder } from './publishedFolder';
+import {
+  DRY_RUN_OUTPUT_DIR,
+  isDryRunFolder,
+  publishedFolder,
+} from './publishedFolder';
 
 const ws = path.resolve('/tmp/ws');
 const localDir = path.join(ws, 'output');
@@ -34,6 +38,22 @@ describe('publishedFolder', () => {
       expect(() =>
         publishedFolder(localDir, dir, { dryRunWorkspace: ws }),
       ).toThrow();
+    }
+  });
+});
+
+describe('isDryRunFolder', () => {
+  it('is true only for a folder inside <ws>/dry-run-output', () => {
+    expect(
+      isDryRunFolder(path.join(ws, DRY_RUN_OUTPUT_DIR, 'orders'), ws),
+    ).toBe(true);
+    for (const dir of [
+      path.join(localDir, 'orders'),
+      path.join(ws, DRY_RUN_OUTPUT_DIR),
+      path.join(ws, DRY_RUN_OUTPUT_DIR, '..', 'x'),
+      path.join(ws, 'x', 'orders'),
+    ]) {
+      expect(isDryRunFolder(dir, ws)).toBe(false);
     }
   });
 });

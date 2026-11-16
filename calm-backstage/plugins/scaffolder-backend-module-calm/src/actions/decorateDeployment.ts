@@ -117,7 +117,11 @@ export async function recordDeployment(
       }), so the dry run leaves out that target`,
     );
   }
-  if (numericId === undefined) {
+  if (numericId === undefined && input.dryRun) {
+    logger.info(
+      `Dry run: CALM Hub lists no numeric id for ${hubNamespace}/${architecture} yet (a new service's architecture is stored by the real run), so the decorator would target the version path only`,
+    );
+  } else if (numericId === undefined) {
     logger.warn(
       `CALM Hub lists no numeric id for ${hubNamespace}/${architecture}, so its Deployments tab will not show this deployment`,
     );

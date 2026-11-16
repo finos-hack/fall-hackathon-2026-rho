@@ -137,6 +137,9 @@ describe('the publish to deploy chain in a dry run', () => {
       return c;
     };
 
+    // What the fill step outputs as architecturePath: the workspace file prepared above.
+    const architecturePath = 'architecture.json';
+
     // register-hub (prepare): checks the name and writes the file in the workspace.
     const prepare = await run(
       createCalmRegisterHubAction({
@@ -146,7 +149,7 @@ describe('the publish to deploy chain in a dry run', () => {
         auth,
         localDir,
       }),
-      { name: 'orders', mode: 'prepare' },
+      { architecturePath, name: 'orders', mode: 'prepare' },
     );
     const registered = prepare.outputs;
 
@@ -174,7 +177,7 @@ describe('the publish to deploy chain in a dry run', () => {
     const dir = path.join(root, 'dry-run-output', 'orders');
     expect(publish.outputs.path).toBe(dir);
 
-    await run(
+    const store = await run(
       createCalmRegisterHubAction({
         hub,
         namespace: 'hackathon',
@@ -182,8 +185,19 @@ describe('the publish to deploy chain in a dry run', () => {
         auth,
         localDir,
       }),
-      { name: 'orders', mode: 'store', publishedDir: publish.outputs.path },
+      {
+        architecturePath,
+        name: 'orders',
+        mode: 'store',
+        publishedDir: publish.outputs.path,
+      },
     );
+    const stored = store.outputs;
+    expect(stored).toMatchObject({
+      namespace: 'hackathon',
+      architecture: 'orders',
+      version: registered.version,
+    });
 
     const git = await run(
       createCalmGitPublishAction({ settings: gitops, localDir }),
@@ -216,6 +230,13 @@ describe('the publish to deploy chain in a dry run', () => {
         dir: publish.outputs.path,
         name: 'orders',
         image: build.outputs.image,
+        // As in the Template: a failed deployment would record itself in the Hub. Nothing fails here, so no POST.
+        record: {
+          hubNamespace: registered.namespace,
+          architecture: registered.architecture,
+          version: registered.version,
+          architecturePath,
+        },
       },
     );
     expect(deploy.outputs).toMatchObject({
@@ -224,12 +245,13 @@ describe('the publish to deploy chain in a dry run', () => {
       commit: 'dry-run',
     });
 
-    // The decorate step's inputs are the deploy step's outputs, as in the Template.
+    // The decorate step's inputs are the store and deploy steps' outputs, as in the Template.
     const decorateInput = {
-      hubNamespace: registered.namespace,
-      architecture: registered.architecture,
-      version: registered.version,
+      hubNamespace: stored.namespace,
+      architecture: stored.architecture,
+      version: stored.version,
       name: 'orders',
+      architecturePath,
       cluster: deploy.outputs.cluster,
       namespace: deploy.outputs.namespace,
       workloads: deploy.outputs.nodes,
@@ -259,8 +281,9 @@ describe('the publish to deploy chain in a dry run', () => {
       { catalogInfoPath: publish.outputs.catalogInfoPath },
     );
     expect(local.outputs.entityRef).toBe('component:default/orders');
+    // The location the real run would add: the file in localDir, not the workspace copy.
     expect(local.outputs.locationTarget).toBe(
-      `file:${publish.outputs.catalogInfoPath}`,
+      `file:${path.join(localDir, 'orders', 'catalog-info.yaml')}`,
     );
 
     // Nothing outside the workspace changed, and nothing was written to the Hub, Git, the catalog or the cluster.

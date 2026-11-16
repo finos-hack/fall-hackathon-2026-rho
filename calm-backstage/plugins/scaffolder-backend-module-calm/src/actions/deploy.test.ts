@@ -21,6 +21,17 @@ import { createCalmClusterCheckAction } from './clusterCheck';
 import { createCalmImageBuildAction, imageReference } from './imageBuild';
 import { serviceEntity } from './publishLocal';
 
+/** Every file under `dir`, by relative path, with its content. */
+async function snapshot(dir: string): Promise<Record<string, string>> {
+  const files = await fs.readdir(dir, { recursive: true, withFileTypes: true });
+  const out: Record<string, string> = {};
+  for (const f of files.filter(x => x.isFile())) {
+    const abs = path.join(f.parentPath, f.name);
+    out[path.relative(dir, abs)] = await fs.readFile(abs, 'utf-8');
+  }
+  return out;
+}
+
 describe('imageReference', () => {
   it('gives <name>:<tag>', () => {
     expect(imageReference('stock-api', '0b1c2d3e-4f')).toBe(
@@ -796,6 +807,41 @@ describe('calm:deploy:k8s: a dry run', () => {
     );
     expect(logged.join('\n')).toMatch(
       /Dry run: would run .*kubectl.* apply -k/,
+    );
+  });
+
+  it('writes nothing in a localDir folder, logs the overlay it would write and still gives the outputs', async () => {
+    const published = path.join(localDir(), 'orders');
+    await fs.cp(dir, published, { recursive: true });
+    const before = await snapshot(published);
+    const kubectl = jest.fn(async () => '');
+    const c = context({ dir: published });
+    await createCalmDeployK8sAction({
+      settings: settings(),
+      localDir: localDir(),
+      kubectl: () => kubectl,
+    }).handler(c);
+    expect(await snapshot(published)).toEqual(before);
+    expect(kubectl).not.toHaveBeenCalled();
+    expect(outs(c)).toMatchObject({
+      namespace: 'calm-orders',
+      deployments: ['web-deployment'],
+      nodes: ['web-service'],
+      networkPolicies: ['web-policy'],
+      services: ['web:8080'],
+      cluster: 'calm-backstage',
+      kubectl: expect.stringContaining('-n calm-orders'),
+    });
+    const logged = c.logger.info.mock.calls.map((x: any[]) => x[0]);
+    expect(logged).toContain(
+      `Dry run: would write the overlay ${path.join(
+        published,
+        'deploy',
+        'k8s-overlay',
+      )}`,
+    );
+    expect(logged.every((l: string) => l.startsWith('Dry run: would '))).toBe(
+      true,
     );
   });
 

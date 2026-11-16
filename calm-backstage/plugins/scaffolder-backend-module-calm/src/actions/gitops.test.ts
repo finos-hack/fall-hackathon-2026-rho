@@ -19,6 +19,17 @@ import {
   withGitopsAnnotations,
 } from './gitPublish';
 
+/** Every file under `dir`, by relative path, with its content. */
+async function snapshot(dir: string): Promise<Record<string, string>> {
+  const files = await fs.readdir(dir, { recursive: true, withFileTypes: true });
+  const out: Record<string, string> = {};
+  for (const f of files.filter(x => x.isFile())) {
+    const abs = path.join(f.parentPath, f.name);
+    out[path.relative(dir, abs)] = await fs.readFile(abs, 'utf-8');
+  }
+  return out;
+}
+
 let root: string;
 let localDir: string;
 let remoteBase: string;
@@ -807,6 +818,50 @@ describe('calm:deploy:gitops: a dry run', () => {
         /^(Dry run: would |Wrote the overlay )/.test(x[0]),
       ),
     ).toBe(true);
+  });
+
+  it('writes nothing in a localDir folder, logs the overlay and annotations it would write and still gives the outputs', async () => {
+    const dir = path.join(localDir, 'orders');
+    await fs.cp(await dryService(), dir, { recursive: true });
+    await fs.writeFile(
+      path.join(dir, 'catalog-info.yaml'),
+      'apiVersion: backstage.io/v1alpha1\nkind: Component\nmetadata:\n  name: orders\n',
+    );
+    const before = await snapshot(dir);
+    const kubectl = jest.fn(async () => '');
+    const c = dryCtx(dir);
+    await createCalmDeployGitopsAction({
+      settings: settings(),
+      gitops: gitops(),
+      localDir,
+      kubectl: () => kubectl,
+    }).handler(c);
+    expect(await snapshot(dir)).toEqual(before);
+    expect(kubectl).not.toHaveBeenCalled();
+    expect(outputs(c)).toMatchObject({
+      namespace: 'calm-orders',
+      deployments: ['web-deployment'],
+      nodes: ['web-service'],
+      services: ['web:8080'],
+      cluster: 'calm-backstage',
+      repoUrl: `file://${remoteBase}/calm-services/orders`,
+      commit: 'dry-run',
+      kustomization: 'flux-system/calm-orders',
+    });
+    const logged = c.logger.info.mock.calls.map((x: any[]) => x[0]);
+    expect(logged).toContain(
+      `Dry run: would write the overlay ${path.join(
+        dir,
+        'deploy',
+        'k8s-overlay',
+      )}`,
+    );
+    expect(logged.join('\n')).toMatch(
+      /Dry run: would add the gitops annotation and tag to .*catalog-info\.yaml/,
+    );
+    expect(logged.every((l: string) => l.startsWith('Dry run: would '))).toBe(
+      true,
+    );
   });
 
   it('still fails without the gitops config, with a missing base, and outside both folders', async () => {

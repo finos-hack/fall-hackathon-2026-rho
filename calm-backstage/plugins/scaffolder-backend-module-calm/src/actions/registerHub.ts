@@ -24,7 +24,7 @@ import {
   serviceEntityOf,
 } from '@internal/backstage-plugin-calm-common';
 import { assertClaimable, fileLocationRef, lookUpClaim } from './catalogClaim';
-import { DRY_RUN_OUTPUT_DIR } from './publishedFolder';
+import { DRY_RUN_OUTPUT_DIR, isDryRunFolder } from './publishedFolder';
 import { CATALOG_INFO_FILE } from './publishLocal';
 
 export const DEFAULT_HUB_VERSION = '1.0.0';
@@ -437,9 +437,18 @@ async function storePrepared(
   try {
     await opts.checkClaim();
     const { versions } = await ownedVersions(hub, namespace, name, entityRef);
-    if (ctx.input.publishedDir && !ctx.isDryRun) {
+    // In a dry run, the folder calm:publish:local wrote in the workspace is checked; a localDir one is not.
+    let checked: string | undefined = ctx.isDryRun ? undefined : opts.target;
+    if (
+      ctx.isDryRun &&
+      ctx.input.publishedDir &&
+      isDryRunFolder(ctx.input.publishedDir, ctx.workspacePath)
+    ) {
+      checked = path.resolve(ctx.input.publishedDir);
+    }
+    if (ctx.input.publishedDir && checked) {
       // What was published (and pushed next) must name what is stored.
-      const named = await publishedVersion(opts.target);
+      const named = await publishedVersion(checked);
       if (named.architecture !== name || named.version !== version) {
         throw new Error(
           `The published folder's ${CATALOG_INFO_FILE} names ${JSON.stringify(

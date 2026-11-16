@@ -9,7 +9,11 @@ import type { CatalogService } from '@backstage/plugin-catalog-node';
 import { createTemplateAction } from '@backstage/plugin-scaffolder-node';
 import YAML from 'yaml';
 import { assertClaimable, fileLocationRef, lookUpClaim } from './catalogClaim';
-import { publishedFolder } from './publishedFolder';
+import {
+  DRY_RUN_OUTPUT_DIR,
+  isDryRunFolder,
+  publishedFolder,
+} from './publishedFolder';
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
@@ -91,7 +95,16 @@ export function createCalmRegisterLocalAction(options: {
           throw new Error(`No entity in ${target}`);
         }
         const entityRef = stringifyEntityRef(entity);
-        const wanted = fileLocationRef(target);
+        // The real run registers the same file in localDir: check and report that location.
+        const dryRoot = path.join(ctx.workspacePath, DRY_RUN_OUTPUT_DIR);
+        const wanted = fileLocationRef(
+          isDryRunFolder(target, ctx.workspacePath)
+            ? resolveSafeChildPath(
+                options.localDir,
+                path.relative(dryRoot, target),
+              )
+            : target,
+        );
         // Throws if the catalog holds the entity from elsewhere, as the real run does.
         assertClaimable(
           await lookUpClaim(options, entityRef),

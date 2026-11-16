@@ -29,6 +29,7 @@ import {
   Kubectl,
   BASE_DIR,
   GITOPS_OVERLAY_HEADER,
+  OVERLAY_DIR,
   applyObjects,
   checkNamespace,
   clusterKubectl,
@@ -40,7 +41,7 @@ import {
 import { CATALOG_INFO_FILE } from './publishLocal';
 import { withGitopsAnnotations } from './gitPublish';
 import { recordFailedDeployment } from './recordFailure';
-import { publishedFolder } from './publishedFolder';
+import { isDryRunFolder, publishedFolder } from './publishedFolder';
 import { withServiceLock } from './serviceLock';
 
 const DEFAULT_TIMEOUT_MS = 300_000;
@@ -133,7 +134,7 @@ export function createCalmDeployGitopsAction(options: {
     id: 'calm:deploy:gitops',
     supportsDryRun: true,
     description:
-      'Deploys a published service through Git and Flux: commits deploy/k8s-overlay with the image, pushes it, points a Flux Kustomization at the repository and waits until Flux has applied the commit and the pods are rolled out. In a dry run it writes the overlay in the dry-run folder and logs what it would commit and apply, without git, kubectl or Flux; the outputs come from the rendered manifests, and the commit is dry-run.',
+      'Deploys a published service through Git and Flux: commits deploy/k8s-overlay with the image, pushes it, points a Flux Kustomization at the repository and waits until Flux has applied the commit and the pods are rolled out. In a dry run it writes the overlay only in the dry-run folder (a folder in localDir is left as it is) and logs what it would commit and apply, without git, kubectl or Flux; the outputs come from the rendered manifests, and the commit is dry-run.',
     schema: {
       input: {
         dir: z =>
@@ -205,26 +206,41 @@ export function createCalmDeployGitopsAction(options: {
           );
           await requireBase(dir);
           if (ctx.isDryRun) {
-            const overlayDir = await writeOverlay(
-              dir,
-              { name, namespace, image },
-              GITOPS_OVERLAY_HEADER,
-              { withNamespace: false },
-            );
             const catalogInfo = path.join(dir, CATALOG_INFO_FILE);
             const info = await fs
               .readFile(catalogInfo, 'utf-8')
               .catch(() => undefined);
-            if (info !== undefined) {
-              await fs.writeFile(
-                catalogInfo,
-                withGitopsAnnotations(info, name),
+            // Only the dry-run folder of the workspace is written; a folder in localDir is left as it is.
+            if (isDryRunFolder(dir, ctx.workspacePath)) {
+              const overlayDir = await writeOverlay(
+                dir,
+                { name, namespace, image },
+                GITOPS_OVERLAY_HEADER,
+                { withNamespace: false },
               );
+              if (info !== undefined) {
+                await fs.writeFile(
+                  catalogInfo,
+                  withGitopsAnnotations(info, name),
+                );
+              }
+              ctx.logger.info(`Wrote the overlay ${overlayDir}`);
+            } else {
+              ctx.logger.info(
+                `Dry run: would write the overlay ${path.join(
+                  dir,
+                  OVERLAY_DIR,
+                )}`,
+              );
+              if (info !== undefined) {
+                ctx.logger.info(
+                  `Dry run: would add the gitops annotation and tag to ${catalogInfo}`,
+                );
+              }
             }
             const { deployed, objects } = await planFromBase(dir);
             const repo = serviceRepository(gitops, name);
             const fluxName = fluxObjectName(name);
-            ctx.logger.info(`Wrote the overlay ${overlayDir}`);
             ctx.logger.info(
               `Dry run: would commit the overlay for ${image} and push it to ${repo.webUrl} on ${gitops.branch}`,
             );

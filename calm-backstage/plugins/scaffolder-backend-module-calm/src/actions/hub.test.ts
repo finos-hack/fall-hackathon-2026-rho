@@ -849,6 +849,10 @@ describe('with a workspace', () => {
         const dryDir = path.join(workspace, 'dry-run-output', 'billing-api');
         await fs.mkdir(dryDir, { recursive: true });
         await fs.writeFile(path.join(dryDir, 'keep.txt'), 'kept');
+        await fs.writeFile(
+          path.join(dryDir, 'catalog-info.yaml'),
+          publishedInfo(),
+        );
         const c = ctx(
           { name: 'billing-api', mode: 'store', publishedDir: dryDir },
           { isDryRun: true },
@@ -859,6 +863,30 @@ describe('with a workspace', () => {
           'kept',
         );
         expect(c.outputs).toMatchObject({ version: '1.0.0', created: false });
+      });
+
+      it("in a dry run fails when the dry-run folder's catalog-info.yaml names another version", async () => {
+        const hub = fakeHub(base);
+        await register(hub, ctx({ name: 'billing-api', mode: 'prepare' }));
+        const dryDir = path.join(workspace, 'dry-run-output', 'billing-api');
+        await fs.mkdir(dryDir, { recursive: true });
+        await fs.writeFile(
+          path.join(dryDir, 'catalog-info.yaml'),
+          publishedInfo('0.0.1'),
+        );
+        await expect(
+          register(
+            hub,
+            ctx(
+              { name: 'billing-api', mode: 'store', publishedDir: dryDir },
+              { isDryRun: true },
+            ),
+          ),
+        ).rejects.toThrow(
+          /published folder's catalog-info.yaml names "billing-api" version "0.0.1", not the billing-api version 1.0.0 being stored/,
+        );
+        expect(hub.posts()).toEqual([]);
+        expect(await exists(dryDir)).toBe(true);
       });
 
       it('refuses the dry-run publishedDir without a dry run', async () => {
@@ -1010,6 +1038,25 @@ describe('with a workspace', () => {
       );
       expect(logged.join('\n')).toContain('"unique-id": "billing-api-task-1"');
       expect(logged.join('\n')).toContain('"applies-to"');
+    });
+
+    it('in a dry run logs at info level when the Hub lists no numeric id yet', async () => {
+      const hub = {
+        baseUrl: base,
+        architectures: jest.fn(async () => []),
+      } as any;
+      const c = ctx(input, { isDryRun: true });
+      await createCalmDecorateDeploymentAction({
+        hub,
+        appBaseUrl: 'http://localhost:3100/',
+      }).handler(c);
+      expect(c.logger.warn).not.toHaveBeenCalledWith(
+        expect.stringContaining('numeric id'),
+      );
+      expect(c.logger.info).toHaveBeenCalledWith(
+        "Dry run: CALM Hub lists no numeric id for hackathon/billing-api yet (a new service's architecture is stored by the real run), so the decorator would target the version path only",
+      );
+      expect(c.outputs.id).toBe('dry-run');
     });
 
     it('in a dry run still fails when no workload is a node, and carries on when the Hub lookup fails', async () => {
