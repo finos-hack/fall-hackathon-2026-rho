@@ -21,6 +21,7 @@ import {
 import { listFiles } from '@internal/backstage-plugin-calm-node';
 import YAML from 'yaml';
 import { assertClaimable, fileLocationRef, lookUpClaim } from './catalogClaim';
+import { DRY_RUN_OUTPUT_DIR } from './publishedFolder';
 
 /** Owner when the Template gives none: the group the CALM provider's own entities belong to. */
 export const DEFAULT_OWNER = 'group:default/guests';
@@ -147,8 +148,9 @@ export function createCalmPublishLocalAction(options: {
 }) {
   return createTemplateAction({
     id: 'calm:publish:local',
+    supportsDryRun: true,
     description:
-      'Publishes the rendered service to a local folder (<calm.publish.localDir>/<name>): rendered files and a catalog-info.yaml Component whose annotations point at the architecture in CALM Hub. The architecture itself is not copied: CALM Hub is its only store.',
+      'Publishes the rendered service to a local folder (<calm.publish.localDir>/<name>): rendered files and a catalog-info.yaml Component whose annotations point at the architecture in CALM Hub. The architecture itself is not copied: CALM Hub is its only store. A dry run runs the same checks and writes the folder to <workspace>/dry-run-output/<name> instead.',
     schema: {
       input: {
         name: z =>
@@ -347,29 +349,41 @@ export function createCalmPublishLocalAction(options: {
         url: ctx.input.hubArchitectureUrl || undefined,
       };
 
-      await fs.mkdir(options.localDir, { recursive: true });
-      const target = resolveSafeChildPath(options.localDir, name);
+      const dryRun = ctx.isDryRun === true;
+      // A dry run must not create localDir: it only checks what the real run would find there.
+      if (!dryRun) await fs.mkdir(options.localDir, { recursive: true });
+      const realTarget = resolveSafeChildPath(options.localDir, name);
+      const target = dryRun
+        ? resolveSafeChildPath(
+            resolveSafeChildPath(ctx.workspacePath, DRY_RUN_OUTPUT_DIR),
+            name,
+          )
+        : realTarget;
 
       // Refuse a name the catalog already holds from elsewhere (a Hub architecture, another service) before writing
       // anything: calm:register:local could not claim it, and the folder would be left behind.
       const entityRef = stringifyEntityRef({ kind: 'Component', name });
       assertClaimable(
         await lookUpClaim(options, entityRef),
-        fileLocationRef(path.join(target, CATALOG_INFO_FILE)),
+        fileLocationRef(path.join(realTarget, CATALOG_INFO_FILE)),
         entityRef,
       );
       const exists = await fs
-        .stat(target)
+        .stat(realTarget)
         .then(() => true)
         .catch(() => false);
       if (exists) {
         if (!ctx.input.overwrite) {
           throw new Error(
-            `${target} already exists; calm:publish:local does not overwrite it (set overwrite: true in the Template, or remove the folder)`,
+            `${realTarget} already exists; calm:publish:local does not overwrite it (set overwrite: true in the Template, or remove the folder)`,
           );
         }
-        ctx.logger.warn(`Replacing ${target}`);
-        await fs.rm(target, { recursive: true, force: true });
+        if (dryRun) {
+          ctx.logger.warn(`Dry run: would replace ${realTarget}`);
+        } else {
+          ctx.logger.warn(`Replacing ${target}`);
+          await fs.rm(target, { recursive: true, force: true });
+        }
       }
 
       await fs.cp(sourceDir, target, { recursive: true, errorOnExist: true });
@@ -405,7 +419,9 @@ export function createCalmPublishLocalAction(options: {
 
       const files = await listFiles(target);
       ctx.logger.info(
-        `Published ${entityRef} to ${target}: ${files.join(', ')}`,
+        dryRun
+          ? `Dry run: would publish ${files.length} files to ${realTarget}`
+          : `Published ${entityRef} to ${target}: ${files.join(', ')}`,
       );
       ctx.output('path', target);
       ctx.output('catalogInfoPath', catalogInfoPath);

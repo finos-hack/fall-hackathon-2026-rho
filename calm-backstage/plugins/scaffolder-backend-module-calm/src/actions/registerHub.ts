@@ -24,6 +24,7 @@ import {
   serviceEntityOf,
 } from '@internal/backstage-plugin-calm-common';
 import { assertClaimable, fileLocationRef, lookUpClaim } from './catalogClaim';
+import { DRY_RUN_OUTPUT_DIR, isDryRunFolder } from './publishedFolder';
 import { CATALOG_INFO_FILE } from './publishLocal';
 
 export const DEFAULT_HUB_VERSION = '1.0.0';
@@ -348,6 +349,7 @@ async function checkStored(
 interface StoreContext {
   input: { publishedDir?: string };
   isDryRun?: boolean;
+  workspacePath: string;
   logger: LoggerService;
   output(name: string, value: unknown): void;
 }
@@ -408,14 +410,21 @@ async function storePrepared(
   }
 
   // The published folder is read and may be removed: only the service folder calm:publish:local wrote qualifies.
+  // In a dry run it wrote to the workspace instead.
+  const allowed = [
+    opts.target,
+    ...(ctx.isDryRun
+      ? [path.join(ctx.workspacePath, DRY_RUN_OUTPUT_DIR, name)]
+      : []),
+  ].map(d => path.resolve(d));
   if (
     ctx.input.publishedDir &&
-    path.resolve(ctx.input.publishedDir) !== path.resolve(opts.target)
+    !allowed.includes(path.resolve(ctx.input.publishedDir))
   ) {
     throw new Error(
-      `publishedDir must be the folder calm:publish:local wrote for ${name} (${
-        opts.target
-      }), got ${JSON.stringify(
+      `publishedDir must be the folder calm:publish:local wrote for ${name} (${allowed.join(
+        ' or ',
+      )}), got ${JSON.stringify(
         ctx.input.publishedDir,
       )}. Nothing was stored, and nothing was removed`,
     );
@@ -428,9 +437,18 @@ async function storePrepared(
   try {
     await opts.checkClaim();
     const { versions } = await ownedVersions(hub, namespace, name, entityRef);
-    if (ctx.input.publishedDir && !ctx.isDryRun) {
+    // In a dry run, the folder calm:publish:local wrote in the workspace is checked; a localDir one is not.
+    let checked: string | undefined = ctx.isDryRun ? undefined : opts.target;
+    if (
+      ctx.isDryRun &&
+      ctx.input.publishedDir &&
+      isDryRunFolder(ctx.input.publishedDir, ctx.workspacePath)
+    ) {
+      checked = path.resolve(ctx.input.publishedDir);
+    }
+    if (ctx.input.publishedDir && checked) {
       // What was published (and pushed next) must name what is stored.
-      const named = await publishedVersion(opts.target);
+      const named = await publishedVersion(checked);
       if (named.architecture !== name || named.version !== version) {
         throw new Error(
           `The published folder's ${CATALOG_INFO_FILE} names ${JSON.stringify(

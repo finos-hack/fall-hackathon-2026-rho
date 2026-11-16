@@ -106,8 +106,10 @@ Scope: GitHub publish, dry run, register the architecture in the Hub.
     read-back after a POST that worked (the version exists). A failure after the store (git publish, build, deploy)
     still leaves the stored version, which cannot be deleted (a rerun with the same document reuses it, and a failed
     deploy is recorded on it), and the published folder, so a rerun with that name is refused.
-  - `calm:image:build`, `calm:deploy:k8s` and `calm:decorate:deployment` have no dry run: in a dry run the
-    scaffolder skips the publish step they depend on.
+- Done: a dry run plans the publish to deploy chain. `calm:publish:local` writes `<workspace>/dry-run-output/<name>`;
+  `calm:register:hub` (store), `calm:git:publish`, `calm:image:build`, `calm:deploy:k8s`/`calm:deploy:gitops`,
+  `calm:decorate:deployment` and `calm:register:local` check their inputs, log what they would do and pass their
+  outputs on, with `dry-run` for the commit and the decorator id (no Docker, kubectl, git push, Flux or Hub writes).
 - `calm:publish:local` still writes `output/<name>/` and `calm:register:local` adds a file location.
 - Done (part 3): services are pushed to Gitea and deployed by Flux (`calm:git:publish`, `calm:deploy:gitops`); the
   card shows the Flux status and the commit applied; upgrades go through a merged pull request. Each Kustomization
@@ -122,7 +124,8 @@ Scope: GitHub publish, dry run, register the architecture in the Hub.
 - Left (part 3): a GitHub client next to `GiteaClient` (push-to-create, pull requests and anonymous Flux reads are
   Gitea's); `user-cookie` auth or a separate origin for the app proxy (FINDINGS, part 3, Security).
 - Swap in `publish:github` + `catalog:register` (url location) for a real repository; no GitHub credentials are set up.
-- `calm:generate`, `calm:fill`, `calm:validate` support dry runs; the template editor's dry run can use them.
+- `calm:generate`, `calm:fill`, `calm:validate`, `calm:template`, `calm:register:hub` and the publish to deploy steps
+  support dry runs; the template editor's dry run can use them.
 
 ## F. Provisioning
 

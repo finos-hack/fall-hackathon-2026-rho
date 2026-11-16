@@ -1,6 +1,5 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { resolveSafeChildPath } from '@backstage/backend-plugin-api';
 import { createTemplateAction } from '@backstage/plugin-scaffolder-node';
 import {
   CALM_ANNOTATIONS as ANN,
@@ -18,6 +17,7 @@ import {
 } from '@internal/backstage-plugin-calm-node';
 import YAML from 'yaml';
 import { CATALOG_INFO_FILE } from './publishLocal';
+import { publishedFolder } from './publishedFolder';
 
 /** Adds the Flux Kustomization and the `calm-gitops` tag (a service deployed from Git) to a catalog-info.yaml text. */
 export function withGitopsAnnotations(
@@ -68,8 +68,9 @@ export function createCalmGitPublishAction(options: {
 }) {
   return createTemplateAction({
     id: 'calm:git:publish',
+    supportsDryRun: true,
     description:
-      'Commits a published service folder and pushes it to its repository on the Git server in calm.gitops (output/<name> becomes the working copy).',
+      'Commits a published service folder and pushes it to its repository on the Git server in calm.gitops (output/<name> becomes the working copy). In a dry run it checks the folder and the settings and logs what it would push, without a commit, a push or a Gitea call.',
     schema: {
       input: {
         dir: z =>
@@ -83,9 +84,14 @@ export function createCalmGitPublishAction(options: {
       },
       output: {
         repoUrl: z => z.string().describe('Web URL of the repository'),
-        commit: z => z.string().describe('The commit pushed'),
+        commit: z =>
+          z.string().describe('The commit pushed (dry-run in a dry run)'),
         shortCommit: z =>
-          z.string().describe('Its first 12 characters (image tags)'),
+          z
+            .string()
+            .describe(
+              'Its first 12 characters (image tags); dry-run in a dry run',
+            ),
       },
     },
     async handler(ctx) {
@@ -96,11 +102,30 @@ export function createCalmGitPublishAction(options: {
         );
       }
       const { name } = ctx.input;
-      const dir = resolveSafeChildPath(
+      const dir = publishedFolder(
         options.localDir,
-        path.relative(options.localDir, path.resolve(ctx.input.dir)),
+        ctx.input.dir,
+        ctx.isDryRun ? { dryRunWorkspace: ctx.workspacePath } : undefined,
       );
       const repo = serviceRepository(settings, name);
+      if (ctx.isDryRun) {
+        const files = (await fs.readdir(dir, { recursive: true })).filter(
+          f => !f.split(path.sep).includes('.git'),
+        );
+        let count = 0;
+        for (const f of files) {
+          if ((await fs.stat(path.join(dir, f))).isFile()) {
+            count++;
+          }
+        }
+        ctx.logger.info(
+          `Dry run: would create ${repo.webUrl} and push ${count} files on ${settings.branch}`,
+        );
+        ctx.output('repoUrl', repo.webUrl);
+        ctx.output('commit', 'dry-run');
+        ctx.output('shortCommit', 'dry-run');
+        return;
+      }
 
       const catalogInfo = path.join(dir, CATALOG_INFO_FILE);
       const text = await fs

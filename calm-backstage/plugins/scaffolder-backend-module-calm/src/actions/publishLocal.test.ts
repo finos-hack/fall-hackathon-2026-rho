@@ -154,3 +154,74 @@ describe('calm:publish:local with deployment rules', () => {
     ).toBeUndefined();
   });
 });
+
+describe('calm:publish:local dry run', () => {
+  const dryCtx = (i: object) => ({ ...ctx(i), isDryRun: true });
+  const dryDir = () => path.join(root, 'dry-run-output', 'orders');
+
+  it('supports dry run', () => {
+    expect(action().supportsDryRun).toBe(true);
+  });
+
+  it('writes only under the workspace and leaves localDir absent', async () => {
+    await action().handler(dryCtx(input));
+    await expect(fs.stat(path.join(root, 'output'))).rejects.toThrow();
+    await expect(
+      fs.stat(path.join(dryDir(), 'catalog-info.yaml')),
+    ).resolves.toBeTruthy();
+    await expect(
+      fs.stat(path.join(dryDir(), 'src/server.js')),
+    ).resolves.toBeTruthy();
+  });
+
+  it('leaves an existing localDir unchanged', async () => {
+    await write('output/other/keep.txt');
+    await action().handler(dryCtx(input));
+    expect(await fs.readdir(path.join(root, 'output'))).toEqual(['other']);
+  });
+
+  it('points the outputs at the dry-run folder and logs the plan', async () => {
+    const c = dryCtx(input);
+    await action().handler(c);
+    expect(c.output).toHaveBeenCalledWith('path', dryDir());
+    expect(c.output).toHaveBeenCalledWith(
+      'catalogInfoPath',
+      path.join(dryDir(), 'catalog-info.yaml'),
+    );
+    expect(c.output).toHaveBeenCalledWith(
+      'entityRef',
+      'component:default/orders',
+    );
+    expect(c.output).toHaveBeenCalledWith(
+      'files',
+      expect.arrayContaining(['catalog-info.yaml', 'src/server.js']),
+    );
+    const n = (await fs.readdir(dryDir(), { recursive: true })).length;
+    expect(n).toBeGreaterThan(0);
+    expect(c.logger.info).toHaveBeenCalledWith(
+      expect.stringMatching(
+        new RegExp(
+          `^Dry run: would publish \\d+ files to ${path
+            .join(root, 'output', 'orders')
+            .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`,
+        ),
+      ),
+    );
+  });
+
+  it('still fails when <localDir>/<name> exists', async () => {
+    await write('output/orders/catalog-info.yaml');
+    await expect(action().handler(dryCtx(input))).rejects.toThrow(
+      /already exists/,
+    );
+    await expect(fs.stat(dryDir())).rejects.toThrow();
+  });
+
+  it('with overwrite, an existing <localDir>/<name> is left untouched', async () => {
+    await write('output/orders/old.txt');
+    await action().handler(dryCtx({ ...input, overwrite: true }));
+    await expect(
+      fs.stat(path.join(root, 'output', 'orders', 'old.txt')),
+    ).resolves.toBeTruthy();
+  });
+});

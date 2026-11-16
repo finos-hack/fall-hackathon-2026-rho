@@ -13,12 +13,24 @@ import {
   createCalmDeployK8sAction,
   overlayKustomization,
   parseImage,
+  planFromBase,
   summariseObjects,
   writeOverlay,
 } from './deployK8s';
 import { createCalmClusterCheckAction } from './clusterCheck';
 import { createCalmImageBuildAction, imageReference } from './imageBuild';
 import { serviceEntity } from './publishLocal';
+
+/** Every file under `dir`, by relative path, with its content. */
+async function snapshot(dir: string): Promise<Record<string, string>> {
+  const files = await fs.readdir(dir, { recursive: true, withFileTypes: true });
+  const out: Record<string, string> = {};
+  for (const f of files.filter(x => x.isFile())) {
+    const abs = path.join(f.parentPath, f.name);
+    out[path.relative(dir, abs)] = await fs.readFile(abs, 'utf-8');
+  }
+  return out;
+}
 
 describe('imageReference', () => {
   it('gives <name>:<tag>', () => {
@@ -250,6 +262,54 @@ describe('the actions without a cluster', () => {
     await expect(
       createCalmDeployK8sAction({ localDir }).handler(ctx(deploy)),
     ).rejects.toThrow(/are not set.*yarn k8s:up/);
+  });
+
+  it('image build in a dry run spawns nothing and gives the image', async () => {
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'calm-image-dry-'));
+    const kubeconfig = path.join(tmp, 'config');
+    await fs.writeFile(kubeconfig, '');
+    const settings = {
+      kubeconfig,
+      context: 'calm-backstage',
+      minikubeProfile: 'calm-backstage',
+      namespacePrefix: 'calm-',
+    };
+    const dryDir = path.join(tmp, 'dry-run-output', 'stock-api');
+    const c = {
+      ...ctx({ ...build, dir: dryDir }),
+      workspacePath: tmp,
+      isDryRun: true,
+    };
+    const path0 = process.env.PATH;
+    process.env.PATH = '';
+    try {
+      await createCalmImageBuildAction({ settings, localDir }).handler(c);
+      expect(c.output).toHaveBeenCalledWith('image', 'stock-api:run-1');
+      expect(c.logger.info).toHaveBeenCalledWith(
+        expect.stringMatching(
+          /^Dry run: would run .*minikube -p calm-backstage image build -t stock-api:run-1 .*dry-run-output.stock-api$/,
+        ),
+      );
+      await expect(
+        createCalmImageBuildAction({ settings, localDir }).handler({
+          ...c,
+          input: { ...build, dir: dryDir, tag: 'latest' },
+        }),
+      ).rejects.toThrow(/latest is refused/);
+      await expect(
+        createCalmImageBuildAction({ localDir }).handler(c),
+      ).rejects.toThrow(/are not set/);
+      // Without a dry run the dry-run folder is refused.
+      await expect(
+        createCalmImageBuildAction({ settings, localDir }).handler({
+          ...c,
+          isDryRun: false,
+        }),
+      ).rejects.toThrow(/outside/i);
+    } finally {
+      process.env.PATH = path0;
+      await fs.rm(tmp, { recursive: true, force: true });
+    }
   });
 
   it('refuse to run when the kubeconfig file is missing, and say how to get it', async () => {
@@ -646,5 +706,177 @@ describe('calm:deploy:k8s: a failed deployment', () => {
     await expect(result).rejects.toThrow(/server rejected the manifest/);
     expect(posted).toHaveLength(1);
     expect(posted[0].data.status).toBe('failed');
+  });
+});
+
+describe('calm:deploy:k8s: a dry run', () => {
+  let root: string;
+  let dir: string;
+  const localDir = () => path.join(root, 'output');
+  const settings = () => ({
+    kubeconfig: path.join(root, 'kubeconfig'),
+    context: 'calm-backstage',
+    minikubeProfile: 'calm-backstage',
+    namespacePrefix: 'calm-',
+  });
+  beforeEach(async () => {
+    root = await fs.mkdtemp(path.join(os.tmpdir(), 'calm-deploy-dry-'));
+    await fs.writeFile(path.join(root, 'kubeconfig'), '');
+    dir = path.join(root, 'dry-run-output', 'orders');
+    await fs.mkdir(path.join(dir, 'deploy', 'k8s'), { recursive: true });
+    await fs.writeFile(
+      path.join(dir, 'deploy', 'k8s', 'kustomization.yaml'),
+      'resources: []\n',
+    );
+    await fs.writeFile(
+      path.join(dir, 'deploy', 'k8s', 'workloads.yaml'),
+      [
+        'apiVersion: apps/v1',
+        'kind: Deployment',
+        'metadata:',
+        '  name: web-deployment',
+        '  annotations:',
+        '    calm.finos.org/unique-id: web-service',
+        '---',
+        'apiVersion: v1',
+        'kind: Service',
+        'metadata:',
+        '  name: web',
+        'spec:',
+        '  ports:',
+        '    - port: 8080',
+        '---',
+        'apiVersion: networking.k8s.io/v1',
+        'kind: NetworkPolicy',
+        'metadata:',
+        '  name: web-policy',
+        '',
+      ].join('\n'),
+    );
+  });
+  afterEach(async () => {
+    await fs.rm(root, { recursive: true, force: true });
+  });
+
+  const context = (input: object = {}) =>
+    ({
+      input: { dir, name: 'orders', image: 'orders:dry-run', ...input },
+      logger: { info: jest.fn(), warn: jest.fn() },
+      output: jest.fn(),
+      workspacePath: root,
+      task: { id: 'task-1' },
+      isDryRun: true,
+    } as any);
+  const outs = (c: any) =>
+    Object.fromEntries(c.output.mock.calls.map((x: any[]) => [x[0], x[1]]));
+
+  it('calls no kubectl, writes the overlay in the dry-run folder and derives the outputs from the base', async () => {
+    const kubectl = jest.fn(async () => '');
+    const { hub } = fakeRecordingHub();
+    const c = context({ record });
+    await createCalmDeployK8sAction({
+      settings: settings(),
+      localDir: localDir(),
+      kubectl: () => kubectl,
+      hub,
+      appBaseUrl: 'http://backstage',
+    }).handler(c);
+    expect(kubectl).not.toHaveBeenCalled();
+    // Nothing failed and nothing is recorded: no decorator is posted.
+    expect(hub.createDecorator).not.toHaveBeenCalled();
+    expect(outs(c)).toMatchObject({
+      namespace: 'calm-orders',
+      deployments: ['web-deployment'],
+      nodes: ['web-service'],
+      networkPolicies: ['web-policy'],
+      services: ['web:8080'],
+      cluster: 'calm-backstage',
+      kubectl: expect.stringContaining('-n calm-orders'),
+      startTime: expect.any(String),
+      endTime: expect.any(String),
+    });
+    expect(await fs.readdir(path.join(dir, 'deploy', 'k8s-overlay'))).toContain(
+      'kustomization.yaml',
+    );
+    const logged = c.logger.info.mock.calls.map((x: any[]) => x[0]);
+    expect(
+      logged.every((l: string) => /^(Dry run: would |Wrote )/.test(l)),
+    ).toBe(true);
+    expect(logged.join('\n')).toMatch(
+      /Dry run: would apply 3 objects into calm-orders: Deployment\/web-deployment, Service\/web/,
+    );
+    expect(logged.join('\n')).toMatch(
+      /Dry run: would run .*kubectl.* apply -k/,
+    );
+  });
+
+  it('writes nothing in a localDir folder, logs the overlay it would write and still gives the outputs', async () => {
+    const published = path.join(localDir(), 'orders');
+    await fs.cp(dir, published, { recursive: true });
+    const before = await snapshot(published);
+    const kubectl = jest.fn(async () => '');
+    const c = context({ dir: published });
+    await createCalmDeployK8sAction({
+      settings: settings(),
+      localDir: localDir(),
+      kubectl: () => kubectl,
+    }).handler(c);
+    expect(await snapshot(published)).toEqual(before);
+    expect(kubectl).not.toHaveBeenCalled();
+    expect(outs(c)).toMatchObject({
+      namespace: 'calm-orders',
+      deployments: ['web-deployment'],
+      nodes: ['web-service'],
+      networkPolicies: ['web-policy'],
+      services: ['web:8080'],
+      cluster: 'calm-backstage',
+      kubectl: expect.stringContaining('-n calm-orders'),
+    });
+    const logged = c.logger.info.mock.calls.map((x: any[]) => x[0]);
+    expect(logged).toContain(
+      `Dry run: would write the overlay ${path.join(
+        published,
+        'deploy',
+        'k8s-overlay',
+      )}`,
+    );
+    expect(logged.every((l: string) => l.startsWith('Dry run: would '))).toBe(
+      true,
+    );
+  });
+
+  it('still fails without the cluster settings, with a missing base, and outside both folders', async () => {
+    await expect(
+      createCalmDeployK8sAction({ localDir: localDir() }).handler(context()),
+    ).rejects.toThrow(/are not set/);
+    await fs.rm(path.join(dir, 'deploy', 'k8s', 'kustomization.yaml'));
+    await expect(
+      createCalmDeployK8sAction({
+        settings: settings(),
+        localDir: localDir(),
+      }).handler(context()),
+    ).rejects.toThrow(/no kustomization.yaml/);
+    await expect(
+      createCalmDeployK8sAction({
+        settings: settings(),
+        localDir: localDir(),
+      }).handler(context({ dir: path.join(root, 'elsewhere') })),
+    ).rejects.toThrow(/outside/i);
+  });
+});
+
+describe('planFromBase', () => {
+  it('names an object without a metadata.name as Kind/?', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'calm-plan-'));
+    try {
+      await fs.mkdir(path.join(dir, 'deploy', 'k8s'), { recursive: true });
+      await fs.writeFile(
+        path.join(dir, 'deploy', 'k8s', 'objects.yaml'),
+        'apiVersion: v1\nkind: ConfigMap\n',
+      );
+      expect((await planFromBase(dir)).objects).toEqual(['ConfigMap/?']);
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
   });
 });

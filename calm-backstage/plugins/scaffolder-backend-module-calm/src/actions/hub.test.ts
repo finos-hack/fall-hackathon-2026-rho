@@ -842,6 +842,65 @@ describe('with a workspace', () => {
         expect(await exists(published())).toBe(true);
       });
 
+      it('in a dry run accepts the dry-run publishedDir, stores nothing and removes nothing', async () => {
+        const hub = fakeHub(base);
+        await register(hub, ctx({ name: 'billing-api', mode: 'prepare' }));
+        const dryDir = path.join(workspace, 'dry-run-output', 'billing-api');
+        await fs.mkdir(dryDir, { recursive: true });
+        await fs.writeFile(path.join(dryDir, 'keep.txt'), 'kept');
+        await fs.writeFile(
+          path.join(dryDir, 'catalog-info.yaml'),
+          publishedInfo(),
+        );
+        const c = ctx(
+          { name: 'billing-api', mode: 'store', publishedDir: dryDir },
+          { isDryRun: true },
+        );
+        await register(hub, c);
+        expect(hub.posts()).toEqual([]);
+        expect(await fs.readFile(path.join(dryDir, 'keep.txt'), 'utf-8')).toBe(
+          'kept',
+        );
+        expect(c.outputs).toMatchObject({ version: '1.0.0', created: false });
+      });
+
+      it("in a dry run fails when the dry-run folder's catalog-info.yaml names another version", async () => {
+        const hub = fakeHub(base);
+        await register(hub, ctx({ name: 'billing-api', mode: 'prepare' }));
+        const dryDir = path.join(workspace, 'dry-run-output', 'billing-api');
+        await fs.mkdir(dryDir, { recursive: true });
+        await fs.writeFile(
+          path.join(dryDir, 'catalog-info.yaml'),
+          publishedInfo('0.0.1'),
+        );
+        await expect(
+          register(
+            hub,
+            ctx(
+              { name: 'billing-api', mode: 'store', publishedDir: dryDir },
+              { isDryRun: true },
+            ),
+          ),
+        ).rejects.toThrow(
+          /published folder's catalog-info.yaml names "billing-api" version "0.0.1", not the billing-api version 1.0.0 being stored/,
+        );
+        expect(hub.posts()).toEqual([]);
+        expect(await exists(dryDir)).toBe(true);
+      });
+
+      it('refuses the dry-run publishedDir without a dry run', async () => {
+        const hub = fakeHub(base);
+        await register(hub, ctx({ name: 'billing-api', mode: 'prepare' }));
+        const dryDir = path.join(workspace, 'dry-run-output', 'billing-api');
+        await expect(
+          register(
+            hub,
+            ctx({ name: 'billing-api', mode: 'store', publishedDir: dryDir }),
+          ),
+        ).rejects.toThrow(/publishedDir must be the folder calm:publish:local/);
+        expect(hub.posts()).toEqual([]);
+      });
+
       it('removes nothing in a dry run', async () => {
         const hub = fakeHub(base);
         await prepareAndPublish(hub);
@@ -954,6 +1013,74 @@ describe('with a workspace', () => {
         decorate(hub, ctx({ ...input, workloads: ['gateway'] })),
       ).rejects.toThrow(/nothing for the decorator to apply to/);
       expect(hub.posts()).toEqual([]);
+    });
+
+    it('in a dry run posts nothing, logs the decorator and outputs the target, url and a placeholder id', async () => {
+      const hub = fakeHub(base);
+      const c = ctx(input, { isDryRun: true });
+      await decorate(hub, c);
+      expect(hub.posts()).toEqual([]);
+      const target =
+        '/calm/namespaces/hackathon/architectures/billing-api/versions/1.0.0';
+      expect(c.outputs).toEqual({
+        id: 'dry-run',
+        uniqueId: 'billing-api-task-1',
+        target,
+        url: `${base}/api/calm/namespaces/hackathon/decorators/dry-run`,
+      });
+      const logged = c.logger.info.mock.calls.map((x: any[]) => x[0]);
+      expect(logged.every((l: string) => l.startsWith('Dry run: would '))).toBe(
+        true,
+      );
+      expect(logged[0]).toBe(
+        'Dry run: would store the decorator billing-api-task-1',
+      );
+      expect(logged.join('\n')).toContain('"unique-id": "billing-api-task-1"');
+      expect(logged.join('\n')).toContain('"applies-to"');
+    });
+
+    it('in a dry run logs at info level when the Hub lists no numeric id yet', async () => {
+      const hub = {
+        baseUrl: base,
+        architectures: jest.fn(async () => []),
+      } as any;
+      const c = ctx(input, { isDryRun: true });
+      await createCalmDecorateDeploymentAction({
+        hub,
+        appBaseUrl: 'http://localhost:3100/',
+      }).handler(c);
+      expect(c.logger.warn).not.toHaveBeenCalledWith(
+        expect.stringContaining('numeric id'),
+      );
+      expect(c.logger.info).toHaveBeenCalledWith(
+        "Dry run: CALM Hub lists no numeric id for hackathon/billing-api yet (a new service's architecture is stored by the real run), so the decorator would target the version path only",
+      );
+      expect(c.outputs.id).toBe('dry-run');
+    });
+
+    it('in a dry run still fails when no workload is a node, and carries on when the Hub lookup fails', async () => {
+      const hub = fakeHub(base);
+      await expect(
+        decorate(
+          hub,
+          ctx({ ...input, workloads: ['gateway'] }, { isDryRun: true }),
+        ),
+      ).rejects.toThrow(/nothing for the decorator to apply to/);
+      const failing = {
+        baseUrl: base,
+        architectures: jest.fn(async () => {
+          throw new Error('hub is down');
+        }),
+      } as any;
+      const c = ctx(input, { isDryRun: true });
+      await createCalmDecorateDeploymentAction({
+        hub: failing,
+        appBaseUrl: 'http://localhost:3100/',
+      }).handler(c);
+      expect(c.outputs.id).toBe('dry-run');
+      expect(c.logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('hub is down'),
+      );
     });
   });
 });

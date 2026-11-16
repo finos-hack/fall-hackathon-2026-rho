@@ -210,6 +210,103 @@ describe('calm:register:local', () => {
   });
 });
 
+describe('calm:register:local, a dry run', () => {
+  const dryPath = () =>
+    path.join(
+      workspace,
+      'dry-run-output',
+      'orders-service',
+      'catalog-info.yaml',
+    );
+  const dryCtx = (catalogInfoPath: string) => ({
+    ...context({ catalogInfoPath }, workspace),
+    isDryRun: true,
+  });
+  beforeEach(async () => {
+    await fs.mkdir(path.dirname(dryPath()), { recursive: true });
+    await fs.writeFile(
+      dryPath(),
+      [
+        'apiVersion: backstage.io/v1alpha1',
+        'kind: Component',
+        'metadata:',
+        '  name: orders-service',
+        '',
+      ].join('\n'),
+    );
+  });
+
+  it('adds no location, logs the target and outputs the entity ref and location', async () => {
+    const catalog = fakeCatalog();
+    const action = createCalmRegisterLocalAction({
+      catalog: catalog as any,
+      auth,
+      localDir,
+    });
+    expect(action.supportsDryRun).toBe(true);
+    const c = dryCtx(dryPath());
+    await action.handler(c);
+    // The real run registers the file in localDir: the log and output name that path, not the workspace one.
+    const wanted = `file:${path.join(
+      localDir,
+      'orders-service',
+      'catalog-info.yaml',
+    )}`;
+    expect(c.output).toHaveBeenCalledWith(
+      'entityRef',
+      'component:default/orders-service',
+    );
+    expect(c.output).toHaveBeenCalledWith('locationTarget', wanted);
+    expect(c.logger.info).toHaveBeenCalledWith(
+      `Dry run: would register ${wanted}`,
+    );
+    expect(catalog.addLocation).not.toHaveBeenCalled();
+  });
+
+  it('checks the claim against the localDir file the real run would register', async () => {
+    const localFile = path.join(
+      localDir,
+      'orders-service',
+      'catalog-info.yaml',
+    );
+    const action = createCalmRegisterLocalAction({
+      catalog: fakeCatalog([
+        component('orders-service', `file:${localFile}`),
+      ]) as any,
+      auth,
+      localDir,
+    });
+    const c = dryCtx(dryPath());
+    await action.handler(c);
+    expect(c.output).toHaveBeenCalledWith(
+      'locationTarget',
+      `file:${localFile}`,
+    );
+  });
+
+  it('still refuses a name the catalog holds from elsewhere, and a path outside both folders', async () => {
+    const taken = createCalmRegisterLocalAction({
+      catalog: fakeCatalog([
+        component('orders-service', 'calm-hub:http://localhost:8090'),
+      ]) as any,
+      auth,
+      localDir,
+    });
+    await expect(taken.handler(dryCtx(dryPath()))).rejects.toThrow(
+      'The catalog already has component:default/orders-service',
+    );
+    const catalog = fakeCatalog();
+    await expect(
+      createCalmRegisterLocalAction({
+        catalog: catalog as any,
+        auth,
+        localDir,
+      }).handler(dryCtx(path.join(tmp, 'elsewhere', 'catalog-info.yaml'))),
+    ).rejects.toThrow();
+    expect(catalog.addLocation).not.toHaveBeenCalled();
+  });
+});
+
 describe('calm:register:local, hidden entity', () => {
   it('refuses a clash with an entity the task user cannot read, without adding the location', async () => {
     const catalog = fakeCatalog(

@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { createTemplateAction } from '@backstage/plugin-scaffolder-node';
-import { publishedFolder } from './publishedFolder';
+import { isDryRunFolder, publishedFolder } from './publishedFolder';
 import {
   CALM_KUBERNETES,
   CalmHubWriteClient,
@@ -263,6 +263,32 @@ export async function listAndWaitForRollouts(
   return deployed;
 }
 
+/**
+ * What a deploy of the bundle in `dir` would apply, read offline from the YAML files of its `deploy/k8s` base:
+ * the same summary a real deploy gets from the cluster, and a `Kind/name` list of the objects.
+ */
+export async function planFromBase(
+  dir: string,
+): Promise<{ deployed: Deployed; objects: string[] }> {
+  const baseDir = path.join(dir, BASE_DIR);
+  const files = (await fs.readdir(baseDir))
+    .filter(f => /\.ya?ml$/.test(f) && f !== 'kustomization.yaml')
+    .sort();
+  const items: any[] = [];
+  for (const f of files) {
+    const text = await fs.readFile(path.join(baseDir, f), 'utf-8');
+    items.push(
+      ...YAML.parseAllDocuments(text)
+        .map(d => d.toJS())
+        .filter(d => d?.kind),
+    );
+  }
+  return {
+    deployed: summariseObjects(items),
+    objects: items.map(i => `${i.kind}/${i.metadata?.name ?? '?'}`),
+  };
+}
+
 export interface Deployed {
   deployments: string[];
   /** The nodes the Deployments were rendered from, each once: `workloadNode`, else the Deployment's name. */
@@ -319,8 +345,9 @@ export function createCalmDeployK8sAction(options: {
 }) {
   return createTemplateAction({
     id: 'calm:deploy:k8s',
+    supportsDryRun: true,
     description:
-      "Deploys a published service folder to the local cluster (calm.deploy.kubernetes): writes the overlay deploy/k8s-overlay over the bundle's kustomize base deploy/k8s, runs kubectl apply -k into the namespace <namespacePrefix><name> and waits for the rollouts. Needs the cluster from `yarn k8s:up`. No dry run: its inputs come from calm:publish:local and calm:image:build, which a dry run skips.",
+      "Deploys a published service folder to the local cluster (calm.deploy.kubernetes): writes the overlay deploy/k8s-overlay over the bundle's kustomize base deploy/k8s, runs kubectl apply -k into the namespace <namespacePrefix><name> and waits for the rollouts. Needs the cluster from `yarn k8s:up`. In a dry run it writes the overlay only in the dry-run folder (a folder in localDir is left as it is) and logs the objects and the kubectl command, without calling the cluster; the outputs come from the rendered manifests.",
     schema: {
       input: {
         dir: z =>
@@ -384,8 +411,50 @@ export function createCalmDeployK8sAction(options: {
       const settings = await requireKubernetesDeploy(options.settings);
       const { name, image } = ctx.input;
       const namespace = deployNamespace(settings.namespacePrefix, name);
-      const dir = publishedFolder(options.localDir, ctx.input.dir);
+      const dir = publishedFolder(
+        options.localDir,
+        ctx.input.dir,
+        ctx.isDryRun ? { dryRunWorkspace: ctx.workspacePath } : undefined,
+      );
       await requireBase(dir);
+
+      if (ctx.isDryRun) {
+        // Only the dry-run folder of the workspace is written; a folder in localDir is left as it is.
+        let overlayDir = path.join(dir, OVERLAY_DIR);
+        if (isDryRunFolder(dir, ctx.workspacePath)) {
+          overlayDir = await writeOverlay(
+            dir,
+            { name, namespace, image },
+            `# Written by calm:deploy:k8s. Apply by hand: kubectl apply -k ${OVERLAY_DIR}`,
+          );
+          ctx.logger.info(`Wrote the overlay ${overlayDir}`);
+        } else {
+          ctx.logger.info(`Dry run: would write the overlay ${overlayDir}`);
+        }
+        const { deployed, objects } = await planFromBase(dir);
+        ctx.logger.info(
+          `Dry run: would apply ${
+            objects.length
+          } objects into ${namespace}: ${objects.join(', ')}`,
+        );
+        ctx.logger.info(
+          `Dry run: would run ${kubectlCommand(
+            settings,
+            applyArgs(overlayDir),
+          )}`,
+        );
+        const now = new Date().toISOString();
+        ctx.output('namespace', namespace);
+        ctx.output('deployments', deployed.deployments);
+        ctx.output('nodes', deployed.nodes);
+        ctx.output('networkPolicies', deployed.networkPolicies);
+        ctx.output('services', deployed.services);
+        ctx.output('kubectl', kubectlCommand(settings, ['-n', namespace]));
+        ctx.output('cluster', settings.context);
+        ctx.output('startTime', now);
+        ctx.output('endTime', now);
+        return;
+      }
 
       const overlayDir = await writeOverlay(
         dir,

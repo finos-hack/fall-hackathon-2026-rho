@@ -3,10 +3,17 @@ import {
   type AuthService,
   resolveSafeChildPath,
 } from '@backstage/backend-plugin-api';
+import fs from 'node:fs/promises';
 import { stringifyEntityRef } from '@backstage/catalog-model';
 import type { CatalogService } from '@backstage/plugin-catalog-node';
 import { createTemplateAction } from '@backstage/plugin-scaffolder-node';
+import YAML from 'yaml';
 import { assertClaimable, fileLocationRef, lookUpClaim } from './catalogClaim';
+import {
+  DRY_RUN_OUTPUT_DIR,
+  isDryRunFolder,
+  publishedFolder,
+} from './publishedFolder';
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
@@ -45,8 +52,9 @@ export function createCalmRegisterLocalAction(options: {
 }) {
   return createTemplateAction({
     id: 'calm:register:local',
+    supportsDryRun: true,
     description:
-      'Registers a catalog-info.yaml from the local publish folder (calm.publish.localDir) in the catalog as a file location.',
+      'Registers a catalog-info.yaml from the local publish folder (calm.publish.localDir) in the catalog as a file location. In a dry run it adds nothing: it checks the name and logs the location it would add.',
     schema: {
       input: {
         catalogInfoPath: z =>
@@ -69,6 +77,45 @@ export function createCalmRegisterLocalAction(options: {
       },
     },
     async handler(ctx) {
+      if (ctx.isDryRun) {
+        // The file is in the dry-run folder of the workspace, which the catalog cannot read: read it here instead.
+        const target = publishedFolder(
+          options.localDir,
+          ctx.input.catalogInfoPath,
+          {
+            dryRunWorkspace: ctx.workspacePath,
+          },
+        );
+        const docs = YAML.parseAllDocuments(await fs.readFile(target, 'utf-8'))
+          .map(d => d.toJS())
+          .filter(d => d?.kind && d?.metadata?.name)
+          .filter(d => !d.metadata.name.startsWith('generated-'));
+        const entity = docs.find(d => d.kind === 'Component') ?? docs[0];
+        if (!entity) {
+          throw new Error(`No entity in ${target}`);
+        }
+        const entityRef = stringifyEntityRef(entity);
+        // The real run registers the same file in localDir: check and report that location.
+        const dryRoot = path.join(ctx.workspacePath, DRY_RUN_OUTPUT_DIR);
+        const wanted = fileLocationRef(
+          isDryRunFolder(target, ctx.workspacePath)
+            ? resolveSafeChildPath(
+                options.localDir,
+                path.relative(dryRoot, target),
+              )
+            : target,
+        );
+        // Throws if the catalog holds the entity from elsewhere, as the real run does.
+        assertClaimable(
+          await lookUpClaim(options, entityRef),
+          wanted,
+          entityRef,
+        );
+        ctx.logger.info(`Dry run: would register ${wanted}`);
+        ctx.output('entityRef', entityRef);
+        ctx.output('locationTarget', wanted);
+        return;
+      }
       const relative = path.relative(
         options.localDir,
         path.resolve(ctx.input.catalogInfoPath),
