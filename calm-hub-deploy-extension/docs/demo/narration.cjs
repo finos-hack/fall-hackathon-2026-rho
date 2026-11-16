@@ -160,7 +160,7 @@ module.exports = function narration(ctx) {
     {
       id: 'run',
       term: `Follow the deployment of ${valid}`,
-      text: `Run. The backend records a deployment decorator on version ${valid}, with the status pending, and starts the job.`,
+      text: `Run. The backend records a deployment decorator on version ${valid}, with the status pending, and starts the job. On the right is that record, on CALM Hub’s Decorators tab.`,
     },
     {
       id: 'step-validate',
@@ -176,19 +176,19 @@ module.exports = function narration(ctx) {
     },
     {
       id: 'waiting',
-      text: 'Now it waits. In this firm, a change to a running service needs someone to approve it.',
+      text: 'Now it waits. The record says so: in progress, waiting for someone to approve the pull request. In this firm, a change to a running service needs that approval.',
     },
     {
       id: 'log-steps',
       term: 'The trail in the backend’s log',
-      text: 'The backend’s log has the whole trail: the POST from CALM Hub, with write scope and its audit id, and then each step recorded on the decorator.',
+      text: 'On the diagram, the nodes this deployment touches are marked in progress. And the backend’s log has the whole trail: the POST from CALM Hub, with write scope and its audit id, then each step recorded on the decorator.',
     },
 
     // ---- 8. The firm's change gate
     {
       id: 'pr',
       term: 'The pull request the extension opened',
-      text: 'This is the pull request the extension opened. It is an ordinary change, in the service’s own repository.',
+      text: 'This is the pull request the extension opened, in Gitea on the right. It is an ordinary change, in the service’s own repository.',
     },
     {
       id: 'files',
@@ -209,7 +209,7 @@ module.exports = function narration(ctx) {
     // ---- 9. Flux applies it
     {
       id: 'flux',
-      text: 'The extension sees the merge and asks Flux to reconcile. Flux pulls the merge commit and applies it to the cluster.',
+      text: 'The pull request is merged. The extension sees the merge and asks Flux to reconcile, and the record in CALM Hub says Flux is applying the merge commit.',
     },
     {
       id: 'policies',
@@ -217,11 +217,11 @@ module.exports = function narration(ctx) {
     },
     {
       id: 'rollouts',
-      text: 'When Flux has applied the commit and every rollout has finished, the extension marks the deployment completed.',
+      text: 'When Flux has applied the commit and every rollout has finished, the extension marks the deployment completed, with the commit and the pull request.',
     },
     {
       id: 'overlay-after',
-      text: `On the diagram, CALM Hub re-reads decorators every five seconds, so the Deployments overlay followed every step. It now shows version ${valid} deployed.`,
+      text: `On the diagram, CALM Hub re-reads decorators every five seconds, so the Deployments overlay followed every step. Each node now shows version ${valid} completed.`,
     },
 
     // ---- 10. The results back in CALM Hub

@@ -344,6 +344,49 @@ const srtTime = s => {
     await hold(600);
   };
   const latestPr = async state => (await getJson(`${GITEA}/${NAME}/pulls?state=${state}&limit=1`))[0];
+  const collapseSidebar = async () => {
+    const collapse = page.getByRole('button', { name: 'Collapse sidebar' });
+    if (await collapse.isVisible().catch(() => false)) await collapse.click();
+  };
+  const hubUrl = (version, tab) => `${HUB}/#/hackathon/architectures/${NAME}/${version}${tab ? `?tab=${tab}` : ''}`;
+  /** Leaves CALM Hub for another page (Gitea), keeping the chapter badge and caption on it. */
+  const visit = async url => {
+    await page.goto(url);
+    await page.waitForLoadState('domcontentloaded');
+    await restoreOverlays();
+    await hold(400);
+  };
+  /** Back to CALM Hub on a version and tab, as it was left (dark, sidebar collapsed). */
+  const backToHub = async (version, tabName) => {
+    await page.goto(hubUrl(version));
+    await page.getByRole('tab', { name: tabName }).waitFor();
+    await collapseSidebar();
+    await restoreOverlays();
+    await tab(tabName);
+  };
+  /** The deployment record on the Decorators tab, read again, with its status and notes picked out. */
+  const record = async () => {
+    await tab('JSON');
+    await tab('Decorators');
+    await page.getByText('notes', { exact: true }).first().waitFor();
+    await page.evaluate(() => {
+      for (const el of document.querySelectorAll('body *')) {
+        if (el.children.length === 0 && ['status', 'notes'].includes(el.textContent.trim())) {
+          const row = el.parentElement;
+          row.style.background = 'rgba(122,162,255,0.18)';
+          row.style.outline = '1px solid rgba(122,162,255,0.6)';
+          row.style.borderRadius = '6px';
+        }
+      }
+    });
+    await hold(300);
+  };
+  /** The diagram, close enough to read each node's deployment badge. */
+  const closeDiagram = async () => {
+    await tab('Diagram');
+    await page.getByRole('button', { name: 'Zoom In' }).click();
+    await hold(300);
+  };
   const newest = async version =>
     (await getJson(`${EXT}/history/namespaces/hackathon/architectures/${NAME}/deployments`)).deployments.find(d => d.version === version);
 
@@ -400,6 +443,7 @@ const srtTime = s => {
   await voice;
   await page.reload();
   await page.getByRole('tab', { name: 'Extensions' }).waitFor();
+  await collapseSidebar();
   await restoreOverlays();
   await fit();
   await beat('reload', () => page.getByRole('tab', { name: 'Extensions' }).hover());
@@ -445,35 +489,37 @@ const srtTime = s => {
   await beat('run', clear, async () => {
     await comment(byId.get('run').term);
     watching = await sh(`UNTIL=approval watch-deploy.sh ${NAME} ${ctx.valid}`, { wait: false });
-  });
-  await beat('step-validate', () => tab('Diagram'));
-  await narrate('step-render');
-  await narrate('step-pr');
+  }, record);
+  await beat('step-validate', record);
+  await beat('step-render', record);
+  await beat('step-pr', record);
   await watching();
-  await beat('waiting', () => hold(1000));
-  await beat('log-steps', clear, termBeat('log-steps', 'ext-log.sh 7'));
+  await beat('waiting', record);
+  await beat('log-steps', clear, closeDiagram, termBeat('log-steps', 'ext-log.sh 7'));
 
-  // ---- 8. The firm's change gate
+  // ---- 8. The firm's change gate (the pull request in Gitea, on the right)
   await chapter(7);
   const pr = await latestPr('open');
   if (!pr || (prBefore && pr.number <= prBefore.number)) throw new Error('no new pull request is open');
-  await beat('pr', clear, termBeat('pr', `curl -s "$GITEA/${NAME}/pulls?state=open" | jq -r '.[] | "#\\(.number)  \\(.title)\\n    \\(.head.ref) → \\(.base.ref)"'`));
-  await beat('files', termBeat('files', `curl -s $GITEA/${NAME}/pulls/${pr.number}/files | jq -r '.[] | "\\(.filename)  +\\(.additions) -\\(.deletions)"' | column -t`));
-  await beat('commit', clear, termBeat('commit', `curl -s $GITEA/${NAME}/pulls/${pr.number}/commits | jq -r '.[0].commit.message'`));
-  await narrate('gate');
-  await beat('approve', termBeat('approve', `approve-pr.sh ${NAME} ${pr.number}`));
+  const prPage = `http://localhost:3300/calm-services/${NAME}/pulls/${pr.number}`;
+  const [prCommit] = await getJson(`${GITEA}/${NAME}/pulls/${pr.number}/commits`);
+  await beat('pr', clear, () => visit(prPage), termBeat('pr', `curl -s "$GITEA/${NAME}/pulls?state=open" | jq -r '.[] | "#\\(.number)  \\(.title)\\n    \\(.head.ref) → \\(.base.ref)"'`));
+  await beat('files', () => visit(`${prPage}/files`), termBeat('files', `curl -s $GITEA/${NAME}/pulls/${pr.number}/files | jq -r '.[] | "\\(.filename)  +\\(.additions) -\\(.deletions)"' | column -t`), () => scroll(700));
+  await beat('commit', clear, () => visit(`http://localhost:3300/calm-services/${NAME}/commit/${prCommit.sha}`), termBeat('commit', `curl -s $GITEA/${NAME}/pulls/${pr.number}/commits | jq -r '.[0].commit.message'`));
+  await beat('gate', () => visit(prPage));
+  await beat('approve', termBeat('approve', `approve-pr.sh ${NAME} ${pr.number}`), () => visit(prPage));
 
-  // ---- 9. Flux applies it
+  // ---- 9. Flux applies it (back in CALM Hub: the record, then the diagram)
   await chapter(8);
   watching = undefined;
   await beat('flux', clear, async () => {
     watching = await sh(`watch-deploy.sh ${NAME} ${ctx.valid}`, { wait: false });
-  });
-  await narrate('policies');
+  }, () => backToHub(ctx.valid, 'Decorators'), record);
+  await beat('policies', record);
   await watching();
   log('deployment finished');
-  await narrate('rollouts');
-  await beat('overlay-after', () => hold(3000));
+  await beat('rollouts', record);
+  await beat('overlay-after', closeDiagram);
   await page.screenshot({ path: path.join(OUT, 'diagram-overlay.png') });
 
   // ---- 10. The results, back in CALM Hub
