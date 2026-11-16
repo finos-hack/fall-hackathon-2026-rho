@@ -98,6 +98,9 @@ export async function handle(deps: AppDeps, req: Request): Promise<Response> {
   if (claims.ns !== undefined && match.route.path.includes('{namespace}') && claims.ns !== decode(match.params.namespace)) {
     return { status: 403, body: { error: `scope was checked on ${claims.ns}` } };
   }
+  deps.logger.info(
+    `${req.method} ${pathname} ← CALM Hub route=${match.route.id} scope=${claims.scope ?? '-'} ns=${claims.ns ?? '-'} sub=${claims.sub} jti=${claims.jti}`,
+  );
 
   const params = Object.fromEntries(Object.entries(match.params).map(([k, v]) => [k, decode(v)]));
   try {
