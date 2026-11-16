@@ -125,7 +125,9 @@ export function nodeReply(view: PlatformView, node: string): BlocksReply {
   const { status: s, platform: p } = view;
   if (!s.managed || !p) return { hubApi: 0, blocks: [notManaged(s)] };
   const workloads = p.workloads.filter(w => w.node === node);
-  if (!workloads.length) {
+  // Deployments Git asks for that the cluster read did not return (deleted, or the cluster could not be read).
+  const absent = (view.service?.deployments ?? []).filter(d => d.node === node && !workloads.some(w => w.name === d.name));
+  if (!workloads.length && !absent.length) {
     const named = policiesNaming(p, node);
     return {
       hubApi: 0,
@@ -147,7 +149,7 @@ export function nodeReply(view: PlatformView, node: string): BlocksReply {
       ],
     };
   }
-  const names = new Set(workloads.map(w => w.name));
+  const names = new Set([...workloads, ...absent].map(w => w.name));
   const reasons = p.drift.filter(d => !d.workload || names.has(d.workload));
   const alert: Block = p.deploying
     ? deployingAlert(p.deploying)
@@ -155,7 +157,9 @@ export function nodeReply(view: PlatformView, node: string): BlocksReply {
       ? driftAlert(p, reasons)
       : p.problems.length
         ? { type: 'alert', tone: 'warning', text: p.problems[0] }
-        : { type: 'alert', tone: 'positive', text: `In sync: ${node} runs as Git asks.` };
+        : absent.length
+          ? { type: 'alert', tone: 'warning', text: `Git asks the platform to run ${node}, but the cluster does not` }
+          : { type: 'alert', tone: 'positive', text: `In sync: ${node} runs as Git asks.` };
   const mine = p.policies.filter(x => x.node === node);
   const policy = (x: { name: string; peers: string }) => `${x.name} (${x.peers})`;
   const records = hubRecords(view.history).filter(r => r.appliesTo?.includes(node));
@@ -178,6 +182,18 @@ export function nodeReply(view: PlatformView, node: string): BlocksReply {
           { label: 'Last change', value: p.flux.commit ? `commit ${short(p.flux.commit)}` : 'unknown' },
         ],
       })),
+      ...absent.map(d => {
+        const missing = p.missing.includes(d.name);
+        return {
+          type: 'keyValue' as const,
+          items: [
+            { label: 'Workload', value: d.name },
+            { label: 'Replicas ready', value: missing ? `0/${d.replicas} (not in the cluster)` : `unknown/${d.replicas} (cannot read the cluster)` },
+            { label: 'Image', value: missing ? 'none' : 'unknown' },
+            { label: 'Last change', value: p.flux.commit ? `commit ${short(p.flux.commit)}` : 'unknown' },
+          ],
+        };
+      }),
       {
         type: 'keyValue',
         items: [
