@@ -1,0 +1,156 @@
+<title>Platform Connector Status</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root {
+  --bg: #f5f6f8; --surface: #ffffff; --ink: #14181f; --muted: #5a6472; --line: #dde1e7; --accent: #2b4cc9;
+  --pending: #6b7480; --pending-bg: #e9ecf0;
+  --run: #8a5200; --run-bg: #ffe9c2;
+  --done: #11663a; --done-bg: #d3f1df;
+  --fail: #a3201c; --fail-bg: #fbdad7;
+  --block: #5b2f9e; --block-bg: #e8dcf7;
+  --font-display: "Bricolage Grotesque", "Helvetica Neue", Arial, sans-serif;
+  --font-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #0f1218; --surface: #171b23; --ink: #e8ebf0; --muted: #9aa4b2; --line: #2a303b; --accent: #8fa6ff;
+  --pending: #a3acb8; --pending-bg: #262c36;
+  --run: #ffc56b; --run-bg: #3d2a08;
+  --done: #7ddca1; --done-bg: #123b25;
+  --fail: #ff9a94; --fail-bg: #4a1714;
+  --block: #cdb0ff; --block-bg: #2e1d4d;
+  color-scheme: dark; } }
+:root[data-theme="dark"] {
+  --bg: #0f1218; --surface: #171b23; --ink: #e8ebf0; --muted: #9aa4b2; --line: #2a303b; --accent: #8fa6ff;
+  --pending: #a3acb8; --pending-bg: #262c36;
+  --run: #ffc56b; --run-bg: #3d2a08;
+  --done: #7ddca1; --done-bg: #123b25;
+  --fail: #ff9a94; --fail-bg: #4a1714;
+  --block: #cdb0ff; --block-bg: #2e1d4d;
+  color-scheme: dark; }
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--ink); font-family: var(--font-body); font-size: 15px; line-height: 1.5;
+  padding-block: 28px 56px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+main { max-width: 1040px; margin: 0 auto; display: flex; flex-direction: column; gap: 32px; }
+h1, h2 { font-family: var(--font-display); text-wrap: balance; margin: 0; letter-spacing: -0.01em; }
+h1 { font-size: clamp(26px, 5vw, 38px); line-height: 1.1; }
+h2 { font-size: 20px; }
+.sub { color: var(--muted); margin: 6px 0 0; max-width: 65ch; }
+.strip { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 18px 20px; display: flex; flex-direction: column; gap: 14px; }
+.strip-top { display: flex; flex-wrap: wrap; gap: 8px 24px; align-items: center; justify-content: space-between; }
+.meta { font-family: var(--font-mono); font-size: 12.5px; color: var(--muted); }
+.bar { height: 10px; background: var(--pending-bg); border-radius: 5px; overflow: hidden; }
+.bar > i { display: block; height: 100%; width: 0%; background: var(--accent); border-radius: 5px; }
+.pill { display: inline-block; font-size: 12px; font-weight: 600; padding: 2px 9px; border-radius: 999px; white-space: nowrap; letter-spacing: 0.02em; }
+.p-pending { color: var(--pending); background: var(--pending-bg); }
+.p-run { color: var(--run); background: var(--run-bg); }
+.p-done { color: var(--done); background: var(--done-bg); }
+.p-fail { color: var(--fail); background: var(--fail-bg); }
+.p-block { color: var(--block); background: var(--block-bg); }
+.wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; min-width: 640px; }
+th { text-align: left; font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); font-weight: 600; padding: 10px 14px; border-bottom: 1px solid var(--line); }
+td { padding: 11px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
+tr:last-child td { border-bottom: 0; }
+td.n { font-family: var(--font-mono); color: var(--muted); width: 36px; }
+td.name { font-weight: 500; min-width: 200px; }
+td.hash, td.mono { font-family: var(--font-mono); font-size: 12.5px; }
+td.step, td.ev { color: var(--muted); font-size: 14px; }
+.sec { display: flex; flex-direction: column; gap: 12px; }
+ul.list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+ul.list li { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 10px 14px; }
+ul.list b { font-family: var(--font-mono); font-size: 12.5px; margin-right: 8px; color: var(--accent); }
+@media (max-width: 560px) { td, th { padding: 9px 10px; } body { font-size: 14.5px; } }
+</style>
+<main>
+  <header>
+    <h1>Platform Connector: integrating with CALM Hub's standard deployments</h1>
+    <p class="sub">Reworking the CALM Hub extension in calm-hub-deploy-extension/ into a Platform Connector that writes CALM Hub's standard records, adds what only the platform knows, and gets a new narrated video. Each task is built by a subagent and reviewed before the next starts.</p>
+  </header>
+
+  <section class="strip" aria-label="Overall status">
+    <div class="strip-top">
+      <div id="overall"><span class="pill p-done">done, awaiting your review</span></div>
+      <div class="meta" id="count">7 of 7 tasks done</div>
+      <div class="meta" id="stamp">started Nov 16 12:20 &middot; updated Nov 16 15:38</div>
+    </div>
+    <div class="bar" role="progressbar" aria-valuemin="0" aria-valuemax="7" aria-valuenow="7"><i id="fill" style="width:100%"></i></div>
+    <div class="meta" id="now">Now: finished. Final review fixes landed and re-reviewed; video linked from the READMEs</div>
+  </section>
+
+  <section class="sec">
+    <h2>Tasks</h2>
+    <div class="wrap"><table>
+      <thead><tr><th>#</th><th>Task</th><th>State</th><th>Current step</th><th>Commit</th><th>Evidence</th></tr></thead>
+      <tbody>
+      <tr id="t0"><td class="n">0</td><td class="name">Spike on the live stack</td><td><span class="pill p-done">done</span></td><td class="step">-</td><td class="hash">-</td><td class="ev">Hub validates the 1.0 standards (good record 201, broken 400); panel and card routes load; Flux restores a scaled workload in ~4 s</td></tr>
+      <tr id="t1"><td class="n">1</td><td class="name">Rename to Platform Connector; standard deployment records; GitOps sub-standard</td><td><span class="pill p-done">done</span></td><td class="step">Review approved</td><td class="hash">8ac22b9</td><td class="ev">43 of 43 tests pass, tsc clean; the test Hub now refuses records that break the standard</td></tr>
+      <tr id="t2"><td class="n">2</td><td class="name">Controls gate as a control evaluation</td><td><span class="pill p-done">done</span></td><td class="step">Review approved</td><td class="hash">af1fdce</td><td class="ev">58 of 58 tests pass, tsc clean; refused version writes one control evaluation, no deployment record, no PR</td></tr>
+      <tr id="t3"><td class="n">3</td><td class="name">Platform views: drift, trimmed tab, node panel, home card</td><td><span class="pill p-done">done</span></td><td class="step">Review approved after one fix round</td><td class="hash">245b152..ef545ff</td><td class="ev">84 of 84 tests pass, tsc clean; live routes answer 200 in 0.1 to 0.2 s; panel now shows an unreadable or missing workload instead of &quot;not run&quot;</td></tr>
+      <tr id="t4"><td class="n">4</td><td class="name">Docs: PROFILE, README, FINDINGS</td><td><span class="pill p-done">done</span></td><td class="step">Review approved after one fix round</td><td class="hash">219f45b, 907b01f</td><td class="ev">README, PROFILE (Platform Connector profile v0) and FINDINGS (X1 to X11) rewritten; claims checked against the code by the reviewer</td></tr>
+      <tr id="t5"><td class="n">5</td><td class="name">Narration, pronunciation and recorder for the new journey</td><td><span class="pill p-done">done</span></td><td class="step">Review approved after one fix round</td><td class="hash">49a0a86..cb5f79b</td><td class="ev">9 chapters, 68 beats; 550 s of narration in your voice (9.2 min); display steps fail soft once a version is stored; 84 of 84 tests pass</td></tr>
+      <tr id="t6"><td class="n">6</td><td class="name">Record the video and hand it over</td><td><span class="pill p-done">done</span></td><td class="step">Video and captions sent</td><td class="hash">b0bfd0e</td><td class="ev">13:22 take, no warnings, audio full length; 1.0.11 deployed via PR #7, 1.0.12 refused at the gate</td></tr>
+      </tbody>
+    </table></div>
+  </section>
+
+  <section class="sec">
+    <h2>Deviations from the plan</h2>
+    <ul class="list" id="devs">
+      <li id="d1"><b>D1</b>The plan feared the route rule (same method and literal count) would block the new panel and card routes. The spike shows CALM Hub loads them next to the tab route, so the paths stay as planned. <span class="pill p-done">applied</span></li>
+      <li id="d2"><b>D2</b>Corrected. The spike said CALM Hub's UI has no Standards page; the namespace page has a Standards tab, which now lists the GitOps sub-standard. The video shows it there, and the README claim was fixed in the final wave. <span class="pill p-done">applied</span></li>
+      <li id="d4"><b>D4</b>The plan expected the home card to show a drift alert. CALM Hub's card draws only the stats block, so drift shows there as the Drifted count; the Services screen carries the detail. <span class="pill p-done">documented</span></li>
+      <li id="d5"><b>D5</b>The sub-standard&#x27;s $id assumed CALM Hub would publish it under its name. CALM Hub gave it a numeric id, so the $id is now location-neutral (urn:calm-platform-connector:standards:gitops-deployment:1.0). CALM Hub&#x27;s published copy still has the old $id until a new version is published. <span class="pill p-done">applied</span></li>
+      <li id="d6"><b>D6</b>The final review found image drift in the plan but not in the code (only replicas were compared). The fix wave added it, comparing each workload&#x27;s image with the image Git&#x27;s overlay asks for. <span class="pill p-done">applied</span></li>
+      <li id="d3"><b>D3</b>The forbidden connection carries no controls, so the control evaluation takes its requirement URL (permitted-connection) from a sibling connection's security control. <span class="pill p-done">applied</span></li>
+    </ul>
+  </section>
+
+  <section class="sec">
+    <h2>Acceptance</h2>
+    <div class="wrap"><table>
+      <thead><tr><th>#</th><th>Criterion</th><th>Result</th><th>Actual</th></tr></thead>
+      <tbody>
+      <tr id="a1"><td class="n">1</td><td class="name">npm test and tsc pass</td><td><span class="pill p-done">pass</span></td><td class="ev">98 of 98 tests, tsc clean after the fix wave (fixer&#x27;s run, re-reviewed)</td></tr>
+      <tr id="a2"><td class="n">2</td><td class="name">CALM Hub accepts the new records and rejects a broken one</td><td><span class="pill p-done">pass</span></td><td class="ev">1.0.11 record stored with data.kubernetes and data.gitops; broken copy refused with HTTP 400 in the take</td></tr>
+      <tr id="a3"><td class="n">3</td><td class="name">Built-in Deployments overlay and View all show connector records</td><td><span class="pill p-done">pass</span></td><td class="ev">Overlay showed in progress then completed for 1.0.11; View all opened the filtered Decorators tab</td></tr>
+      <tr id="a4"><td class="n">4</td><td class="name">Refused version: not-met in Control evaluations, no deployment record, no PR</td><td><span class="pill p-done">pass</span></td><td class="ev">1.0.12: overlay marks the connection and both nodes not met; badge names the security control; newest PR still #7</td></tr>
+      <tr id="a5"><td class="n">5</td><td class="name">Detail panel and home card render</td><td><span class="pill p-done">pass</span></td><td class="ev">Seen in the take: Platform panel in the node sidebar (in sync, then drift 0/1), Platform Connector card on the home page</td></tr>
+      <tr id="a6"><td class="n">6</td><td class="name">Scaling stream-app to 0 shows drift in panel, tab, card and MCP status; Flux restores it</td><td><span class="pill p-done">pass</span></td><td class="ev">Panel and tab: &quot;Drift: stream-app runs 0 replicas; Git asks for 1&quot;; card Drifted 1; MCP drift listed; reconcile.sh back to 1/1, panel in sync</td></tr>
+      <tr id="a7"><td class="n">7</td><td class="name">MCP tools listed as ext_platform-connector_*</td><td><span class="pill p-done">pass</span></td><td class="ev">tools/list: ext_platform-connector_deploy, _history, _status</td></tr>
+      <tr id="a8"><td class="n">8</td><td class="name">Video: narration matches the screen in every chapter; audio full length; .srt matches</td><td><span class="pill p-done">pass</span></td><td class="ev">Frames sampled in all 9 chapters match their captions; audio 802.09 s against video 802.08 s; .srt from the same timings</td></tr>
+      <tr id="a9"><td class="n">9</td><td class="name">No files changed under calm-backstage/; commits signed off</td><td><span class="pill p-done">pass</span></td><td class="ev">git diff --stat e02b8d9..HEAD -- calm-backstage/ is empty; all commits carry Signed-off-by: James Gough</td></tr>
+      </tbody>
+    </table></div>
+  </section>
+
+  <section class="sec">
+    <h2>Open items for James</h2>
+    <ul class="list">
+      <li>Run the force-push to PR #42 (command in the chat). It publishes 15 new commits and removes the old mp4 from history. After it, I update the PR description.</li>
+      <li>Four parked findings, each with a ruling, are in the chat summary; say if any should be fixed before merge.</li>
+    </ul>
+  </section>
+
+  <section class="sec" id="bigger">
+    <h2>Overall plan progress</h2>
+    <div class="strip">
+      <div class="strip-top">
+        <div class="meta" id="plan-count">3 of 4 phases done</div>
+        <div class="meta" id="plan-name">CALM Hub extension for the FINOS hackathon (PR #42)</div>
+      </div>
+      <div class="bar" role="progressbar" aria-valuemin="0" aria-valuemax="4" aria-valuenow="3"><i id="plan-fill" style="width:75%"></i></div>
+      <div class="meta" id="plan-next">Next up: publish to PR #42 (needs your force-push), then update its description</div>
+    </div>
+    <div class="wrap"><table>
+      <thead><tr><th>Phase</th><th>Name</th><th>State</th><th>Outcome</th><th>Report</th></tr></thead>
+      <tbody>
+      <tr id="pl0"><td class="n">0</td><td class="name">Deployment extension build</td><td><span class="pill p-done">done</span></td><td class="ev">Deployed from CALM Hub through Gitea and Flux; 32 tests passing</td><td class="mono">PR #42</td></tr>
+      <tr id="pl1"><td class="n">1</td><td class="name">Narrated demo in the presenter's voice</td><td><span class="pill p-done">done</span></td><td class="ev">12:35 take, ElevenLabs voice, captions</td><td class="mono">docs/demo/README.md</td></tr>
+      <tr id="pl2"><td class="n">2</td><td class="name">Platform Connector rework and new video</td><td><span class="pill p-done">done</span></td><td class="ev">Standard records validated by CALM Hub, gate as control evaluation, drift and panels; 13:22 video; 98 tests</td><td class="mono">calm-hub-deploy-extension/README.md</td></tr>
+      <tr id="pl3"><td class="n">3</td><td class="name">Publish: PR #42 updated, video on YouTube</td><td><span class="pill p-run">in progress</span></td><td class="ev">Video on YouTube and linked (youtu.be/0r6zxzfNzJE); PR waits for the force-push</td><td class="mono">-</td></tr>
+      </tbody>
+    </table></div>
+  </section>
+</main>
