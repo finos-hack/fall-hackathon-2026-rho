@@ -577,6 +577,11 @@ describe('with a workspace', () => {
 
     describe('when the store fails', () => {
       const published = () => path.join(workspace, 'output', 'billing-api');
+      const exists = (p: string) =>
+        fs.stat(p).then(
+          () => true,
+          () => false,
+        );
       // Prepare, publish (a copy of the prepared file), and another document in the Hub as the prepared version.
       // With conflict false, the Hub is left empty.
       // What calm:publish:local writes: the catalog-info.yaml naming the architecture version.
@@ -732,7 +737,7 @@ describe('with a workspace', () => {
         const callsBefore = hub.calls.length;
         const output = path.join(workspace, 'output');
         const sub = path.join(published(), 'sub');
-        const readFile = jest.spyOn(fs, 'readFile');
+        const readFileSpy = jest.spyOn(fs, 'readFile');
         try {
           for (const dir of [output, sub, path.join(workspace, 'elsewhere')]) {
             // Each holds the published catalog-info.yaml.
@@ -741,20 +746,20 @@ describe('with a workspace', () => {
               path.join(dir, 'catalog-info.yaml'),
               publishedInfo(),
             );
-            readFile.mockClear();
+            readFileSpy.mockClear();
             await expect(
               register(hub, store({ publishedDir: dir })),
             ).rejects.toThrow(
               /publishedDir must be the folder calm:publish:local wrote for billing-api .*Nothing was stored/,
             );
-            expect(readFile).not.toHaveBeenCalledWith(
+            expect(readFileSpy).not.toHaveBeenCalledWith(
               path.join(dir, 'catalog-info.yaml'),
               expect.anything(),
             );
             expect(await exists(dir)).toBe(true);
           }
         } finally {
-          readFile.mockRestore();
+          readFileSpy.mockRestore();
         }
         expect(hub.calls.length).toBe(callsBefore);
         expect(await exists(published())).toBe(true);
@@ -778,12 +783,6 @@ describe('with a workspace', () => {
         expect(broken.message).not.toContain('secret');
         expect(hub.posts()).toEqual([]);
       });
-
-      const exists = (p: string) =>
-        fs.stat(p).then(
-          () => true,
-          () => false,
-        );
 
       it('removes the folder this run published, and says so', async () => {
         const hub = fakeHub(base);
