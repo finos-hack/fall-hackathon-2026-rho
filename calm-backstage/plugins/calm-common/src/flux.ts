@@ -68,9 +68,9 @@ const FLUX_PRUNE_ANNOTATION = 'kustomize.toolkit.fluxcd.io/prune';
  * the service's repository cannot touch other namespaces or cluster-scoped objects.
  *
  * The service account cannot create a Namespace, so the Namespace is applied here and not from Git (its labels,
- * with Pod Security `baseline`, come from `namespaceManifest`). It is marked prune-disabled: a service deployed before this change has it in its
- * Kustomization's inventory, and the push that drops it from the overlay would otherwise make Flux delete the
- * namespace and everything in it.
+ * with Pod Security `baseline`, come from `namespaceManifest`). It is marked prune-disabled: a service deployed
+ * before this change has it in its Kustomization's inventory, and the push that drops it from the overlay would
+ * otherwise make Flux delete the namespace and everything in it.
  *
  * Flux prunes that stale inventory entry as the service account too: it reads the Namespace, finds the annotation
  * and keeps it, without writing to it. A RoleBinding cannot grant access to a cluster-scoped object, so a ClusterRole
