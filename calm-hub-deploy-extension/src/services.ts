@@ -1,3 +1,4 @@
+import { ReadTimeout } from './errors';
 import { readService } from './resolve';
 import { readPlatform, type PlatformDeps, type PlatformView } from './platform';
 import { oneLine } from './deploy/kube';
@@ -9,6 +10,7 @@ export const SERVICES_TTL_MS = 10_000;
 export interface ServiceRow {
   /** The service repository's name. */
   name: string;
+  /** Empty when the repository could not be read (its namespace is then unknown). */
   namespace: string;
   architecture: string;
   view?: PlatformView;
@@ -44,7 +46,10 @@ async function readAll(deps: PlatformDeps): Promise<ServiceRow[]> {
         service = await readService(deps.gitea, deps.settings, repo);
       } catch (e) {
         deps.logger.warn(`Could not read ${org}/${repo}: ${oneLine(e)}`);
-        return undefined;
+        // A timeout is a problem shown on the row, not a service that silently disappears. Its namespace is unknown,
+        // so the namespace filter cannot apply to it.
+        if (!(e instanceof ReadTimeout)) return undefined;
+        return { name: repo, namespace: '', architecture: repo, error: `Cannot read ${org}/${repo}: ${e.message}` };
       }
       const namespace = service?.architectureNamespace;
       const architecture = service?.architecture;

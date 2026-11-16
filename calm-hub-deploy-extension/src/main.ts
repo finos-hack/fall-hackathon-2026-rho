@@ -1,6 +1,7 @@
 import { runKubectl } from '@internal/backstage-plugin-calm-node';
 import type { AppDeps } from './app';
 import { readSettings } from './config';
+import { READ_TIMEOUT_MS, timedGets } from './errors';
 import { Gitea } from './gitea';
 import { HubClient } from './hub';
 import { createVerifier } from './identity';
@@ -36,7 +37,8 @@ async function main() {
     verify: createVerifier({
       issuer: settings.hubIssuer,
       audience: settings.extensionId,
-      fetchJwks: async () => (await fetch(`${settings.hubUrl}/api/calm/auth/jwks`)).json() as any,
+      // Read when a key id is new (first call, key rotation), within the same 4 s as every other CALM Hub read.
+      fetchJwks: async () => (await timedGets('CALM Hub', undefined, READ_TIMEOUT_MS)(`${settings.hubUrl}/api/calm/auth/jwks`)).json(),
     }),
   };
   // Only the namespaces in DEPLOY_NAMESPACES (default hackathon) are scanned.

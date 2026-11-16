@@ -272,7 +272,9 @@ against an in-memory Hub, a Gitea backed by real bare git repositories, and a ku
 - History reads the records of an architecture's newest 10 versions (and, for drift, the running version's); older
   attempts are in CALM Hub's Decorators tab.
 - Each CALM Hub or Gitea read has its own 4 s limit. A route that reads in sequence (the architecture, then the
-  service, then the records) can still take longer than CALM Hub's 10 s when every read is slow.
+  service, then the records) can still take longer than CALM Hub's 10 s when every read is slow. A service repository
+  that times out stays on the Services screen with the problem (its namespace unknown). When CALM Hub's signing keys
+  cannot be read in time the caller cannot be verified, and the route answers 503.
 - The sub-standard for `data.gitops` is not enforced by CALM Hub, which validates only the standards it bundles.
 - Every record has a double target (the version by name, for Backstage, and by numeric id, for CALM Hub's UI). It is
   known and left; see FINDINGS.md.

@@ -227,6 +227,40 @@ describe('reads that time out', () => {
     expect(s.problems).toEqual([expect.stringMatching(/^Cannot read CALM Hub's deployment records: CALM Hub did not answer GET/)]);
   });
 
+  it('keeps a service whose repository times out on the card and the screen, as a problem', async () => {
+    const w = make();
+    slowGitea(w, /catalog-info/);
+    const card: any = (await call(w, 'GET', '/card')).body;
+    expect(card.blocks[0].items.map((i: any) => i.value)).toEqual(['1', '0', '0']);
+    const screen: any = (await call(w, 'GET', '/screen')).body;
+    expect(screen.blocks[1].rows).toEqual([
+      ['events-stream', 'unknown', 'unknown', expect.stringMatching(/^Cannot read calm-services\/events-stream: Gitea did not answer GET/)],
+    ]);
+  });
+
+  it('gives the service repository’s own problem as the reason when other reads time out too', async () => {
+    const w = make();
+    slowGitea(w, /catalog-info/);
+    // The versions read times out first, so its problem comes first.
+    w.deps.hub = new HubClient('http://hub.test', hanging(w.hub.fetch, /\/versions$/), { readTimeoutMs: 1 });
+    const s: any = (await call(w, 'GET', routes[2])).body;
+    expect(s.problems[0]).toMatch(/^Cannot read the versions in CALM Hub/);
+    expect(s.reason).toMatch(/^Cannot read the service repository: Gitea did not answer GET/);
+    expect(s.problems).toHaveLength(2);
+    expect(s.problems).toContain(s.reason);
+  });
+
+  it('answers 503, not a problem, when CALM Hub’s keys cannot be read in time to verify the caller', async () => {
+    const w = make();
+    const { ReadTimeout } = await import('./errors');
+    w.deps.verify = async () => {
+      throw new ReadTimeout('CALM Hub', 'http://hub.test/api/calm/auth/jwks', 4000);
+    };
+    const r: any = await call(w, 'GET', routes[2]);
+    expect(r.status).toBe(503);
+    expect(r.body.error).toBe('cannot verify the request: CALM Hub did not answer GET http://hub.test/api/calm/auth/jwks within 4 s');
+  });
+
   it('shows the overlay read timing out as a problem, not as image drift', async () => {
     const w = make();
     slowGitea(w, /k8s-overlay/);

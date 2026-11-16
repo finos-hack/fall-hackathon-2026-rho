@@ -267,12 +267,13 @@ export async function readPlatform(
       problems.push(`Cannot read ${what}: ${e.message}`);
       return fallback;
     };
-  let serviceUnread = false;
+  /** The problem when the service repository could not be read in time: whether it is managed is then unknown. */
+  let serviceUnread: string | undefined;
   const [service, versions] = await Promise.all([
     opts.service === undefined
       ? readService(deps.gitea, deps.settings, architecture).catch(e => {
           const none = timedOut('the service repository', undefined)(e);
-          serviceUnread = true;
+          serviceUnread = problems[problems.length - 1];
           return none;
         })
       : Promise.resolve(opts.service ?? undefined),
@@ -303,7 +304,7 @@ export async function readPlatform(
   ]);
   if (!managed || !service) {
     // Whether the service is managed is unknown: say why rather than "no repository".
-    const shown = serviceUnread ? { ...status, reason: problems[0] } : status;
+    const shown = serviceUnread ? { ...status, reason: serviceUnread } : status;
     return { status: shown, history, ...(service ? { service } : {}), ...(problems.length ? { problems } : {}) };
   }
 
