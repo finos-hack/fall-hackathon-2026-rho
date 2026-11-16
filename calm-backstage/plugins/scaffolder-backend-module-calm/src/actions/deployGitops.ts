@@ -180,199 +180,62 @@ export function createCalmDeployGitopsAction(options: {
       },
     },
     async handler(outer) {
-      await withServiceLock(
-        outer,
-        {
-          dir: publishedFolder(
-            options.localDir,
-            outer.input.dir,
-            outer.isDryRun
-              ? { dryRunWorkspace: outer.workspacePath }
-              : undefined,
-          ),
-        },
-        async ctx => {
-          const settings = await requireKubernetesDeploy(options.settings);
-          const gitops = options.gitops;
-          if (!gitops) {
-            throw new Error('calm.gitops is not configured');
-          }
-          const { name, image } = ctx.input;
-          const namespace = deployNamespace(settings.namespacePrefix, name);
-          const dir = publishedFolder(
-            options.localDir,
-            ctx.input.dir,
-            ctx.isDryRun ? { dryRunWorkspace: ctx.workspacePath } : undefined,
-          );
-          await requireBase(dir);
-          if (ctx.isDryRun) {
-            const catalogInfo = path.join(dir, CATALOG_INFO_FILE);
-            const info = await fs
-              .readFile(catalogInfo, 'utf-8')
-              .catch(() => undefined);
-            // Only the dry-run folder of the workspace is written; a folder in localDir is left as it is.
-            if (isDryRunFolder(dir, ctx.workspacePath)) {
-              const overlayDir = await writeOverlay(
-                dir,
-                { name, namespace, image },
-                GITOPS_OVERLAY_HEADER,
-                { withNamespace: false },
-              );
-              if (info !== undefined) {
-                await fs.writeFile(
-                  catalogInfo,
-                  withGitopsAnnotations(info, name),
-                );
-              }
-              ctx.logger.info(`Wrote the overlay ${overlayDir}`);
-            } else {
-              ctx.logger.info(
-                `Dry run: would write the overlay ${path.join(
-                  dir,
-                  OVERLAY_DIR,
-                )}`,
-              );
-              if (info !== undefined) {
-                ctx.logger.info(
-                  `Dry run: would add the gitops annotation and tag to ${catalogInfo}`,
-                );
-              }
-            }
-            const { deployed, objects } = await planFromBase(dir);
-            const repo = serviceRepository(gitops, name);
-            const fluxName = fluxObjectName(name);
-            ctx.logger.info(
-              `Dry run: would commit the overlay for ${image} and push it to ${repo.webUrl} on ${gitops.branch}`,
-            );
-            ctx.logger.info(
-              `Dry run: would apply the Flux objects ${FLUX_NAMESPACE}/${fluxName} and ${
-                objects.length
-              } objects into ${namespace}: ${objects.join(', ')}`,
-            );
-            const now = new Date().toISOString();
-            ctx.output('namespace', namespace);
-            ctx.output('deployments', deployed.deployments);
-            ctx.output('nodes', deployed.nodes);
-            ctx.output('networkPolicies', deployed.networkPolicies);
-            ctx.output('services', deployed.services);
-            ctx.output('kubectl', kubectlCommand(settings, ['-n', namespace]));
-            ctx.output('cluster', settings.context);
-            ctx.output('startTime', now);
-            ctx.output('endTime', now);
-            ctx.output('repoUrl', repo.webUrl);
-            ctx.output('commit', 'dry-run');
-            ctx.output('kustomization', `${FLUX_NAMESPACE}/${fluxName}`);
-            return;
-          }
-          const kubectl: Kubectl = options.kubectl
-            ? options.kubectl(settings, dir)
-            : clusterKubectl(settings, {
-                cwd: dir,
-                logger: ctx.logger,
-                signal: ctx.signal,
-              });
-          await checkNamespace(kubectl, namespace, name);
-
-          // Checked before the try: on the wrong branch nothing is deployed, so no failed deployment is recorded.
-          const git = { logger: ctx.logger, signal: ctx.signal };
-          const branch = await gitCurrentBranch(dir, git);
-          if (branch !== gitops.branch) {
-            throw new Error(
-              `${dir} is on the branch ${branch}, not ${gitops.branch}: Flux deploys ${gitops.branch}`,
-            );
-          }
-
-          const startTime = new Date().toISOString();
-          const fluxName = fluxObjectName(name);
-          await writeOverlay(
-            dir,
-            { name, namespace, image },
-            GITOPS_OVERLAY_HEADER,
-            { withNamespace: false },
-          );
-          // From now on the service is deployed from Git: the catalog and the upgrade Template find it by this.
+      const run = async (ctx: typeof outer) => {
+        const settings = await requireKubernetesDeploy(options.settings);
+        const gitops = options.gitops;
+        if (!gitops) {
+          throw new Error('calm.gitops is not configured');
+        }
+        const { name, image } = ctx.input;
+        const namespace = deployNamespace(settings.namespacePrefix, name);
+        const dir = publishedFolder(
+          options.localDir,
+          ctx.input.dir,
+          ctx.isDryRun ? { dryRunWorkspace: ctx.workspacePath } : undefined,
+        );
+        await requireBase(dir);
+        if (ctx.isDryRun) {
           const catalogInfo = path.join(dir, CATALOG_INFO_FILE);
           const info = await fs
             .readFile(catalogInfo, 'utf-8')
             .catch(() => undefined);
-          if (info !== undefined) {
-            await fs.writeFile(catalogInfo, withGitopsAnnotations(info, name));
-          }
-          const made = await gitCommitAll(dir, `Deploy ${image}`, git);
-          const commit = made ?? (await gitHead(dir, git));
-          ctx.logger.info(
-            made
-              ? `Committed the overlay for ${image}: ${commit}`
-              : `The overlay already deploys ${image}; deploying ${commit}`,
-          );
-          // Before the push: the pushed overlay no longer holds the Namespace, and for a service deployed before that
-          // change, Flux would prune it unless it is already marked prune-disabled.
-          await applyObjects(kubectl, fluxTenantObjects({ name, namespace }), {
-            serverSide: true,
-          });
-          const repo = serviceRepository(gitops, name);
-          await gitPush(dir, repo.pushUrl, gitops.branch, gitops.auth, git);
-
-          // The deployment starts once the commit is in Git, where Flux reads it. A failure before this point (the
-          // overlay, the commit, the Namespace and Flux service account, a rejected push) deployed nothing of the
-          // service, so it is thrown without recording a failed deployment.
-          let deployed: Deployed;
-          try {
-            await applyObjects(
-              kubectl,
-              fluxObjects({
-                name,
-                namespace,
-                repoUrl: repo.clusterUrl,
-                branch: gitops.branch,
-              }),
+          // Only the dry-run folder of the workspace is written; a folder in localDir is left as it is.
+          if (isDryRunFolder(dir, ctx.workspacePath)) {
+            const overlayDir = await writeOverlay(
+              dir,
+              { name, namespace, image },
+              GITOPS_OVERLAY_HEADER,
+              { withNamespace: false },
             );
-            await kubectl([
-              '-n',
-              FLUX_NAMESPACE,
-              'annotate',
-              '--overwrite',
-              `gitrepository/${fluxName}`,
-              `kustomization/${fluxName}`,
-              `${FLUX_RECONCILE_ANNOTATION}=${new Date().toISOString()}`,
-            ]);
-            ctx.logger.info(
-              `Waiting for Flux to apply ${commit.slice(
-                0,
-                12,
-              )} (${FLUX_NAMESPACE}/${fluxName})`,
-            );
-            await waitForKustomization(kubectl, name, commit, {
-              ...options.wait,
-              onStatus: s => ctx.logger.info(`Flux: ${s.message}`),
-            });
-
-            deployed = await listAndWaitForRollouts(kubectl, namespace);
-          } catch (error) {
-            if (ctx.input.record) {
-              await recordFailedDeployment({
-                hub: options.hub,
-                appBaseUrl: options.appBaseUrl,
-                record: ctx.input.record,
-                baseDir: path.join(dir, BASE_DIR),
-                workspacePath: ctx.workspacePath,
-                taskId: ctx.task?.id,
-                name,
-                cluster: settings.context,
-                namespace,
-                startTime,
-                error,
-                logger: ctx.logger,
-                signal: ctx.signal,
-              });
+            if (info !== undefined) {
+              await fs.writeFile(
+                catalogInfo,
+                withGitopsAnnotations(info, name),
+              );
             }
-            throw error;
+            ctx.logger.info(`Wrote the overlay ${overlayDir}`);
+          } else {
+            ctx.logger.info(
+              `Dry run: would write the overlay ${path.join(dir, OVERLAY_DIR)}`,
+            );
+            if (info !== undefined) {
+              ctx.logger.info(
+                `Dry run: would add the gitops annotation and tag to ${catalogInfo}`,
+              );
+            }
           }
+          const { deployed, objects } = await planFromBase(dir);
+          const repo = serviceRepository(gitops, name);
+          const fluxName = fluxObjectName(name);
           ctx.logger.info(
-            `Flux deployed ${name} at ${commit.slice(0, 12)} to ${
-              settings.context
-            } / ${namespace}: ${deployed.deployments.join(', ')}`,
+            `Dry run: would commit the overlay for ${image} and push it to ${repo.webUrl} on ${gitops.branch}`,
           );
+          ctx.logger.info(
+            `Dry run: would apply the Flux objects ${FLUX_NAMESPACE}/${fluxName} and ${
+              objects.length
+            } objects into ${namespace}: ${objects.join(', ')}`,
+          );
+          const now = new Date().toISOString();
           ctx.output('namespace', namespace);
           ctx.output('deployments', deployed.deployments);
           ctx.output('nodes', deployed.nodes);
@@ -380,12 +243,144 @@ export function createCalmDeployGitopsAction(options: {
           ctx.output('services', deployed.services);
           ctx.output('kubectl', kubectlCommand(settings, ['-n', namespace]));
           ctx.output('cluster', settings.context);
-          ctx.output('startTime', startTime);
-          ctx.output('endTime', new Date().toISOString());
+          ctx.output('startTime', now);
+          ctx.output('endTime', now);
           ctx.output('repoUrl', repo.webUrl);
-          ctx.output('commit', commit);
+          ctx.output('commit', 'dry-run');
           ctx.output('kustomization', `${FLUX_NAMESPACE}/${fluxName}`);
-        },
+          return;
+        }
+        const kubectl: Kubectl = options.kubectl
+          ? options.kubectl(settings, dir)
+          : clusterKubectl(settings, {
+              cwd: dir,
+              logger: ctx.logger,
+              signal: ctx.signal,
+            });
+        await checkNamespace(kubectl, namespace, name);
+
+        // Checked before the try: on the wrong branch nothing is deployed, so no failed deployment is recorded.
+        const git = { logger: ctx.logger, signal: ctx.signal };
+        const branch = await gitCurrentBranch(dir, git);
+        if (branch !== gitops.branch) {
+          throw new Error(
+            `${dir} is on the branch ${branch}, not ${gitops.branch}: Flux deploys ${gitops.branch}`,
+          );
+        }
+
+        const startTime = new Date().toISOString();
+        const fluxName = fluxObjectName(name);
+        await writeOverlay(
+          dir,
+          { name, namespace, image },
+          GITOPS_OVERLAY_HEADER,
+          { withNamespace: false },
+        );
+        // From now on the service is deployed from Git: the catalog and the upgrade Template find it by this.
+        const catalogInfo = path.join(dir, CATALOG_INFO_FILE);
+        const info = await fs
+          .readFile(catalogInfo, 'utf-8')
+          .catch(() => undefined);
+        if (info !== undefined) {
+          await fs.writeFile(catalogInfo, withGitopsAnnotations(info, name));
+        }
+        const made = await gitCommitAll(dir, `Deploy ${image}`, git);
+        const commit = made ?? (await gitHead(dir, git));
+        ctx.logger.info(
+          made
+            ? `Committed the overlay for ${image}: ${commit}`
+            : `The overlay already deploys ${image}; deploying ${commit}`,
+        );
+        // Before the push: the pushed overlay no longer holds the Namespace, and for a service deployed before that
+        // change, Flux would prune it unless it is already marked prune-disabled.
+        await applyObjects(kubectl, fluxTenantObjects({ name, namespace }), {
+          serverSide: true,
+        });
+        const repo = serviceRepository(gitops, name);
+        await gitPush(dir, repo.pushUrl, gitops.branch, gitops.auth, git);
+
+        // The deployment starts once the commit is in Git, where Flux reads it. A failure before this point (the
+        // overlay, the commit, the Namespace and Flux service account, a rejected push) deployed nothing of the
+        // service, so it is thrown without recording a failed deployment.
+        let deployed: Deployed;
+        try {
+          await applyObjects(
+            kubectl,
+            fluxObjects({
+              name,
+              namespace,
+              repoUrl: repo.clusterUrl,
+              branch: gitops.branch,
+            }),
+          );
+          await kubectl([
+            '-n',
+            FLUX_NAMESPACE,
+            'annotate',
+            '--overwrite',
+            `gitrepository/${fluxName}`,
+            `kustomization/${fluxName}`,
+            `${FLUX_RECONCILE_ANNOTATION}=${new Date().toISOString()}`,
+          ]);
+          ctx.logger.info(
+            `Waiting for Flux to apply ${commit.slice(
+              0,
+              12,
+            )} (${FLUX_NAMESPACE}/${fluxName})`,
+          );
+          await waitForKustomization(kubectl, name, commit, {
+            ...options.wait,
+            onStatus: s => ctx.logger.info(`Flux: ${s.message}`),
+          });
+
+          deployed = await listAndWaitForRollouts(kubectl, namespace);
+        } catch (error) {
+          if (ctx.input.record) {
+            await recordFailedDeployment({
+              hub: options.hub,
+              appBaseUrl: options.appBaseUrl,
+              record: ctx.input.record,
+              baseDir: path.join(dir, BASE_DIR),
+              workspacePath: ctx.workspacePath,
+              taskId: ctx.task?.id,
+              name,
+              cluster: settings.context,
+              namespace,
+              startTime,
+              error,
+              logger: ctx.logger,
+              signal: ctx.signal,
+            });
+          }
+          throw error;
+        }
+        ctx.logger.info(
+          `Flux deployed ${name} at ${commit.slice(0, 12)} to ${
+            settings.context
+          } / ${namespace}: ${deployed.deployments.join(', ')}`,
+        );
+        ctx.output('namespace', namespace);
+        ctx.output('deployments', deployed.deployments);
+        ctx.output('nodes', deployed.nodes);
+        ctx.output('networkPolicies', deployed.networkPolicies);
+        ctx.output('services', deployed.services);
+        ctx.output('kubectl', kubectlCommand(settings, ['-n', namespace]));
+        ctx.output('cluster', settings.context);
+        ctx.output('startTime', startTime);
+        ctx.output('endTime', new Date().toISOString());
+        ctx.output('repoUrl', repo.webUrl);
+        ctx.output('commit', commit);
+        ctx.output('kustomization', `${FLUX_NAMESPACE}/${fluxName}`);
+      };
+      // A dry run takes no lock: its folder is unique to the dry run's workspace, or a localDir folder that is only read.
+      if (outer.isDryRun) {
+        await run(outer);
+        return;
+      }
+      await withServiceLock(
+        outer,
+        { dir: publishedFolder(options.localDir, outer.input.dir) },
+        run,
       );
     },
   });
