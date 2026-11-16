@@ -1,4 +1,4 @@
-# Demo: plugging a deployment extension into CALM Hub
+# Demo: plugging a Platform Connector into CALM Hub
 
 A narrated walkthrough (12:35, 1920×1080, one take, in the presenter's cloned voice) with a terminal on the local cluster on the left and CALM Hub on
 the right. It starts with CALM Hub as it ships, with no extensions, and shows how an integration plugs in: the
@@ -15,18 +15,18 @@ pattern forbids.
 | | Chapter | What it shows |
 |---|---|---|
 | 0:00 | CALM Hub on its own | No Extensions tab. The two built-in extensions are views for decorators, with no backend. Decorators already let tools record facts, but CALM Hub can't start anything. |
-| 1:02 | An extension is a manifest and a backend | The manifest's routes (method, path, scope), contributions (the Deployment tab and the action) and commands (schemas, which become CLI commands and MCP tools). |
+| 1:02 | An extension is a manifest and a backend | The manifest's routes (method, path, scope), contributions (the Deployment tab, the action, the node detail panel, the landing card and the Services screen) and commands (schemas, which become CLI commands and MCP tools). |
 | 2:27 | Plugging it in | The CALM Hub configuration (manifest folder, backend URL, signing key). Starts the backend with manual approval and restarts CALM Hub. Covers the signed assertion on every call, the registry, the JWKS and the MCP tools. |
 | 4:01 | CALM Hub hooks in | The Extensions tab appears. The backend's log shows the call CALM Hub made, verified. The tab is blocks that CALM Hub draws. |
 | 4:55 | Where the service runs | The cluster's Deployments, and the status command through CALM Hub's proxy. |
 | 5:22 | An architect changes a pattern decision | A new version with the broker's storage changed. The tab warns that the cluster runs the old one. |
-| 6:02 | Asking CALM Hub to deploy | The confirm dialog: scope check, audit and signing. The deployment record on the Decorators tab goes pending, then validate, render and pull request, then it waits for approval. Ends with the diagram marked in progress and the trail in the backend's log. |
+| 6:02 | Asking CALM Hub to deploy | The confirm dialog: scope check, audit and signing. The version is validated first; once it passes, the deployment record on the Decorators tab goes pending, then render and pull request, then it waits for approval. Ends with the diagram marked in progress and the trail in the backend's log. |
 | 7:26 | The firm's change gate | The pull request in Gitea, the files it changes, and the commit message with who asked and CALM Hub's audit id. The approver merges it. |
 | 8:38 | Flux applies it | The record says Flux is applying the merge commit, the PostgreSQL Deployment and its network policies come back, and the record and the overlay end completed. |
-| 9:19 | The results, back in CALM Hub | The decorator's fields, and the tab saying "deployed" with the history. CALM Hub's audit line has the same id. The integration runs both ways. |
-| 10:25 | The controls gate | A forbidden connection fails validation: no pull request is opened and the cluster is unchanged. |
+| 9:19 | The results, back in CALM Hub | The decorator's fields (the standard's, `data.kubernetes` and `data.gitops`), and the tab saying the version is the one running. CALM Hub's audit line has the same id. The integration runs both ways. |
+| 10:25 | The controls gate | A forbidden connection fails validation: no deployment record or pull request, the cluster is unchanged, and CALM Hub records a control evaluation. |
 | 11:30 | The same extension, for an agent | The history command as an MCP tool, with the same checks and audit. |
-| 11:58 | The integration pattern | Recap. A firm with another deployment platform implements the same profile. |
+| 11:58 | The integration pattern | Recap. A firm with another delivery platform implements the same profile. |
 
 ![CALM Hub before the extension: no Extensions tab](hub-before.png)
 
