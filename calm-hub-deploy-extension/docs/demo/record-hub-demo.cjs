@@ -4,7 +4,8 @@
 // approval of the pull request, Flux, and the results written back to CALM Hub. Then a version the pattern forbids
 // stops at the controls gate, and an agent calls the same extension over MCP.
 //
-// The voiceover is narration.cjs, spoken with macOS `say`; each beat is also the caption. Every step is held until
+// The voiceover is narration.cjs, spoken by voice.cjs (macOS `say`, or ElevenLabs with DEMO_TTS=elevenlabs); each beat
+// is also the caption. Every step is held until
 // its beat has been spoken, and the pacing is 3x the first take's (typing, holds and waits).
 //
 // Patterned on calm-backstage's docs/demo/record-cluster-demo.cjs (ttyd + two Playwright pages + ffmpeg).
@@ -23,10 +24,10 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const crypto = require('crypto');
 const { spawn, execFileSync } = require('child_process');
 const { createRequire } = require('module');
 const narration = require('./narration.cjs');
+const { speak } = require('./voice.cjs');
 
 const DIR = path.resolve(__dirname, '../..');
 const BACKSTAGE = process.env.CALM_BACKSTAGE_DIR || path.resolve(DIR, '../calm-backstage');
@@ -40,8 +41,6 @@ const EXT = `${HUB}/api/calm/extensions/gitops-deploy/api`;
 const GITEA = 'http://localhost:3300/api/v1/repos/calm-services';
 const NAME = 'events-stream';
 const TTYD_PORT = 7682;
-const VOICE = process.env.DEMO_VOICE || 'Daniel';
-const RATE = process.env.DEMO_RATE || '170';
 const AUDIO_DIR = path.join(DIR, '.work/demo-audio');
 // Terminal on the left, CALM Hub on the right: 1920×1080 together. CALM Hub renders at 1.15× the size it is
 // recorded at, with its sidebar collapsed, so the diagram and the tab have room.
@@ -79,20 +78,6 @@ const getJson = async url => {
 const run = (cmd, argv, opts = {}) => execFileSync(cmd, argv, { stdio: 'inherit', cwd: DIR, ...opts });
 let onFailure = async () => {};
 
-/** Speaks every beat to an AIFF (cached by voice, rate and text) and adds its length in seconds. */
-function speak(beats) {
-  fs.mkdirSync(AUDIO_DIR, { recursive: true });
-  for (const b of beats) {
-    const hash = crypto.createHash('sha1').update(`${VOICE}|${RATE}|${b.text}`).digest('hex').slice(0, 16);
-    b.file = path.join(AUDIO_DIR, `${b.id}-${hash}.aiff`);
-    if (!fs.existsSync(b.file)) execFileSync('say', ['-v', VOICE, '-r', RATE, '-o', b.file, b.text]);
-    b.seconds = Number(
-      execFileSync('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', b.file]).toString().trim(),
-    );
-  }
-  return beats;
-}
-
 /** What this take deploys: the other storage choice than the one running, as the next version. */
 async function plan() {
   const status = await getJson(`${EXT}/namespaces/hackathon/architectures/${NAME}/status`);
@@ -114,11 +99,11 @@ const srtTime = s => {
 (async () => {
   fs.mkdirSync(OUT, { recursive: true });
   const ctx = await plan();
-  const beats = speak(narration(ctx));
+  const beats = await speak(narration(ctx), AUDIO_DIR);
   const byId = new Map(beats.map(b => [b.id, b]));
   const spoken = beats.reduce((s, b) => s + b.seconds + GAP / 1000, 0);
   console.log(`running ${ctx.running} (${ctx.storage}); will store ${ctx.valid} (${ctx.choice}) and ${ctx.invalid} (forbidden)`);
-  console.log(`${beats.length} beats, ${Math.round(spoken)} s of narration (${(spoken / 60).toFixed(1)} min), voice ${VOICE} at ${RATE}`);
+  console.log(`${beats.length} beats, ${Math.round(spoken)} s of narration (${(spoken / 60).toFixed(1)} min), ${beats.describe}`);
   if (AUDIO_ONLY) {
     for (const b of beats) console.log(`${b.seconds.toFixed(1).padStart(5)} s  ${b.id}`);
     return;
