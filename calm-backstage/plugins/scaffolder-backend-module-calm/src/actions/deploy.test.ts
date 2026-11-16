@@ -833,16 +833,57 @@ describe('calm:deploy:k8s: a dry run', () => {
       kubectl: expect.stringContaining('-n calm-orders'),
     });
     const logged = c.logger.info.mock.calls.map((x: any[]) => x[0]);
-    expect(logged).toContain(
-      `Dry run: would write the overlay ${path.join(
-        published,
-        'deploy',
-        'k8s-overlay',
-      )}`,
+    expect(logged.every((l: string) => l.startsWith('Dry run: '))).toBe(true);
+  });
+
+  it('in a localDir folder logs one line tying the kubectl command to the overlay it would write, and the overlay, not the stale one there', async () => {
+    const published = path.join(localDir(), 'orders');
+    await fs.cp(dir, published, { recursive: true });
+    const staleFile = path.join(
+      published,
+      'deploy',
+      'k8s-overlay',
+      'kustomization.yaml',
     );
-    expect(logged.every((l: string) => l.startsWith('Dry run: would '))).toBe(
-      true,
+    await fs.mkdir(path.dirname(staleFile), { recursive: true });
+    await fs.writeFile(
+      staleFile,
+      'namespace: calm-old\nimages:\n  - name: placeholder\n    newName: old-image\n    newTag: v0\n',
     );
+    const before = await snapshot(published);
+    const c = context({ dir: published });
+    await createCalmDeployK8sAction({
+      settings: settings(),
+      localDir: localDir(),
+      kubectl: () => jest.fn(async () => ''),
+    }).handler(c);
+    expect(await snapshot(published)).toEqual(before);
+    const logged: string[] = c.logger.info.mock.calls.map((x: any[]) => x[0]);
+    const overlayDir = path.join(published, 'deploy', 'k8s-overlay');
+    const combined = logged.filter(l =>
+      l.startsWith('Dry run: would write the overlay'),
+    );
+    expect(combined).toHaveLength(1);
+    expect(combined[0]).toContain(overlayDir);
+    expect(combined[0]).toContain('orders:dry-run');
+    expect(combined[0]).toContain('calm-orders');
+    expect(combined[0]).toMatch(/then run .*kubectl.* apply -k /);
+    expect(combined[0]).toContain(`apply -k ${overlayDir}`);
+    // No line runs kubectl on its own, without saying the overlay is written first.
+    expect(
+      logged.filter(l => /would run/.test(l) && !/would write/.test(l)),
+    ).toEqual([]);
+    const shown = logged.find(l =>
+      l.startsWith('Dry run: the overlay would be:'),
+    );
+    expect(shown).toBeDefined();
+    const yaml = YAML.parse(shown!.slice(shown!.indexOf('\n') + 1));
+    expect(yaml.namespace).toBe('calm-orders');
+    expect(yaml.images).toEqual([
+      expect.objectContaining({ newName: 'orders', newTag: 'dry-run' }),
+    ]);
+    expect(shown).not.toContain('old-image');
+    expect(shown).not.toContain('calm-old');
   });
 
   it('still fails without the cluster settings, with a missing base, and outside both folders', async () => {

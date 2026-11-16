@@ -347,7 +347,7 @@ export function createCalmDeployK8sAction(options: {
     id: 'calm:deploy:k8s',
     supportsDryRun: true,
     description:
-      "Deploys a published service folder to the local cluster (calm.deploy.kubernetes): writes the overlay deploy/k8s-overlay over the bundle's kustomize base deploy/k8s, runs kubectl apply -k into the namespace <namespacePrefix><name> and waits for the rollouts. Needs the cluster from `yarn k8s:up`. In a dry run it writes the overlay only in the dry-run folder (a folder in localDir is left as it is) and logs the objects and the kubectl command, without calling the cluster; the outputs come from the rendered manifests.",
+      "Deploys a published service folder to the local cluster (calm.deploy.kubernetes): writes the overlay deploy/k8s-overlay over the bundle's kustomize base deploy/k8s, runs kubectl apply -k into the namespace <namespacePrefix><name> and waits for the rollouts. Needs the cluster from `yarn k8s:up`. In a dry run it writes the overlay only in the dry-run folder (a folder in localDir is left as it is; the overlay it would write is logged) and logs the objects and the kubectl command, without calling the cluster; the outputs come from the rendered manifests.",
     schema: {
       input: {
         dir: z =>
@@ -429,7 +429,18 @@ export function createCalmDeployK8sAction(options: {
           );
           ctx.logger.info(`Wrote the overlay ${overlayDir}`);
         } else {
-          ctx.logger.info(`Dry run: would write the overlay ${overlayDir}`);
+          // What is in the folder now may be missing or stale, so the plan names the overlay it would write.
+          ctx.logger.info(
+            `Dry run: would write the overlay ${overlayDir} for ${image} in ${namespace}, then run ${kubectlCommand(
+              settings,
+              applyArgs(overlayDir),
+            )}`,
+          );
+          ctx.logger.info(
+            `Dry run: the overlay would be:\n${YAML.stringify(
+              overlayKustomization({ name, namespace, image }),
+            )}`,
+          );
         }
         const { deployed, objects } = await planFromBase(dir);
         ctx.logger.info(
@@ -437,12 +448,14 @@ export function createCalmDeployK8sAction(options: {
             objects.length
           } objects into ${namespace}: ${objects.join(', ')}`,
         );
-        ctx.logger.info(
-          `Dry run: would run ${kubectlCommand(
-            settings,
-            applyArgs(overlayDir),
-          )}`,
-        );
+        if (isDryRunFolder(dir, ctx.workspacePath)) {
+          ctx.logger.info(
+            `Dry run: would run ${kubectlCommand(
+              settings,
+              applyArgs(overlayDir),
+            )}`,
+          );
+        }
         const now = new Date().toISOString();
         ctx.output('namespace', namespace);
         ctx.output('deployments', deployed.deployments);
