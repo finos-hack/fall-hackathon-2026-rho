@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { recordDeployment } from './decorateDeployment';
 import { recordFailedDeployment } from './recordFailure';
+import { CalmHubWriteClient } from '@internal/backstage-plugin-calm-common';
 
 let root: string;
 let workspace: string;
@@ -37,6 +38,8 @@ function fakeRecordingHub() {
     getDecorator: jest.fn(async (_ns: string, id: number) => ({
       uniqueId: posted[id - 1]['unique-id'],
     })),
+    // The real client gives a copy that sends the signal with each request; this one is the same fake.
+    withSignal: jest.fn((): any => hub),
   };
   return { hub: hub as any, posted };
 }
@@ -66,6 +69,8 @@ const failed = (opts: {
   appBaseUrl?: string;
   architecturePath?: string;
   log: any;
+  signal?: AbortSignal;
+  timeoutMs?: number;
 }) =>
   recordFailedDeployment({
     hub: opts.hub,
@@ -80,7 +85,34 @@ const failed = (opts: {
     startTime: '2026-11-15T10:00:00.000Z',
     error: new Error('rollout timed out'),
     logger: opts.log,
+    signal: opts.signal,
+    timeoutMs: opts.timeoutMs,
   });
+
+/**
+ * A real Hub client whose fetch never answers until the request's signal aborts, then rejects the way fetch does.
+ * Gives the signals it saw.
+ */
+function hangingHub() {
+  const signals: (AbortSignal | undefined)[] = [];
+  const fetchImpl = jest.fn(
+    (_url: string, init?: any) =>
+      new Promise<never>((_resolve, reject) => {
+        signals.push(init?.signal);
+        const abort = () =>
+          reject(Object.assign(new Error('aborted'), { name: 'AbortError' }));
+        if (init?.signal?.aborted) {
+          abort();
+        }
+        init?.signal?.addEventListener('abort', abort);
+      }),
+  );
+  return {
+    hub: new CalmHubWriteClient('http://hub', fetchImpl as any),
+    fetchImpl,
+    signals,
+  };
+}
 
 describe('recordFailedDeployment', () => {
   it('applies to the labelled workloads that are nodes of the architecture', async () => {
@@ -170,5 +202,54 @@ describe('recordFailedDeployment', () => {
       'orders-task-1-failed',
       'orders-task-1',
     ]);
+  });
+
+  it('records nothing, and says so, when the task was already cancelled', async () => {
+    await workloads(['web-service']);
+    const { hub } = fakeRecordingHub();
+    const log = logger();
+    await failed({ hub, log, signal: AbortSignal.abort() });
+    expect(hub.withSignal).not.toHaveBeenCalled();
+    expect(hub.architectures).not.toHaveBeenCalled();
+    expect(hub.createDecorator).not.toHaveBeenCalled();
+    expect(log.info).toHaveBeenCalledWith(
+      expect.stringMatching(/cancelled.*not recorded as failed/),
+    );
+    expect(log.warn).not.toHaveBeenCalled();
+  });
+
+  it('sends the Hub calls with a signal', async () => {
+    await workloads(['web-service']);
+    const { hub, posted } = fakeRecordingHub();
+    await failed({ hub, log: logger(), signal: new AbortController().signal });
+    expect(hub.withSignal).toHaveBeenCalledWith(expect.any(AbortSignal));
+    expect(posted).toHaveLength(1);
+  });
+
+  it('gives up with a warning when the Hub does not answer in time', async () => {
+    await workloads(['web-service']);
+    const { hub, fetchImpl, signals } = hangingHub();
+    const log = logger();
+    await expect(failed({ hub, log, timeoutMs: 50 })).resolves.toBeUndefined();
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(signals[0]).toBeInstanceOf(AbortSignal);
+    const warning: string = log.warn.mock.calls[0][0];
+    expect(warning).toMatch(/Could not record the failed deployment/);
+    expect(warning).toMatch(/did not answer within 0\.05 s/);
+  });
+
+  it('warns, and does not throw, when the task is cancelled while recording', async () => {
+    await workloads(['web-service']);
+    const { hub, fetchImpl } = hangingHub();
+    const log = logger();
+    const task = new AbortController();
+    const pending = failed({ hub, log, signal: task.signal });
+    await new Promise(r => setTimeout(r, 20));
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    task.abort();
+    await expect(pending).resolves.toBeUndefined();
+    expect(log.warn).toHaveBeenCalledWith(
+      expect.stringMatching(/Could not record the failed deployment/),
+    );
   });
 });

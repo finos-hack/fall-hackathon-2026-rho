@@ -434,6 +434,7 @@ export function createCalmDeployK8sAction(options: {
             startTime,
             error,
             logger: ctx.logger,
+            signal: ctx.signal,
           });
         }
         throw error;

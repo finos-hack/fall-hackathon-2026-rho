@@ -83,7 +83,7 @@ Scope: GitHub publish, dry run, register the architecture in the Hub.
   recorded too: `calm:deploy:k8s` and `calm:deploy:gitops` take `record` and, when the deploy fails after it started
   (from `kubectl apply` on; for gitops once the commit is pushed), post a `failed` decorator (applies to the
   architecture nodes the rendered workloads name, all its nodes when none does; the error in the notes; unique-id
-  `<name>-<task>-failed`) and rethrow the error.
+  `<name>-<task>-failed`) and rethrow the error. Recording is skipped for a cancelled task and gives up after 30 s.
 - Done: the gateway reaches the service over TLS, as the architecture's HTTPS relationship says. The deployment rules
   `k8s-deploy` 1.3.0 put an nginx sidecar on 8443 in front of the destination of an HTTPS relationship inside the
   cluster, with a certificate cert-manager issues from a self-signed CA in the namespace; the gateway checks it, and

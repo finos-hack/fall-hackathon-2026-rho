@@ -482,6 +482,8 @@ function fakeRecordingHub(opts: { failPost?: boolean } = {}) {
     getDecorator: jest.fn(async (_ns: string, id: number) => ({
       uniqueId: posted[id - 1]['unique-id'],
     })),
+    // The real client gives a copy that sends the signal with each request; this one is the same fake.
+    withSignal: jest.fn((): any => hub),
   };
   return { hub: hub as any, posted };
 }
@@ -520,6 +522,7 @@ describe('calm:deploy:gitops: a failed deployment', () => {
     branch?: string;
     failApply?: string;
     failTenantApply?: string;
+    signal?: AbortSignal;
     /** Breaks the working copy or the remote before the action runs. */
     before?: (dir: string, remote: string) => Promise<void>;
   }) => {
@@ -542,6 +545,7 @@ describe('calm:deploy:gitops: a failed deployment', () => {
       ...opts.input,
     });
     c.task = { id: 'task-1' };
+    c.signal = opts.signal;
     const result = createCalmDeployGitopsAction({
       settings: settings(),
       gitops: gitops(),
@@ -563,6 +567,18 @@ describe('calm:deploy:gitops: a failed deployment', () => {
       data: { status: 'failed', 'start-time': expect.any(String) },
     });
     expect(posted[0].data.notes).toContain('kustomize build failed');
+  });
+
+  it('records nothing, and still rejects with the deploy error, when the task was cancelled (the wait for Flux stops with the abort)', async () => {
+    const { hub } = fakeRecordingHub();
+    const { result } = await run({
+      input: { record },
+      hub,
+      signal: AbortSignal.abort(),
+    });
+    await expect(result).rejects.toThrow(/aborted/);
+    expect(hub.architectures).not.toHaveBeenCalled();
+    expect(hub.createDecorator).not.toHaveBeenCalled();
   });
 
   it('calls no Hub without record', async () => {

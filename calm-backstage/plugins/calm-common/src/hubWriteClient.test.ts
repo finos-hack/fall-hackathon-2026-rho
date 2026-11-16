@@ -1,4 +1,4 @@
-import { CalmHubError, FetchLike } from './hubClient';
+import { CalmHubClient, CalmHubError, FetchLike } from './hubClient';
 import { CalmHubWriteClient } from './hubWriteClient';
 import {
   architectureVersionPath,
@@ -273,5 +273,88 @@ describe('hub record helpers', () => {
         d(4, '2026-11-14T11:00:00Z'),
       ]).map(x => x.id),
     ).toEqual([3, 4, 1, 2]);
+  });
+});
+
+describe('CalmHubClient.withSignal', () => {
+  /** A fetch that keeps the init of each call and answers 200 with an empty list. */
+  const recordingFetch = () => {
+    const inits: any[] = [];
+    const fn = (async (_url: string, init?: any) => {
+      inits.push(init);
+      return {
+        ok: true,
+        status: 200,
+        json: async () => [],
+        text: async () => '[]',
+      };
+    }) as FetchLike;
+    return { fn, inits };
+  };
+
+  it('sends the signal with a GET and with a POST, keeping the rest of the request', async () => {
+    const { fn, inits } = recordingFetch();
+    const signal = new AbortController().signal;
+    const client = new CalmHubWriteClient(base, fn).withSignal(signal);
+    await client.get('/api/calm/namespaces');
+    await client.createArchitectureVersion(
+      'hackathon',
+      'billing-api',
+      '1.0.0',
+      {
+        id: 'x',
+      },
+    );
+    expect(inits[0].signal).toBe(signal);
+    expect(inits[0].headers).toEqual({ Accept: 'application/json' });
+    expect(inits[1].signal).toBe(signal);
+    expect(inits[1].method).toBe('POST');
+    expect(inits[1].body).toContain('"id":"x"');
+  });
+
+  it('leaves the original client without a signal', async () => {
+    const { fn, inits } = recordingFetch();
+    const original = new CalmHubWriteClient(base, fn);
+    original.withSignal(new AbortController().signal);
+    await original.get('/api/calm/namespaces');
+    expect(inits[0].signal).toBeUndefined();
+  });
+
+  it('is still the subclass it was made from', () => {
+    const { fn } = recordingFetch();
+    const copy = new CalmHubWriteClient(base, fn).withSignal(
+      new AbortController().signal,
+    );
+    expect(copy).toBeInstanceOf(CalmHubWriteClient);
+    expect(copy.baseUrl).toBe(base);
+  });
+
+  it('gives a subclass method that reads fetchImpl the signal too', async () => {
+    class Putting extends CalmHubWriteClient {
+      async put(): Promise<void> {
+        const doFetch: FetchLike =
+          (this as any).fetchImpl ?? ((globalThis as any).fetch as FetchLike);
+        await doFetch(`${this.baseUrl}/x`, { method: 'PUT' });
+      }
+    }
+    const { fn, inits } = recordingFetch();
+    const signal = new AbortController().signal;
+    const copy = new Putting(base, fn).withSignal(signal);
+    expect(copy).toBeInstanceOf(Putting);
+    await copy.put();
+    expect(inits[0]).toMatchObject({ method: 'PUT', signal });
+  });
+
+  it('wraps the global fetch when the client has no fetch of its own', async () => {
+    const { fn, inits } = recordingFetch();
+    const real = (globalThis as any).fetch;
+    (globalThis as any).fetch = fn;
+    try {
+      const signal = new AbortController().signal;
+      await new CalmHubClient(base).withSignal(signal).get('/x');
+      expect(inits[0].signal).toBe(signal);
+    } finally {
+      (globalThis as any).fetch = real;
+    }
   });
 });

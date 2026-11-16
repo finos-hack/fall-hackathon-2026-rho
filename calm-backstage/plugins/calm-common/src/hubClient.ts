@@ -128,6 +128,24 @@ export class CalmHubClient {
     this.fetchImpl = fetchImpl;
   }
 
+  /**
+   * A copy of this client (a subclass stays the subclass) whose requests carry `signal`, so they stop when it aborts.
+   * The original is unchanged.
+   */
+  withSignal(signal: AbortSignal): this {
+    const inner = this.fetchImpl;
+    const copy = Object.assign(
+      Object.create(Object.getPrototypeOf(this)),
+      this,
+    );
+    copy.fetchImpl = ((url: string, init?: any) =>
+      (inner ?? ((globalThis as any).fetch as FetchLike))(url, {
+        ...init,
+        signal,
+      })) as FetchLike;
+    return copy;
+  }
+
   /** GET a path under the base URL, or an absolute URL (a document `$id`, a `requirement-url`). */
   async get<T = any>(pathOrUrl: string): Promise<T> {
     const url = /^https?:\/\//.test(pathOrUrl)
