@@ -96,6 +96,8 @@ interface LockContext {
  *   release.
  * - `acquire: false` is for a step that works in a copy another step reserved (the image build): it takes nothing,
  *   renews the task's own reservation while it runs, releases it when it fails, and keeps it when it succeeds.
+ * - `enabled: false` runs the body as it is, without a task id and without reserving, renewing or releasing anything
+ *   (a dry run, whose folder nothing else contends for).
  * - A task id is needed to tell tasks apart: without one this throws rather than let two runs count as the same task.
  */
 export async function withServiceLock<C extends LockContext>(
@@ -104,10 +106,14 @@ export async function withServiceLock<C extends LockContext>(
     dir: string;
     keep?: (outputs: Record<string, unknown>) => boolean;
     acquire?: boolean;
+    enabled?: boolean;
     locks?: ServiceLocks;
   },
   run: (ctx: C) => Promise<void>,
 ): Promise<void> {
+  if (options.enabled === false) {
+    return run(ctx);
+  }
   const locks = options.locks ?? serviceLocks;
   const owner = ctx.task?.id;
   if (!owner) {

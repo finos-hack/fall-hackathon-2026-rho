@@ -833,7 +833,11 @@ describe('calm:deploy:k8s: a dry run', () => {
       kubectl: expect.stringContaining('-n calm-orders'),
     });
     const logged = c.logger.info.mock.calls.map((x: any[]) => x[0]);
-    expect(logged.every((l: string) => l.startsWith('Dry run: '))).toBe(true);
+    expect(
+      logged.every((l: string) =>
+        /^Dry run: (would |the overlay would be:\n)/.test(l),
+      ),
+    ).toBe(true);
   });
 
   it('in a localDir folder logs one line tying the kubectl command to the overlay it would write, and the overlay, not the stale one there', async () => {
@@ -877,6 +881,7 @@ describe('calm:deploy:k8s: a dry run', () => {
       l.startsWith('Dry run: the overlay would be:'),
     );
     expect(shown).toBeDefined();
+    expect(shown).toContain('\n# Written by calm:deploy:k8s. Apply by hand');
     const yaml = YAML.parse(shown!.slice(shown!.indexOf('\n') + 1));
     expect(yaml.namespace).toBe('calm-orders');
     expect(yaml.images).toEqual([
@@ -989,14 +994,44 @@ describe('planFromBase', () => {
     ]);
   });
 
-  it('throws for an entry that leaves the published folder', async () => {
+  it('throws for an entry that leaves the published folder, though the target exists', async () => {
     await put({
-      'deploy/k8s/kustomization.yaml': kustomization('../../../x.yaml'),
+      'pub/deploy/k8s/kustomization.yaml': kustomization('../../../x.yaml'),
       'x.yaml': cm('x'),
     });
-    await expect(planFromBase(dir)).rejects.toThrow(
-      /\.\.\/\.\.\/\.\.\/x\.yaml/,
+    await expect(planFromBase(path.join(dir, 'pub'))).rejects.toThrow(
+      /\.\.\/\.\.\/\.\.\/x\.yaml.*outside the published folder/,
     );
+  });
+
+  it('throws for a listed file that is a symlink to a file outside the published folder', async () => {
+    await put({
+      'pub/deploy/k8s/kustomization.yaml': kustomization('link.yaml'),
+      'x.yaml': cm('x'),
+    });
+    await fs.symlink(
+      path.join(dir, 'x.yaml'),
+      path.join(dir, 'pub', 'deploy', 'k8s', 'link.yaml'),
+    );
+    await expect(planFromBase(path.join(dir, 'pub'))).rejects.toThrow(
+      /link\.yaml.*outside the published folder/,
+    );
+  });
+
+  it('throws for a resources value that is not a list', async () => {
+    await put({
+      'deploy/k8s/kustomization.yaml': 'resources: a.yaml\n',
+      'deploy/k8s/a.yaml': cm('a'),
+    });
+    await expect(planFromBase(dir)).rejects.toThrow(
+      /resources in .*kustomization\.yaml is not a list/,
+    );
+  });
+
+  it('throws on a directory symlink back to its own base as listed more than once', async () => {
+    await put({ 'deploy/k8s/kustomization.yaml': kustomization('sub') });
+    await fs.symlink('.', path.join(dir, 'deploy', 'k8s', 'sub'));
+    await expect(planFromBase(dir)).rejects.toThrow(/more than once/);
   });
 
   it('throws for a remote entry, saying a dry run cannot read it', async () => {
@@ -1027,6 +1062,6 @@ describe('planFromBase', () => {
       'deploy/k8s/kustomization.yaml': kustomization('sub'),
       'deploy/k8s/sub/kustomization.yaml': kustomization('..'),
     });
-    await expect(planFromBase(dir)).rejects.toThrow(/cycle|twice/i);
+    await expect(planFromBase(dir)).rejects.toThrow(/more than once/);
   });
 });
