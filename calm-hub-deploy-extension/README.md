@@ -22,8 +22,10 @@ service card already reads the deployment records this connector writes.
 
 ![The Deployment tab in CALM Hub](docs/demo/deployment-tab.png)
 
-▶ The demo (narrated; video link to follow) has a terminal on the cluster and CALM Hub side by side. It starts with
-CALM Hub with no extensions and plugs this one in. Chapters and how to record it again: [docs/demo](docs/demo/README.md).
+[![The Platform Connector demo](https://img.youtube.com/vi/0r6zxzfNzJE/maxresdefault.jpg)](https://youtu.be/0r6zxzfNzJE)
+
+▶ [Watch the demo on YouTube](https://youtu.be/0r6zxzfNzJE) (13:22, narrated): a terminal on the cluster and CALM Hub side by
+side. It starts with CALM Hub with no extensions and plugs this one in. Chapters and how to record it again: [docs/demo](docs/demo/README.md).
 
 ## What it adds to CALM Hub
 

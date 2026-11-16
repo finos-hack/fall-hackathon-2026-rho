@@ -7,7 +7,7 @@ write-only. Then it plugs in the Platform Connector and shows it woven into CALM
 spots drift that a record cannot know about, deploys a changed pattern decision through the firm's pull request
 approval and Flux, and refuses a version that breaks a control.
 
-The video is not kept in this repository. It is published separately (link to follow), with
+▶ [Watch it on YouTube](https://youtu.be/0r6zxzfNzJE). The video is not kept in this repository; YouTube has it, with
 `calm-hub-deploy-demo.srt` as its captions. `record-hub-demo.cjs` writes both files.
 
 The take works out its versions from what runs. `events-stream` (a Nisshi event-streaming service from
