@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # watch-deploy.sh <architecture> <version> [timeout-seconds]: a live view of a deployment started from CALM Hub,
-# redrawn every 2 s: the newest deployment recorded for the version (from the extension's history), Flux, the
-# Deployments and the network policies in calm-<architecture>. Exits when the deployment is completed (and every
-# Deployment is available) or failed, or, with UNTIL=approval, when it waits for its pull request to be approved.
+# redrawn every 2 s: the newest attempt for the version (from the extension's history: a deployment record, a job at
+# the controls gate, or a refusal), Flux, the Deployments and the network policies in calm-<architecture>. Exits when
+# the deployment is completed (and every Deployment is available), failed or refused at the controls gate (a refusal
+# writes no deployment record), or, with UNTIL=approval, when it waits for its pull request to be approved.
 # Uses $KUBECONFIG, context calm-backstage, and $EXT.
 set -u
 NAME="${1:?usage: watch-deploy.sh <architecture> <version> [timeout-seconds]}"
@@ -28,6 +29,7 @@ while :; do
   case "$status" in
     completed) s="${G}completed${R}" ;;
     failed) s="${RED}failed${R}" ;;
+    refused) s="${RED}refused${R}" ;;
     "") s="${DIM}not recorded yet${R}" ;;
     *) s="${Y}${status}${R}" ;;
   esac
@@ -53,8 +55,12 @@ while :; do
     printf '\n%sWaiting for someone to approve the pull request%s\n' "$Y" "$R"
     exit 0
   fi
+  if [ "$status" = refused ]; then
+    printf '\n%sRefused at the controls gate: nothing was changed in Git or the cluster%s\n' "$RED" "$R"
+    exit 0
+  fi
   if [ "$status" = failed ]; then
-    printf '\n%sThe deployment failed: nothing was changed in Git or the cluster%s\n' "$RED" "$R"
+    printf '\n%sThe deployment failed%s\n' "$RED" "$R"
     exit 0
   fi
   if [ "$now" -ge "$LIMIT" ]; then

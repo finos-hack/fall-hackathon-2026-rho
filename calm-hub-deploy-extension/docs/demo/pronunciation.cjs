@@ -6,4 +6,8 @@ module.exports = [
   [/\bGitea\b/g, 'git-tea'],
   [/\bk8s-deploy\b/g, 'Kubernetes deploy'],
   [/\bno-auth\b/g, 'no auth'],
+  [/\bPostgreSQL\b/g, 'Postgres'],
+  [/\bread-only\b/g, 'reed-only'],
+  [/\bRead-only\b/g, 'Reed-only'],
+  [/\bplatform-connector\b/g, 'platform connector'],
 ];
