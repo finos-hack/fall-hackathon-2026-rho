@@ -12,7 +12,7 @@ service card already reads the deployments this extension records.
 
 ![The Deployment tab in CALM Hub](docs/demo/deployment-tab.png)
 
-▶ The demo (12:58, narrated; video link to follow) has a terminal on the cluster and CALM Hub side by side. It
+▶ The demo (12:35, narrated; video link to follow) has a terminal on the cluster and CALM Hub side by side. It
 starts with CALM Hub with no extensions and plugs this one in. Then it deploys a pattern decision from CALM Hub,
 through a pull request the firm approves and Flux, and shows the results written back to CALM Hub. It ends with
 the controls gate and MCP. Chapters and how to record it again: [docs/demo](docs/demo/README.md).
