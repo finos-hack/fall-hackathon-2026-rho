@@ -50,6 +50,17 @@ export interface DeploymentRecord {
 }
 
 /**
+ * The `target` of a record on an architecture version: the version by name (Backstage, and this connector's own
+ * lookups) and, when the numeric id is known, by id (CALM Hub's UI).
+ */
+export function versionTargets(namespace: string, architecture: string, version: string, numericId?: number): string[] {
+  return [
+    architectureVersionPath(namespace, architecture, version),
+    ...(numericId !== undefined ? [architectureVersionUiTarget(namespace, numericId, version)] : []),
+  ];
+}
+
+/**
  * The standard (Kubernetes) deployment decorator for a record: targets the architecture version by name (Backstage)
  * and by id (Hub UI); the GitOps details go in `data.gitops`.
  */
@@ -58,10 +69,7 @@ export function decoratorOf(r: DeploymentRecord): Record<string, unknown> {
     $schema: KUBERNETES_DEPLOYMENT_STANDARD,
     'unique-id': r.uniqueId,
     type: 'deployment',
-    target: [
-      architectureVersionPath(r.namespace, r.architecture, r.version),
-      ...(r.numericId !== undefined ? [architectureVersionUiTarget(r.namespace, r.numericId, r.version)] : []),
-    ],
+    target: versionTargets(r.namespace, r.architecture, r.version, r.numericId),
     'target-type': ['architecture'],
     'applies-to': r.appliesTo,
     data: {
@@ -130,9 +138,17 @@ export function isOwnUnfinished(data: Record<string, unknown>): boolean {
   return own && (data.status === 'pending' || data.status === 'in-progress');
 }
 
-/** A recorded deployment as the status and history routes give it. */
+/**
+ * A deployment attempt as the status and history routes give it: a deployment decorator, a refusal at the controls
+ * gate (a control-evaluation decorator), or a job CALM Hub holds no record of yet (from memory).
+ */
 export interface HistoryEntry {
-  id: number;
+  /** The CALM Hub decorator's id; absent for a job CALM Hub holds no record of. */
+  id?: number;
+  /** The id the deploy request answered with, for a job read from memory. */
+  deploymentId?: string;
+  /** The control-evaluation decorator that records a refusal at the controls gate. */
+  evaluationId?: number;
   version?: string;
   status: string;
   startTime?: string;
@@ -171,5 +187,5 @@ export function historyEntry(d: CalmHubDecorator, fallbackVersion?: string): His
 /** Newest first by start time, then by id. */
 export function newestFirst(list: HistoryEntry[]): HistoryEntry[] {
   const t = (e: HistoryEntry) => (e.startTime ? Date.parse(e.startTime) || 0 : 0);
-  return [...list].sort((a, b) => t(b) - t(a) || b.id - a.id);
+  return [...list].sort((a, b) => t(b) - t(a) || (b.id ?? 0) - (a.id ?? 0));
 }

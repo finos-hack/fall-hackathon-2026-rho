@@ -48,7 +48,7 @@
     },
     "history": {
       "route": "history",
-      "description": "The deployments recorded for an architecture, newest first.",
+      "description": "The deployment attempts for an architecture, newest first: deployments, versions refused at the controls gate (status refused, with the control evaluation's id) and a job still at the gate (status validating, no id yet).",
       "input": {
         "type": "object",
         "properties": {
@@ -66,7 +66,9 @@
             "items": {
               "type": "object",
               "properties": {
-                "id": { "type": "number" },
+                "id": { "type": "number", "description": "The CALM Hub decorator; absent while CALM Hub holds no record of the job" },
+                "deploymentId": { "type": "string", "description": "The id the deploy command answered with, for a job not yet recorded in CALM Hub" },
+                "evaluationId": { "type": "number", "description": "The control-evaluation decorator recording a refusal at the controls gate" },
                 "version": { "type": "string" },
                 "status": { "type": "string" },
                 "startTime": { "type": "string" },
@@ -77,7 +79,7 @@
                 "details": { "type": "string" },
                 "notes": { "type": "string" }
               },
-              "required": ["id", "status"]
+              "required": ["status"]
             }
           }
         },
@@ -88,7 +90,7 @@
     },
     "deploy": {
       "route": "deploy",
-      "description": "Deploy an architecture version: validate it, re-render the service's deployment rules against it, merge the change and wait for Flux. Answers at once; follow the deployment with history or the deployment decorator.",
+      "description": "Deploy an architecture version: validate it, re-render the service's deployment rules against it, merge the change and wait for Flux. Answers at once; the deployment decorator is written only once the version passes the controls gate (a refused version gets a control-evaluation decorator instead). Follow the deployment with history.",
       "input": {
         "type": "object",
         "properties": {
@@ -104,10 +106,9 @@
         "properties": {
           "hubApi": { "type": "number" },
           "deploymentId": { "type": "string" },
-          "decoratorId": { "type": "number" },
           "status": { "type": "string" }
         },
-        "required": ["deploymentId", "decoratorId", "status"]
+        "required": ["deploymentId", "status"]
       },
       "destructive": false,
       "idempotent": true
