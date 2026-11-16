@@ -53,9 +53,8 @@ async function waitingForApproval(w: World) {
     for (const pr of w.gitea.pulls) pr.state = 'closed';
   };
   expect((await call(w, 'POST', '/deploy/hackathon/architectures/events-stream/1.0.1')).status).toBe(202);
-  for (let i = 0; i < 200 && !w.gitea.pulls.length; i++) await new Promise(r => setTimeout(r, 10));
-  // Let the job reach the approval wait after opening the pull request.
-  await new Promise(r => setTimeout(r, 50));
+  for (let i = 0; i < 500 && !w.deps.jobs.current('events-stream')?.pendingApproval; i++) await new Promise(r => setTimeout(r, 10));
+  expect(w.deps.jobs.current('events-stream')?.pendingApproval).toBeDefined();
   return async () => {
     release();
     await w.deps.jobs.idle();
