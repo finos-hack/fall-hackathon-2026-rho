@@ -341,11 +341,12 @@ const GIT_TEXT = {
 const hubText = (canDeploy: boolean) => ({
   title: 'CALM Hub',
   content: [
-    'Architecture: `${{ steps["store-hub"].output.namespace }}/${{ steps["store-hub"].output.architecture }}` version ${{ steps["store-hub"].output.version }}, at ${{ steps["store-hub"].output.url }}, its only copy.',
+    // A dry run gives no url: the Hub does not hold what it would store.
+    'Architecture: `${{ steps["store-hub"].output.namespace }}/${{ steps["store-hub"].output.architecture }}` version ${{ steps["store-hub"].output.version }}${{ (", at " + steps["store-hub"].output.url) if steps["store-hub"].output.url else "" }}, its only copy.',
     ...(canDeploy
       ? [
           '',
-          '${{ ("Deployment recorded as the decorator " + steps.decorate.output.id + " (`" + steps.decorate.output.uniqueId + "`): " + steps.decorate.output.url) if steps.decorate.output.id else "No deployment recorded: nothing was deployed." }}',
+          '${{ ("Deployment recorded as the decorator " + steps.decorate.output.id + " (`" + steps.decorate.output.uniqueId + "`)" + (": " + steps.decorate.output.url if steps.decorate.output.url else "")) if steps.decorate.output.id else "No deployment recorded: nothing was deployed." }}',
         ]
       : []),
   ].join('\n'),

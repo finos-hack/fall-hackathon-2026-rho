@@ -929,14 +929,14 @@ describe('with a workspace', () => {
       expect(c.outputs).toMatchObject({ version: '1.0.0', created: false });
     });
 
-    it('store writes nothing in a dry run', async () => {
+    it('store writes nothing in a dry run, and outputs no url for a version it would store', async () => {
       const hub = fakeHub(base);
       await register(hub, ctx({ name: 'billing-api', mode: 'prepare' }));
-      await register(
-        hub,
-        ctx({ name: 'billing-api', mode: 'store' }, { isDryRun: true }),
-      );
+      const c = ctx({ name: 'billing-api', mode: 'store' }, { isDryRun: true });
+      await register(hub, c);
       expect(hub.posts()).toEqual([]);
+      expect(c.outputs).toMatchObject({ version: '1.0.0', created: false });
+      expect(c.outputs).not.toHaveProperty('url');
     });
   });
 
