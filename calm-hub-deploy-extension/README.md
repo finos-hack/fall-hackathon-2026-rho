@@ -178,34 +178,6 @@ npx tsx scripts/new-version.ts hackathon events-stream --choose "broker-storage=
 
 Open the new version in CALM Hub (http://localhost:8090, *hackathon* → *events-stream* → the newest version →
 **Extensions**): the tab warns that the cluster runs the previous version. Choose **Deploy this version** → **Run**,
-then watch the overlay on the **Diagram** and the record on **Decorators**. In the cluster the PostgreSQL Deployment
-and its two network policies go away (`kubectl -n calm-events-stream get deploy,networkpolicies`).
-
-```sh
-# A version the pattern does not allow: the browser connects to the service directly, past the gateway.
-npx tsx scripts/new-version.ts hackathon events-stream --connect web-client:stream-app
-```
-
-Deploying it stops at the controls gate: the decorator says `failed` with the validation error, and no pull request
-is opened. The same through the API (what the CLI and MCP tools call):
-
-```sh
-curl -X POST -H 'content-type: application/json' -d '{}' \
-  localhost:8090/api/calm/extensions/platform-connector/api/namespaces/hackathon/architectures/events-stream/versions/1.0.1/deployments
-curl localhost:8090/api/calm/extensions/platform-connector/api/namespaces/hackathon/architectures/events-stream/status
-```
-
-Deploying the version that already runs is a no-op recorded as `completed` ("Already deployed").
-
-## Try it
-
-```sh
-# A new version of events-stream that changes a pattern decision: the broker keeps its topics in SQLite.
-npx tsx scripts/new-version.ts hackathon events-stream --choose "broker-storage=SQLite on the broker’s volume"
-```
-
-Open the new version in CALM Hub (http://localhost:8090, *hackathon* → *events-stream* → the newest version →
-**Extensions**): the tab warns that the cluster runs the previous version. Choose **Deploy this version** → **Run**,
 then watch the Deployments overlay on the **Diagram** and the record on **Decorators**. In the cluster the PostgreSQL
 Deployment and its two network policies go away (`kubectl -n calm-events-stream get deploy,networkpolicies`).
 
