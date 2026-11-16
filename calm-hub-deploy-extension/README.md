@@ -65,7 +65,8 @@ Organised by the CALM Hub feature each piece appears in.
   red on all three.
 - **Commands.** For the CLI (`calm hub ext platform-connector <command>`, once a CLI with it is published) and as MCP
   tools `ext_platform-connector_status`, `ext_platform-connector_history` and `ext_platform-connector_deploy`.
-  `status` includes the drift and the workloads; `history` lists deployments and refusals, newest first.
+  `status` includes the drift and the workloads; `history` lists deployments and refusals, newest first, from the
+  records of the architecture's newest 10 versions (the read side also reads the running version's, for drift).
 
 What it does not duplicate: deployment history. The built-in Deployments view and Decorators tab already show it,
 so the tab links there and the `history` command reads the same records.
@@ -74,13 +75,18 @@ How it decides what is drift (`src/platform.ts`):
 
 - Flux is not ready, or has not applied the commit `main` points at.
 - A Deployment runs a different number of replicas from the one Git asks for, or has fewer ready than it runs.
+- A Deployment runs an image other than the one Git asks for: the overlay's `calm-service` entry
+  (`deploy/k8s-overlay/kustomization.yaml` on `main`, `newName:newTag`), compared with each container that runs that
+  image (`calm-service` or `newName`, whatever its tag).
 - Git asks for a Deployment that does not run in the cluster.
 - CALM Hub's newest completed record names a version other than the one `main` says is deployed.
 
 A read that fails (the cluster, Flux, Git) is reported as a problem, never as drift, and the service is then
-neither in sync nor drifted. "Deploying" comes only from this connector's own in-memory jobs: while one runs, drift
-is not reported. A deployment another writer has in progress shows as drift until it finishes. Only Deployments are
-treated as workloads; StatefulSets and DaemonSets are not read.
+neither in sync nor drifted. Each read of CALM Hub or Gitea gives up after 4 s, and one that times out is a problem
+too, not an error status: CALM Hub gives a proxied call 10 s. "Deploying" comes only from this connector's own
+in-memory jobs: while one runs, drift is not reported. A deployment another writer has in progress can show as drift
+until it finishes, because drift compares the newest completed record with what runs. Only Deployments are treated as
+workloads; StatefulSets and DaemonSets are not read.
 
 The routes need CALM Hub's `read` scope (tab, node panel, status, history), `write` scope (deploy) or only a signed-in
 user (card and screen). Every call that deploys is in CALM Hub's audit log; its audit id is stored on the decorator
@@ -115,7 +121,8 @@ validates), with the same two targets:
   requirement, else the first one in the version, else the version's URL in CALM Hub), and `attached-to` (the
   connection)
 - `data.status`: `not-met`; `evaluated-at`; `findings`: up to five `calm validate` errors (`subject`, `description`,
-  `check`); `engine`: `calm validate`
+  `check`); `engine`: `{ name: "calm validate", version }`, where `version` is the version of the `calm` CLI that ran
+  (`@finos/calm-cli`, through calm-node)
 - `data.actors`: `requested-by`, `hub-audit-id` and `connector`
 
 **The GitOps sub-standard.** [standards/gitops.decorator.standard.json](standards/gitops.decorator.standard.json) is
@@ -126,11 +133,15 @@ Standards as `gitops-deployment`:
 npx tsx scripts/publish-standard.ts [namespace]     # default hackathon; CALM_HUB_URL defaults to http://localhost:8090
 ```
 
+Its `$id` is `urn:calm-platform-connector:standards:gitops-deployment:1.0`, which names the standard without tying it
+to one Hub or namespace (CALM Hub stores it under a numeric id).
+
 CALM Hub validates decorators only against the standards it bundles. A standard registered through the Standards API
-is stored, but a decorator is not checked against it. So the sub-standard documents `data.gitops` for anyone reading
-the Standards API (CALM Hub's UI has no Standards page); CALM Hub does not enforce it. The connector stamps the bundled
-1.0 Kubernetes standard, which CALM Hub does enforce: a record without `data.kubernetes.namespace` is refused with
-HTTP 400 "Decorator does not match its $schema". [FINDINGS.md](FINDINGS.md) says why not the draft schema URL.
+is stored, but a decorator is not checked against it. So the sub-standard documents `data.gitops`: it shows on the
+namespace's **Standards** tab and through the Standards API, but CALM Hub does not enforce it. The connector stamps
+the bundled 1.0 Kubernetes standard, which CALM Hub does enforce: a record without `data.kubernetes.namespace` is
+refused with HTTP 400 "Decorator does not match its $schema". [FINDINGS.md](FINDINGS.md) says why not the draft schema
+URL.
 
 ## Run it
 
@@ -224,7 +235,7 @@ The panel, tab and card then say in sync again.
 | `src/resolve.ts` | Context → architecture (by name, as the Hub UI sends it, or numeric id); reads the service's `catalog-info.yaml` and manifests from Gitea over HTTP; refuses a repository that names another namespace's architecture. |
 | `src/record.ts` | The deployment decorator: the bundled Kubernetes standard with `data.kubernetes` and `data.gitops`, and reading records back (also the layout older versions wrote). |
 | `src/evaluation.ts` | The control evaluation for a version refused at the controls gate, and reading it back for history. |
-| `src/platform.ts` | What really runs (Deployments, NetworkPolicies, Flux, `main`) next to CALM Hub's newest record, and the drift between them. |
+| `src/platform.ts` | What really runs (Deployments, NetworkPolicies, Flux, `main` and the image its overlay sets) next to CALM Hub's newest record, and the drift between them. |
 | `src/status.ts` | The status command and the history of deployments and refusals. |
 | `src/blocks.ts` | The blocks CALM Hub draws: the tab, the node panel, the landing card and the Services screen. |
 | `src/services.ts` | Every service in `DEPLOY_NAMESPACES`, for the card and screen (one read reused for 10 s). |
@@ -244,18 +255,24 @@ against an in-memory Hub, a Gitea backed by real bare git repositories, and a ku
 - CALM Hub runs without auth here, so every caller is `no-auth`: `requested-by` is always `no-auth`. With the Hub on
   OIDC it is the user, and a firm would check its own entitlements (who may deploy to production) with it.
 - Jobs live in memory. On start-up, deployments this connector left `pending` or `in-progress` are marked `failed`.
-  Three outcomes are held only in memory and lost on a restart: a job at the controls gate (`validating`), a
-  controls-gate crash or a first deployment record CALM Hub refused (the job ends `failed`), and a refusal whose
-  control evaluation could not be written (the job ends `refused` with no evaluation id). The status and history
-  commands show them until then.
+  Four outcomes are held only in memory and lost on a restart: a job at the controls gate (`validating`), a
+  controls-gate crash or a first deployment record CALM Hub refused (the job ends `failed`), a refusal whose control
+  evaluation could not be written (the job ends `refused` with no evaluation id), and a final `completed` or `failed`
+  CALM Hub did not take (the decorator still shows the earlier status; history shows the outcome in its place). The
+  status and history commands show them until then.
 - The landing card and the Services screen are open to any signed-in user: they list every service in
   `DEPLOY_NAMESPACES`, whatever the user's namespace read scope.
 - CALM Hub draws only a card's first `stats` block, so the card shows drift as a count; the detail is on the
   Services screen.
 - One environment per instance. Promotion between environments would be one instance per environment, or the
   profile's `environment` input (PROFILE.md).
-- "Deploying" comes only from this connector's own jobs; another writer's in-progress deployment shows as drift until
-  it finishes. Only Deployments are workloads: StatefulSets and DaemonSets are not read.
+- "Deploying" comes only from this connector's own jobs; another writer's in-progress deployment can show as drift
+  until it finishes (drift compares the newest completed record with what runs). Only Deployments are workloads:
+  StatefulSets and DaemonSets are not read.
+- History reads the records of an architecture's newest 10 versions (and, for drift, the running version's); older
+  attempts are in CALM Hub's Decorators tab.
+- Each CALM Hub or Gitea read has its own 4 s limit. A route that reads in sequence (the architecture, then the
+  service, then the records) can still take longer than CALM Hub's 10 s when every read is slow.
 - The sub-standard for `data.gitops` is not enforced by CALM Hub, which validates only the standards it bundles.
 - Every record has a double target (the version by name, for Backstage, and by numeric id, for CALM Hub's UI). It is
   known and left; see FINDINGS.md.

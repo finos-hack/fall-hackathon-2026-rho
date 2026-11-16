@@ -1,6 +1,6 @@
 import { CalmHubError } from '@internal/backstage-plugin-calm-common';
 import { cardReply, errorReply, nodeReply, screenReply, tabReply, type BlocksReply } from './blocks';
-import { HttpError } from './errors';
+import { HttpError, ReadTimeout } from './errors';
 import { AssertionError, type HubClaims, type VerifyAssertion } from './identity';
 import { resolveArchitecture, findArchitecture } from './resolve';
 import { RouteTable } from './routes';
@@ -35,15 +35,11 @@ type Handler = (deps: AppDeps, p: Record<string, string>, q: URLSearchParams, cl
 const handlers: Record<string, Handler> = {
   /** The designer tab: what runs, whether it matches Git and CALM Hub's record, and the version on screen. */
   async tab(deps, p, q) {
-    try {
+    // A tab shows its own error rather than CALM Hub's generic "Extension request failed."
+    return panel(deps, 'designer tab', async () => {
       const arch = await resolveArchitecture(deps.hub, p.namespace, p.resourceType, p.resourceId);
-      const view = await readPlatform(deps, arch.namespace, arch.name);
-      return { status: 200, body: tabReply(view, q.get('version') ?? undefined) };
-    } catch (e) {
-      // A tab shows its own error rather than CALM Hub's generic "Extension request failed."
-      if (e instanceof HttpError) return { status: 200, body: errorReply(e.message) };
-      throw e;
-    }
+      return tabReply(await readPlatform(deps, arch.namespace, arch.name), q.get('version') ?? undefined);
+    });
   },
 
   /** The detail panel of a node: the workload the platform runs for it, its network policies and CALM Hub's record. */
@@ -70,16 +66,35 @@ const handlers: Record<string, Handler> = {
   },
 
   async status(deps, p) {
-    const arch = await findArchitecture(deps.hub, p.namespace, p.architecture);
-    const { status, platform } = await readPlatform(deps, arch.namespace, arch.name);
-    return { status: 200, body: platform ? { ...status, ...platformFacts(platform) } : status };
+    let arch;
+    try {
+      arch = await findArchitecture(deps.hub, p.namespace, p.architecture);
+    } catch (e) {
+      if (!(e instanceof ReadTimeout)) throw e;
+      // Whether the architecture exists is unknown: a status with the problem, not a 5xx.
+      const problem = `Cannot read the architectures in CALM Hub: ${e.message}`;
+      deps.logger.warn(problem);
+      const { namespace, architecture } = p;
+      const body = { namespace, architecture, managed: false, reason: problem, environment: deps.settings.environment, versions: [], problems: [problem] };
+      return { status: 200, body };
+    }
+    const { status, platform, problems } = await readPlatform(deps, arch.namespace, arch.name);
+    return { status: 200, body: platform ? { ...status, ...platformFacts(platform) } : { ...status, ...(problems ? { problems } : {}) } };
   },
 
   async history(deps, p) {
-    const arch = await findArchitecture(deps.hub, p.namespace, p.architecture);
-    const versions = await deps.hub.architectureVersions(arch.namespace, arch.name);
-    const deployments = await readHistory(deps.hub, arch.namespace, arch.name, versions, deps.jobs.unrecorded(arch.name));
-    return { status: 200, body: { deployments: deployments.map(publicEntry) } };
+    const unrecorded = deps.jobs.unrecorded(p.architecture);
+    try {
+      const arch = await findArchitecture(deps.hub, p.namespace, p.architecture);
+      const versions = await deps.hub.architectureVersions(arch.namespace, arch.name);
+      const deployments = await readHistory(deps.hub, arch.namespace, arch.name, versions, deps.jobs.unrecorded(arch.name));
+      return { status: 200, body: { deployments: deployments.map(publicEntry) } };
+    } catch (e) {
+      if (!(e instanceof ReadTimeout)) throw e;
+      // What memory holds, and the problem, rather than a 5xx.
+      deps.logger.warn(`Could not read the history of ${p.namespace}/${p.architecture}: ${e.message}`);
+      return { status: 200, body: { deployments: unrecorded.map(publicEntry), problems: [`Cannot read CALM Hub's records: ${e.message}`] } };
+    }
   },
 
   /** The "Deploy this version" action: the version on screen. */

@@ -24,11 +24,37 @@ const MAX_NOTE = 300;
 /** Runs kubectl and returns stdout. `quiet` keeps stdout out of the log; `timeoutMs` aborts a slow call. */
 export type Kubectl = (args: string[], quiet?: boolean, timeoutMs?: number) => Promise<string>;
 
+/** The overlay's kustomization, relative to the repository root. */
+export const OVERLAY_FILE = `${OVERLAY_DIR}/kustomization.yaml`;
+
+/** The overlay's `calm-service` image entry: the placeholder name, what replaces it, and the result `<newName>:<newTag>`. */
+export interface OverlayImage {
+  name: string;
+  newName: string;
+  newTag: string;
+  image: string;
+}
+
+/** The `calm-service` entry of the overlay's `images:` in the text of its kustomization.yaml; undefined without one. */
+export function parseOverlayImage(text: string | undefined): OverlayImage | undefined {
+  const images = text ? YAML.parse(text)?.images : undefined;
+  const entry = Array.isArray(images) ? images.find((i: any) => i?.name === PLACEHOLDER_IMAGE) : undefined;
+  if (!entry?.newName || !entry?.newTag) return undefined;
+  const [newName, newTag] = [String(entry.newName), String(entry.newTag)];
+  return { name: PLACEHOLDER_IMAGE, newName, newTag, image: `${newName}:${newTag}` };
+}
+
 /** The image the overlay deploys (`<newName>:<newTag>` of its `calm-service` entry), or undefined without one. */
 export async function readOverlayImage(dir: string): Promise<string | undefined> {
-  const text = await fs.readFile(path.join(dir, OVERLAY_DIR, 'kustomization.yaml'), 'utf-8').catch(() => undefined);
-  const entry = text ? (YAML.parse(text)?.images ?? []).find((i: any) => i?.name === PLACEHOLDER_IMAGE) : undefined;
-  return entry?.newName && entry?.newTag ? `${entry.newName}:${entry.newTag}` : undefined;
+  const text = await fs.readFile(path.join(dir, OVERLAY_FILE), 'utf-8').catch(() => undefined);
+  return parseOverlayImage(text)?.image;
+}
+
+/** An image reference without its tag or digest: `localhost:5050/app:1` → `localhost:5050/app`. */
+export function imageRepository(ref: string): string {
+  const name = ref.split('@')[0];
+  const colon = name.lastIndexOf(':');
+  return colon > name.lastIndexOf('/') ? name.slice(0, colon) : name;
 }
 
 /**

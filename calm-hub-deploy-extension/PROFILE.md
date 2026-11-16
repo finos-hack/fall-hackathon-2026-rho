@@ -26,7 +26,9 @@ for, replicas in the cluster, replicas ready, images) and `hubRecord` (CALM Hub'
 platform other than Git and Flux reports its own equivalents.
 
 `history` lists deployments, versions refused at the controls gate (status `refused`, with `evaluationId`, the id of the
-control-evaluation decorator) and a job still at the gate (status `validating`, no `id`, only `deploymentId`).
+control-evaluation decorator) and a job still at the gate (status `validating`, no `id`, only `deploymentId`). The
+reference connector reads the records of the newest 10 versions, and gives `problems[]` with what memory holds when
+CALM Hub does not answer in time.
 
 `deploy` answers at once (CALM Hub gives a backend 10 s) and carries on in the background. The reply carries the
 `deploymentId` only: there is no decorator yet, because the connector validates the version first and writes the
@@ -103,15 +105,18 @@ reference connector reports drift when:
 
 - Flux is not ready, or has not applied the commit `main` points at;
 - a Deployment runs a different number of replicas from the one Git asks for, or has fewer ready than it runs;
+- a Deployment runs an image other than the one Git asks for (for each container that runs the image the overlay
+  sets);
 - Git asks for a Deployment that does not run;
 - CALM Hub's newest completed deployment record names a different version from the one the platform runs.
 
 Rules for any connector:
 
-- A read that fails (the cluster, the platform's API) is a `problem`, never drift: the state is unknown.
+- A read that fails (the cluster, the platform's API) is a `problem`, never drift: the state is unknown. So is a read
+  that times out: the reference connector gives each read of CALM Hub or Gitea 4 s, within CALM Hub's 10 s.
 - While the connector has a job running for the service, drift is not reported: the service is `deploying`. That
-  state comes from the connector's own jobs, so another writer's in-progress deployment shows as drift until it
-  finishes.
+  state comes from the connector's own jobs, so another writer's in-progress deployment can show as drift until it
+  finishes (drift compares the newest completed record with what runs).
 - The reference connector treats only Kubernetes Deployments as workloads, not StatefulSets or DaemonSets.
 
 ## 4. The UI contributions

@@ -89,7 +89,7 @@
     },
     "history": {
       "route": "history",
-      "description": "The deployment attempts for an architecture, newest first: deployments, versions refused at the controls gate (status refused, with the control evaluation's id) and a job still at the gate (status validating, no id yet).",
+      "description": "The deployment attempts on an architecture's newest 10 versions, newest first: deployments, versions refused at the controls gate (status refused, with the control evaluation's id) and a job still at the gate (status validating, no id yet).",
       "input": {
         "type": "object",
         "properties": {
@@ -122,7 +122,8 @@
               },
               "required": ["status"]
             }
-          }
+          },
+          "problems": { "type": "array", "items": { "type": "string" }, "description": "Reads that timed out: the list is what memory holds" }
         },
         "required": ["deployments"]
       },

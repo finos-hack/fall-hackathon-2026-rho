@@ -8,6 +8,7 @@ import {
   requirementUrlOf,
   type GateRefusal,
 } from './evaluation';
+import { calmCliVersion } from './deploy/job';
 import { architectureDoc, evaluationErrors } from './test/fakes';
 
 const VERSION_URL = 'http://hub.test/calm/namespaces/hackathon/architectures/events-stream/versions/1.0.2';
@@ -70,6 +71,15 @@ describe('controlEvaluationOf', () => {
     expect(d.data.findings).toEqual([
       { subject: 'web-service-stream', description: '/relationships/1: not permitted', check: 'calm validate' },
     ]);
+  });
+
+  it('names the engine, with the calm CLI’s version when known', () => {
+    expect((controlEvaluationOf(refusal) as any).data.engine).toStrictEqual({ name: 'calm validate' });
+    const version = calmCliVersion();
+    expect(version).toMatch(/^\d+\.\d+\.\d+/);
+    const d: any = controlEvaluationOf({ ...refusal, engineVersion: version });
+    expect(d.data.engine).toStrictEqual({ name: 'calm validate', version });
+    expect(evaluationErrors(d)).toEqual([]);
   });
 
   it('still gives a finding when calm validate reported errors without any message', () => {
