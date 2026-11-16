@@ -242,6 +242,23 @@ export class FakeGitea {
     }
   }
 
+  /** Names of the files in `folder` at `ref`. */
+  files(repo: string, folder: string, ref = 'main'): string[] {
+    try {
+      return sh(this.bare(repo), 'ls-tree', '--name-only', ref, `${folder}/`)
+        .split('\n')
+        .filter(Boolean)
+        .map(f => path.basename(f));
+    } catch {
+      return [];
+    }
+  }
+
+  repos(): string[] {
+    const org = path.join(this.root, 'calm-services');
+    return fs.existsSync(org) ? fs.readdirSync(org).filter(f => f.endsWith('.git')).map(f => f.slice(0, -4)) : [];
+  }
+
   merge(repo: string, number: number) {
     const pr = this.pulls.find(x => x.number === number)!;
     sh(this.bare(repo), 'update-ref', 'refs/heads/main', `refs/heads/${pr.head}`);
@@ -258,6 +275,18 @@ export class FakeGitea {
       if (!fs.existsSync(this.bare(m[1]))) return reply(404);
       const text = this.show(m[1], m[2], u.searchParams.get('ref') ?? 'main');
       return text === undefined ? reply(404) : reply(200, text);
+    }
+    if (method === 'GET' && p === '/api/v1/orgs/calm-services/repos') {
+      const page = Number(u.searchParams.get('page') ?? '1');
+      return reply(200, page > 1 ? [] : this.repos().map(name => ({ name, empty: false })));
+    }
+    if (method === 'GET' && (m = /^\/api\/v1\/repos\/calm-services\/([^/]+)\/branches\/([^/]+)$/.exec(p))) {
+      if (!fs.existsSync(this.bare(m[1]))) return reply(404);
+      try {
+        return reply(200, { name: m[2], commit: { id: this.head(m[1], m[2]) } });
+      } catch {
+        return reply(404);
+      }
     }
     if ((m = /^\/api\/v1\/repos\/calm-services\/([^/]+)\/contents\/(.+)$/.exec(p))) {
       if (!fs.existsSync(this.bare(m[1]))) return reply(404);
@@ -298,23 +327,60 @@ export class FakeGitea {
   };
 }
 
-/** Kubernetes manifests the fake renderer writes: a labelled Deployment and one NetworkPolicy per relationship. */
+const NODE = 'calm.finos.org/node';
+
+/** A NetworkPolicy as the deployment rules render it: `podSelector` the node (or every pod when undefined). */
+function policy(name: string, node: string | undefined, types: string[], rules: Record<string, unknown> = {}) {
+  return {
+    apiVersion: 'networking.k8s.io/v1',
+    kind: 'NetworkPolicy',
+    metadata: { name },
+    spec: { podSelector: node ? { matchLabels: { [NODE]: node } } : {}, policyTypes: types, ...rules },
+  };
+}
+
+/**
+ * Kubernetes manifests the fake renderer writes: a labelled Deployment (`web-service`, no `spec.replicas`), and
+ * network policies shaped like the bundles': `default-deny` and `allow-dns` for every pod, ingress from the gateway,
+ * and `<relationship>-egress` / `<relationship>-ingress` per relationship.
+ */
 export function manifestsFor(doc: any): Record<string, string> {
   const rels: any[] = doc.relationships ?? [];
+  const policies = [
+    policy('default-deny', undefined, ['Ingress', 'Egress']),
+    policy('allow-dns', undefined, ['Egress'], {
+      egress: [{ to: [{ namespaceSelector: { matchLabels: { 'kubernetes.io/metadata.name': 'kube-system' } } }], ports: [{ port: 53 }] }],
+    }),
+    policy('api-gateway-web-service-ingress', 'web-service', ['Ingress'], {
+      ingress: [{ from: [{ podSelector: { matchLabels: { [NODE]: 'api-gateway' } } }], ports: [{ port: 8080 }] }],
+    }),
+    ...rels.flatMap(r => {
+      const { source, destination } = r['relationship-type'].connects;
+      return [
+        policy(`${r['unique-id']}-egress`, source.node, ['Egress'], {
+          egress: [{ to: [{ podSelector: { matchLabels: { [NODE]: destination.node } } }], ports: [{ port: 5432 }] }],
+        }),
+        policy(`${r['unique-id']}-ingress`, destination.node, ['Ingress'], {
+          ingress: [{ from: [{ podSelector: { matchLabels: { [NODE]: source.node } } }], ports: [{ port: 5432 }] }],
+        }),
+      ];
+    }),
+  ];
   return {
     'deploy/k8s/kustomization.yaml': YAML.stringify({ resources: ['workloads.yaml', 'network-policy.yaml'] }),
     'deploy/k8s/workloads.yaml': YAML.stringify({
       apiVersion: 'apps/v1',
       kind: 'Deployment',
-      metadata: { name: 'web-service', labels: { 'calm.finos.org/node': 'web-service' } },
+      metadata: { name: 'web-service', labels: { [NODE]: 'web-service' } },
+      spec: {
+        selector: { matchLabels: { [NODE]: 'web-service' } },
+        template: {
+          metadata: { labels: { [NODE]: 'web-service' } },
+          spec: { containers: [{ name: 'web-service', image: 'calm-service' }] },
+        },
+      },
     }),
-    'deploy/k8s/network-policy.yaml': rels.length
-      ? rels
-          .map(r =>
-            YAML.stringify({ apiVersion: 'networking.k8s.io/v1', kind: 'NetworkPolicy', metadata: { name: r['unique-id'] } }),
-          )
-          .join('---\n')
-      : '# none\n',
+    'deploy/k8s/network-policy.yaml': policies.map(x => YAML.stringify(x)).join('---\n'),
   };
 }
 
@@ -338,16 +404,47 @@ export function fakeValidate(errors: string[] = []): Validate {
   });
 }
 
-/** kubectl whose Flux has applied whatever `main` of the service repository points at. */
+/** What the fake cluster does differently from what Git asks. */
+export interface Cluster {
+  /** `spec.replicas` per Deployment, as if someone ran `kubectl scale`. */
+  scaled: Record<string, number>;
+  /** Ready replicas per Deployment (default: all of `spec.replicas`). */
+  ready: Record<string, number>;
+  /** Flux applied an older commit than `main`'s. */
+  fluxBehind: boolean;
+  /** kubectl reads of Deployments and NetworkPolicies fail (the cluster cannot be reached). */
+  unreachable: boolean;
+}
+
+const OLD_COMMIT = '0123456789abcdef0123456789abcdef01234567';
+
+/**
+ * kubectl whose Flux has applied whatever `main` of the service repository points at (or an older commit when
+ * `fluxBehind`), and whose cluster runs what `main` renders: its Deployments (image from the overlay, labels and
+ * replicas from Git unless `scaled`) and NetworkPolicies.
+ */
 export function fakeKubectl(gitea: FakeGitea, opts: { fluxReady?: boolean; noKustomization?: boolean } = {}) {
   const calls: string[] = [];
+  const cluster: Cluster = { scaled: {}, ready: {}, fluxBehind: false, unreachable: false };
+  const docs = (svc: string) =>
+    gitea
+      .files(svc, 'deploy/k8s')
+      .filter(f => /\.ya?ml$/.test(f))
+      .flatMap(f => YAML.parseAllDocuments(gitea.show(svc, `deploy/k8s/${f}`) ?? '').map(d => d.toJS()))
+      .filter(Boolean);
+  const overlayImage = (svc: string) => {
+    const k = YAML.parse(gitea.show(svc, 'deploy/k8s-overlay/kustomization.yaml') ?? '{}');
+    const i = (k?.images ?? []).find((x: any) => x.name === 'calm-service');
+    return i ? `${i.newName}:${i.newTag}` : 'calm-service';
+  };
+  const service = (args: string[]) => args[args.indexOf('-n') + 1].replace(/^calm-/, '');
   const kubectl: Kubectl = async args => {
     const line = args.join(' ');
     calls.push(line);
     if (line.includes('get kustomization')) {
       if (opts.noKustomization) return '';
       const svc = args[args.indexOf('kustomization') + 1].replace(/^calm-/, '');
-      const sha = gitea.head(svc);
+      const sha = cluster.fluxBehind ? OLD_COMMIT : gitea.head(svc);
       const ready = opts.fluxReady ?? true;
       return JSON.stringify({
         status: {
@@ -357,9 +454,33 @@ export function fakeKubectl(gitea: FakeGitea, opts: { fluxReady?: boolean; noKus
       });
     }
     if (line.includes('get deployments')) return JSON.stringify({ items: [{ metadata: { name: 'web-service' } }] });
+    if (/get (deploy|networkpolicy) -o json/.test(line)) {
+      if (cluster.unreachable) throw new Error('Unable to connect to the server: dial tcp 127.0.0.1:6443: connect: connection refused');
+      const svc = service(args);
+      if (line.includes('networkpolicy')) return JSON.stringify({ items: docs(svc).filter((d: any) => d.kind === 'NetworkPolicy') });
+      const image = overlayImage(svc);
+      const items = docs(svc)
+        .filter((d: any) => d.kind === 'Deployment')
+        .map((d: any) => {
+          const name = d.metadata.name;
+          const replicas = cluster.scaled[name] ?? d.spec?.replicas ?? 1;
+          const ready = Math.min(cluster.ready[name] ?? replicas, replicas);
+          const containers = (d.spec?.template?.spec?.containers ?? []).map((c: any) => ({
+            ...c,
+            image: c.image === 'calm-service' ? image : c.image,
+          }));
+          return {
+            ...d,
+            spec: { ...d.spec, replicas, template: { ...d.spec?.template, spec: { ...d.spec?.template?.spec, containers } } },
+            // Kubernetes leaves readyReplicas out when none is ready.
+            status: { replicas, ...(ready ? { readyReplicas: ready } : {}) },
+          };
+        });
+      return JSON.stringify({ items });
+    }
     return '';
   };
-  return { kubectl, calls };
+  return { kubectl, calls, cluster };
 }
 
 export interface World {
@@ -369,6 +490,7 @@ export interface World {
   gitea: FakeGitea;
   deps: AppDeps;
   kubectlCalls: string[];
+  cluster: Cluster;
   claims: Pick<HubClaims, 'sub' | 'jti' | 'ns'>;
 }
 
@@ -436,7 +558,7 @@ export function world(opts: { approval?: 'auto' | 'manual'; validateErrors?: str
   sh(seed, 'commit', '-q', '-m', 'Create events-stream');
   sh(seed, 'push', '-q', bare, 'main');
 
-  const { kubectl, calls } = fakeKubectl(gitea, { fluxReady: opts.fluxReady });
+  const { kubectl, calls, cluster } = fakeKubectl(gitea, { fluxReady: opts.fluxReady });
   const deps: AppDeps = {
     settings,
     logger: silentLogger,
@@ -453,5 +575,5 @@ export function world(opts: { approval?: 'auto' | 'manual'; validateErrors?: str
     approvalPollMs: 1,
     fluxPollMs: 1,
   };
-  return { root, settings, hub, gitea, deps, kubectlCalls: calls, claims: { sub: 'alice', jti: 'aaaa1111-2222', ns: 'hackathon' } };
+  return { root, settings, hub, gitea, deps, kubectlCalls: calls, cluster, claims: { sub: 'alice', jti: 'aaaa1111-2222', ns: 'hackathon' } };
 }

@@ -29,7 +29,10 @@ describe('designer tab', () => {
     expect(r.body.blocks[0]).toMatchObject({ type: 'alert', tone: 'warning' });
     expect(r.body.blocks[0].text).toContain('local runs 1.0.0; this page shows 1.0.1');
     const kv = r.body.blocks.find((b: any) => b.type === 'keyValue').items;
-    expect(kv).toContainEqual({ label: 'Deployment rules', value: 'k8s-deploy@1.2.1' });
+    expect(kv).toContainEqual({ label: 'Running version', value: '1.0.0' });
+    expect(kv).toContainEqual({ label: 'This version', value: '1.0.1' });
+    expect(kv).toContainEqual({ label: 'Flux', value: 'Ready' });
+    expect(kv).toContainEqual({ label: "CALM Hub's record", value: 'none' });
   });
 
   it('says so when the version on screen is deployed, and accepts a numeric id', async () => {
@@ -99,6 +102,33 @@ describe('status and history commands', () => {
       deploymentRules: 'k8s-deploy@1.2.1',
     });
   });
+
+  it('reads the architecture’s versions once', async () => {
+    const w = make();
+    let versionReads = 0;
+    w.deps.hub = new HubClient('http://hub.test', async (url, init) => {
+      if (/\/architectures\/events-stream\/versions$/.test(new URL(url).pathname)) versionReads++;
+      return w.hub.fetch(url, init);
+    });
+    await call(w, 'GET', '/namespaces/hackathon/architectures/events-stream/status');
+    expect(versionReads).toBe(1);
+  });
+
+  it('keeps this connector’s attempts when more than 20 newer evaluations are other engines’', async () => {
+    const w = make();
+    await call(w, 'POST', '/deploy/hackathon/architectures/events-stream/1.0.1', {});
+    await w.deps.jobs.idle();
+    const own = Math.max(...w.hub.decorators.keys());
+    for (let i = 0; i < 25; i++) {
+      w.hub.decorators.set(1000 + i, {
+        type: 'control-evaluation',
+        target: ['/calm/namespaces/hackathon/architectures/events-stream/versions/1.0.1'],
+        data: { status: 'met', 'evaluated-at': '2026-01-01T00:00:00Z', actors: { connector: 'someone-else' } },
+      });
+    }
+    const h: any = await call(w, 'GET', '/history/namespaces/hackathon/architectures/events-stream/deployments');
+    expect(h.body.deployments.map((e: any) => e.id)).toEqual([own]);
+  });
 });
 
 describe('deploy', () => {
@@ -147,12 +177,16 @@ describe('deploy', () => {
     expect(w.kubectlCalls.some(c => c.includes('reconcile.fluxcd.io/requestedAt='))).toBe(true);
     expect(w.kubectlCalls.some(c => c.includes('rollout status deployment/web-service'))).toBe(true);
 
-    // The tab now says this version is deployed and lists the deployment.
+    // The tab now says this version runs, and that CALM Hub's record matches; history lists the deployment.
     const t: any = await tab(w, 'events-stream', '1.0.1');
-    expect(t.body.blocks[0]).toMatchObject({ tone: 'positive' });
-    const table = t.body.blocks.find((b: any) => b.type === 'table');
-    expect(table.rows[0][0]).toBe('1.0.1');
-    expect(table.rows[0][1]).toEqual({ badge: 'completed', tone: 'positive' });
+    expect(t.body.blocks[0]).toStrictEqual({ type: 'alert', tone: 'positive', text: 'This version (1.0.1) is the one running in local.' });
+    expect(t.body.blocks.find((b: any) => b.type === 'keyValue').items).toContainEqual({
+      label: "CALM Hub's record",
+      value: '1.0.1 completed — matches the platform',
+    });
+    const h: any = await call(w, 'GET', '/history/namespaces/hackathon/architectures/events-stream/deployments');
+    expect(h.body.deployments[0]).toMatchObject({ version: '1.0.1', status: 'completed' });
+    expect(h.body.deployments[0].appliesTo).toBeUndefined();
   });
 
   it('deploys through the command route by name too', async () => {
@@ -430,9 +464,9 @@ describe('controls gate', () => {
     const s = await status(w);
     expect(s.running).toBeUndefined();
     expect(s.deployedVersion).toBe('1.0.0');
+    // A refusal is not a deployment record: the tab's record line ignores it.
     const t: any = await tab(w, 'events-stream', '1.0.2');
-    const table = t.body.blocks.find((b: any) => b.type === 'table');
-    expect(table.rows[0][1]).toEqual({ badge: 'refused', tone: 'negative' });
+    expect(t.body.blocks.find((b: any) => b.type === 'keyValue').items).toContainEqual({ label: "CALM Hub's record", value: 'none' });
 
     // A later deployment lists before the refusal.
     w.deps.validate = fakeValidate();
