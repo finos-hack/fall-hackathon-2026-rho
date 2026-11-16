@@ -112,7 +112,8 @@ export async function withServiceLock<C extends LockContext>(
   run: (ctx: C) => Promise<void>,
 ): Promise<void> {
   if (options.enabled === false) {
-    return run(ctx);
+    await run(ctx);
+    return;
   }
   const locks = options.locks ?? serviceLocks;
   const owner = ctx.task?.id;
