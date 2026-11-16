@@ -1,4 +1,5 @@
 import { CalmHubError, CalmHubWriteClient, type FetchLike } from '@internal/backstage-plugin-calm-common';
+import { READ_TIMEOUT_MS, timedGets } from './errors';
 
 /**
  * CALM Hub refused a decorator (400), typically `Decorator does not match its $schema`. The message carries CALM
@@ -28,16 +29,17 @@ export function rejectionMessage(body: string): string {
 
 /**
  * The calm-common write client plus replacing a decorator (PUT), to move it through statuses. Decorator writes go
- * through `send` rather than calm-common so a refusal keeps CALM Hub's whole reason (`DecoratorRejected`).
+ * through `send` rather than calm-common so a refusal keeps CALM Hub's whole reason (`DecoratorRejected`). Every GET
+ * gives up after `readTimeoutMs` (4 s) with `ReadTimeout`; writes have no timeout.
  */
 export class HubClient extends CalmHubWriteClient {
-  constructor(baseUrl: string, fetchImpl?: FetchLike) {
-    super(baseUrl, fetchImpl);
+  constructor(baseUrl: string, fetchImpl?: FetchLike, opts: { readTimeoutMs?: number } = {}) {
+    super(baseUrl, timedGets('CALM Hub', fetchImpl, opts.readTimeoutMs ?? READ_TIMEOUT_MS));
   }
 
   private async send(method: 'POST' | 'PUT', path: string, body: unknown): Promise<string> {
-    const url = `${(this as any).baseUrl}${path}`;
-    const doFetch: FetchLike = (this as any).fetchImpl ?? ((globalThis as any).fetch as FetchLike);
+    const url = `${this.baseUrl}${path}`;
+    const doFetch: FetchLike = this.fetchImpl ?? ((globalThis as any).fetch as FetchLike);
     const res = await doFetch(url, {
       method,
       headers: { Accept: 'application/json', 'Content-Type': 'application/json' },

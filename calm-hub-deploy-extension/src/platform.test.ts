@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import fs from 'node:fs';
 import { handle } from './app';
+import { driftOf, usesOverlayImage } from './platform';
+import { imageRepository, parseOverlayImage } from './deploy/kube';
 import { world, type World } from './test/fakes';
 
 const worlds: World[] = [];
@@ -84,6 +86,66 @@ describe('drift', () => {
     const s = await status(w);
     expect(s.inSync).toBe(false);
     expect(s.drift).toEqual(['web-service runs 0 replicas; Git asks for 1']);
+  });
+
+  it('detects drift and clears it once the cluster matches Git again (one world)', async () => {
+    const w = make();
+    expect((await status(w)).inSync).toBe(true);
+    w.cluster.scaled['web-service'] = 0;
+    const drifted = await status(w);
+    expect(drifted.inSync).toBe(false);
+    expect(drifted.drift).toEqual(['web-service runs 0 replicas; Git asks for 1']);
+    // Flux puts the replicas back.
+    delete w.cluster.scaled['web-service'];
+    const restored = await status(w);
+    expect(restored.inSync).toBe(true);
+    expect(restored.drift).toEqual([]);
+  });
+
+  it('names a workload whose image differs from Git, and clears when it is restored', async () => {
+    const w = make();
+    w.cluster.images['web-service'] = 'events-stream:old999';
+    const s = await status(w);
+    expect(s.inSync).toBe(false);
+    expect(s.drift).toEqual(['web-service runs image events-stream:old999; Git asks for events-stream:abc123']);
+    expect((await node(w, 'web-service'))[0]).toEqual({
+      type: 'alert',
+      tone: 'warning',
+      text: 'Drift: web-service runs image events-stream:old999; Git asks for events-stream:abc123',
+    });
+    delete w.cluster.images['web-service'];
+    const restored = await status(w);
+    expect(restored.inSync).toBe(true);
+    expect(restored.drift).toEqual([]);
+  });
+
+  it('compares only the containers that run the overlay’s image, by repository with any registry, tag or digest', () => {
+    const image = parseOverlayImage(
+      'images:\n  - name: calm-service\n    newName: localhost:5050/calm/events-stream\n    newTag: "abc123"\n',
+    )!;
+    expect(image).toEqual({ name: 'calm-service', newName: 'localhost:5050/calm/events-stream', newTag: 'abc123', image: 'localhost:5050/calm/events-stream:abc123' });
+    expect(imageRepository('localhost:5050/calm/events-stream:abc123')).toBe('localhost:5050/calm/events-stream');
+    expect(imageRepository('events-stream@sha256:0123')).toBe('events-stream');
+    expect(imageRepository('localhost:5050/app')).toBe('localhost:5050/app');
+    expect(usesOverlayImage('calm-service', image)).toBe(true);
+    expect(usesOverlayImage('localhost:5050/calm/events-stream:old', image)).toBe(true);
+    expect(usesOverlayImage('postgres:16', image)).toBe(false);
+    const run = (images: string[]) =>
+      driftOf({
+        environment: 'local',
+        flux: {},
+        workloads: [{ name: 'stream-app', replicas: 1, ready: 1, images }],
+        missing: [],
+        image,
+        policies: [],
+        problems: [],
+      }).map(r => r.text);
+    expect(run(['localhost:5050/calm/events-stream:abc123', 'busybox:1.36'])).toEqual([]);
+    expect(run(['postgres:16'])).toEqual([]);
+    expect(run(['localhost:5050/calm/events-stream:old'])).toEqual([
+      'stream-app runs image localhost:5050/calm/events-stream:old; Git asks for localhost:5050/calm/events-stream:abc123',
+    ]);
+    expect(parseOverlayImage('resources: [../k8s]\n')).toBeUndefined();
   });
 
   it('names a workload that is not ready', async () => {
@@ -319,6 +381,35 @@ describe('landing card and services screen', () => {
     const blocks = (await call(drifted, 'GET', '/card')).body.blocks;
     expect(blocks[0].items.map((i: any) => i.value)).toEqual(['1', '0', '1']);
     expect(blocks[1]).toEqual({ type: 'alert', tone: 'warning', text: 'events-stream: web-service runs 0 replicas; Git asks for 1' });
+  });
+
+  it('answers the card and the screen (scope authenticated) through handle for an assertion with no ns claim', async () => {
+    const w = make();
+    noNamespace(w);
+    const seen: any[] = [];
+    const verify = w.deps.verify;
+    w.deps.verify = async (t, req) => {
+      const claims = await verify(t, req);
+      seen.push(claims);
+      return claims;
+    };
+    const card = await call(w, 'GET', '/card');
+    const screen = await call(w, 'GET', '/screen');
+    expect(seen).toHaveLength(2);
+    for (const claims of seen) expect('ns' in claims).toBe(false);
+    expect(w.deps.routes.match('GET', '/card')).toMatchObject({ kind: 'route', route: { id: 'card', scope: 'authenticated' } });
+    expect(w.deps.routes.match('GET', '/screen')).toMatchObject({ kind: 'route', route: { id: 'screen', scope: 'authenticated' } });
+    expect(card.status).toBe(200);
+    expect(card.body.blocks[0]).toEqual({
+      type: 'stats',
+      items: [
+        { label: 'Services', value: '1' },
+        { label: 'In sync', value: '1' },
+        { label: 'Drifted', value: '0' },
+      ],
+    });
+    expect(screen.status).toBe(200);
+    expect(screen.body.blocks[1].rows[0][0]).toMatchObject({ label: 'events-stream' });
   });
 
   it('lists each service on the screen, linked to its architecture in CALM Hub', async () => {

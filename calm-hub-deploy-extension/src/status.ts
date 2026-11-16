@@ -21,6 +21,8 @@ const RUNNING = new Set(['validating', 'pending', 'in-progress']);
 export const KUBECTL_TIMEOUT_MS = 5_000;
 const RECORD_TYPES = ['deployment', 'control-evaluation'];
 const MAX_HISTORY_PAGES = 5;
+/** History reads the records of the newest 10 versions only (and the running one), to stay within CALM Hub's 10 s. */
+export const HISTORY_VERSIONS = 10;
 
 export interface ReadDeps {
   settings: Settings;
@@ -52,11 +54,18 @@ export interface Status {
   running?: { version?: string; status: DeploymentStatus | string; notes?: string };
 }
 
+/** The newest `HISTORY_VERSIONS` of `versions`, plus `running` when it is an older one. */
+export function scannedVersions(versions: string[], running?: string): string[] {
+  const newest = [...versions].sort(compareVersions).slice(-HISTORY_VERSIONS);
+  return running && versions.includes(running) && !newest.includes(running) ? [running, ...newest] : newest;
+}
+
 /**
- * The deployment attempts on every version of an architecture, newest first (at most 20): its deployment decorators,
- * this connector's refusals at the controls gate (control-evaluation decorators), and `unrecorded` (jobs CALM Hub
- * holds no record of yet, from memory). Entries read from deployment decorators carry `appliesTo`; the history route
- * leaves it out.
+ * The deployment attempts on an architecture's newest 10 versions (and `running`, the version that runs, when it is
+ * older), newest first (at most 20): its deployment decorators, this connector's refusals at the controls gate
+ * (control-evaluation decorators), and `unrecorded` (jobs from memory that CALM Hub holds no record of yet, or whose
+ * outcome it did not take: those replace the record with the same id). Entries read from deployment decorators carry
+ * `appliesTo`; the history route leaves it out.
  */
 export async function readHistory(
   hub: HubClient,
@@ -64,9 +73,10 @@ export async function readHistory(
   architecture: string,
   versions: string[],
   unrecorded: HistoryEntry[] = [],
+  running?: string,
 ): Promise<HistoryEntry[]> {
-  // CALM Hub gives each proxied call 10 s: list every version's decorators at once.
-  const pairs = versions.flatMap(version => RECORD_TYPES.map(type => ({ version, type })));
+  // CALM Hub gives each proxied call 10 s: list every scanned version's decorators at once.
+  const pairs = scannedVersions(versions, running).flatMap(version => RECORD_TYPES.map(type => ({ version, type })));
   const lists = await Promise.all(
     pairs.map(p => hub.listDecorators(namespace, { target: architectureVersionPath(namespace, architecture, p.version), type: p.type })),
   );
@@ -89,7 +99,10 @@ export async function readHistory(
     );
     kept.push(...read.filter((e): e is HistoryEntry => e !== undefined));
   }
-  return newestFirst([...unrecorded, ...kept.slice(0, HISTORY_LIMIT)]).slice(0, HISTORY_LIMIT);
+  // A job whose outcome CALM Hub did not take carries its decorator's id: memory's outcome replaces the stale record.
+  const replaced = new Set(unrecorded.map(u => u.id).filter((id): id is number => id !== undefined));
+  const fromHub = kept.filter(e => e.id === undefined || !replaced.has(e.id)).slice(0, HISTORY_LIMIT);
+  return newestFirst([...unrecorded, ...fromHub]).slice(0, HISTORY_LIMIT);
 }
 
 /** A history entry as the history route gives it (without the nodes a deployment applies to). */

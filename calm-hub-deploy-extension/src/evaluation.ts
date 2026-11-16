@@ -47,6 +47,8 @@ export interface GateRefusal {
   requestedBy: string;
   hubAuditId: string;
   evaluatedAt: string;
+  /** The version of the `calm` CLI that ran `calm validate`, when known (`data.engine.version`). */
+  engineVersion?: string;
 }
 
 /** Relationships (by unique-id) of the refused version that the deployed one does not have; none when it is unknown. */
@@ -115,7 +117,7 @@ export function controlEvaluationOf(r: GateRefusal): Record<string, unknown> {
       status: 'not-met',
       'evaluated-at': r.evaluatedAt,
       findings: descriptions.map(description => ({ subject, description, check: ENGINE })),
-      engine: { name: ENGINE },
+      engine: { name: ENGINE, ...(r.engineVersion ? { version: r.engineVersion } : {}) },
       actors: { 'requested-by': r.requestedBy, 'hub-audit-id': r.hubAuditId, connector: CONNECTOR },
     },
   };

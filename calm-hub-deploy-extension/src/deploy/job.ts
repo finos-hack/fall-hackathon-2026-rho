@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 import YAML from 'yaml';
@@ -44,6 +45,11 @@ export interface JobState {
   evaluationId?: number;
   /** The pull request the job waits for a person to merge (manual approval), while it waits. */
   pendingApproval?: { number: number; url: string };
+  /**
+   * CALM Hub did not take the job's final update (`completed` or `failed`): its decorator still shows an earlier
+   * status, so memory holds the outcome (`status`, `endTime`, `notes`) and history shows it in the decorator's place.
+   */
+  outcomeUnrecorded?: boolean;
 }
 
 /** One deployment job per service at a time; jobs live in memory (a restart marks unfinished ones failed). */
@@ -85,13 +91,16 @@ export class Jobs {
 
   /**
    * The latest job of `key` as a history entry while CALM Hub holds no record of it: at the controls gate, or ended
-   * before a record could be written. Once CALM Hub has its decorator or evaluation, history reads that instead.
+   * before a record could be written. Once CALM Hub has its decorator or evaluation, history reads that instead,
+   * unless CALM Hub did not take the final update: then the entry carries the decorator's id and replaces it.
    */
   unrecorded(key: string): HistoryEntry[] {
     const s = this.latest.get(key);
-    if (!s || s.decoratorId !== undefined || s.evaluationId !== undefined) return [];
+    if (!s || s.evaluationId !== undefined) return [];
+    if (s.decoratorId !== undefined && !s.outcomeUnrecorded) return [];
     return [
       {
+        ...(s.outcomeUnrecorded ? { id: s.decoratorId } : {}),
         deploymentId: s.deploymentId,
         version: s.version,
         status: s.status,
@@ -156,6 +165,21 @@ export function registryRender(deps: ReadDeps): Render {
     const r = await renderBundle({ architecturePath, bundleDir: pulled.dir, dir, outputDir: RENDERED, logger: deps.logger });
     return r.files;
   };
+}
+
+/**
+ * The version of the `calm` CLI that `cliValidate` runs (`@finos/calm-cli`, a dependency of calm-node); undefined when
+ * it cannot be found.
+ */
+export function calmCliVersion(): string | undefined {
+  try {
+    const here = createRequire(path.join(__dirname, 'job.ts'));
+    const calmNode = createRequire(here.resolve('@internal/backstage-plugin-calm-node/package.json'));
+    const version = calmNode('@finos/calm-cli/package.json')?.version;
+    return typeof version === 'string' && version ? version : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /** The default controls gate: `calm validate` against the architecture's pattern and the Hub's controls. */
@@ -332,6 +356,7 @@ async function refuse(
 ): Promise<void> {
   const { record, state, service } = ctx;
   const notes = refusalNotes(firstError(errors));
+  const engineVersion = deps.validate ? undefined : calmCliVersion();
   let evaluationId: number | undefined;
   try {
     evaluationId = await recordRefusal(deps, {
@@ -346,6 +371,8 @@ async function refuse(
       requestedBy: record.requestedBy,
       hubAuditId: record.hubAuditId,
       evaluatedAt,
+      // The CLI's version when the default gate ran it; an injected gate says nothing about its engine.
+      ...(engineVersion ? { engineVersion } : {}),
     });
   } catch (e) {
     deps.logger.error(`Could not record that ${record.uniqueId} was refused at the controls gate: ${oneLine(e)}`);
@@ -380,7 +407,17 @@ export async function runDeployment(
     if (decoratorId === undefined) return;
     try {
       await hub.updateDecorator(record.namespace, decoratorId, decoratorOf(record));
+      delete state.outcomeUnrecorded;
     } catch (e) {
+      if (record.status === 'completed' || record.status === 'failed') {
+        // The outcome would be invisible (the decorator still says in progress): memory holds it.
+        Object.assign(state, {
+          status: record.status,
+          endTime: record.endTime,
+          notes: `${record.notes} (CALM Hub did not record this: ${oneLine(e)})`,
+          outcomeUnrecorded: true,
+        });
+      }
       // CALM Hub refused the record itself: the step fails (with its reason) rather than going on unrecorded.
       if (e instanceof DecoratorRejected) throw e;
       logger.warn(`Could not update decorator ${decoratorId}: ${oneLine(e)}`);

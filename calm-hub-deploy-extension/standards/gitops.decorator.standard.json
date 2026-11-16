@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "http://localhost:8090/calm/namespaces/hackathon/standards/gitops-deployment",
+  "$id": "urn:calm-platform-connector:standards:gitops-deployment:1.0",
   "title": "GitOps deployment decorator",
   "description": "A Kubernetes deployment decorator made through GitOps: the standard deployment record plus, in data.gitops, how the Platform Connector made the change (repository, pull request, commit) and who asked for it through CALM Hub.",
   "allOf": [

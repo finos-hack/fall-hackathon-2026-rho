@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import fs from 'node:fs';
 import YAML from 'yaml';
+import type { FetchLike } from '@internal/backstage-plugin-calm-common';
 import { handle } from './app';
+import { Gitea } from './gitea';
 import { HubClient } from './hub';
 import { architectureDoc, fakeValidate, world, type World } from './test/fakes';
 
@@ -128,6 +130,109 @@ describe('status and history commands', () => {
     }
     const h: any = await call(w, 'GET', '/history/namespaces/hackathon/architectures/events-stream/deployments');
     expect(h.body.deployments.map((e: any) => e.id)).toEqual([own]);
+  });
+
+  it('reads the records of the newest 10 versions only, and of the running version', async () => {
+    const w = make();
+    const versions = w.hub.architectures.get('events-stream')!.versions;
+    for (let i = 2; i <= 12; i++) versions.set(`1.0.${i}`, architectureDoc('events-stream', `1.0.${i}`, ['database']));
+    const record = (id: number, version: string, startTime: string) =>
+      w.hub.decorators.set(id, {
+        type: 'deployment',
+        target: [`/calm/namespaces/hackathon/architectures/events-stream/versions/${version}`],
+        'target-type': ['architecture'],
+        data: { 'start-time': startTime, status: 'completed' },
+      });
+    record(700, '1.0.0', '2026-11-01T10:00:00Z'); // running, older than the newest 10
+    record(701, '1.0.1', '2026-11-02T10:00:00Z'); // neither
+    record(702, '1.0.12', '2026-11-03T10:00:00Z');
+    let listed = 0;
+    w.deps.hub = new HubClient('http://hub.test', async (url, init) => {
+      if (/\/decorators\?/.test(url)) listed++;
+      return w.hub.fetch(url, init);
+    });
+    const h: any = await call(w, 'GET', '/history/namespaces/hackathon/architectures/events-stream/deployments');
+    expect(h.body.deployments.map((e: any) => e.id)).toEqual([702]);
+    expect(listed).toBe(10 * 2);
+    listed = 0;
+    const s: any = (await call(w, 'GET', '/namespaces/hackathon/architectures/events-stream/status')).body;
+    expect(s.hubRecord).toMatchObject({ version: '1.0.12', status: 'completed' });
+    // The running version's record is read too: 1.0.0 is not in the newest 10.
+    expect(listed).toBe(11 * 2);
+  });
+});
+
+describe('reads that time out', () => {
+  /** `fetch`, except that requests matching `hang` never answer until their signal aborts. */
+  const hanging =
+    (fetch: FetchLike, hang: RegExp): FetchLike =>
+    (url, init) =>
+      hang.test(url)
+        ? new Promise((_, reject) => init?.signal?.addEventListener('abort', () => reject(init.signal.reason)))
+        : fetch(url, init);
+  const slowHub = (w: World, hang = /./) => (w.deps.hub = new HubClient('http://hub.test', hanging(w.hub.fetch, hang), { readTimeoutMs: 20 }));
+  const slowGitea = (w: World, hang = /./) =>
+    (w.deps.gitea = new Gitea('http://gitea.test', w.settings.gitops.auth, hanging(w.gitea.fetch, hang), { readTimeoutMs: 20 }));
+  const routes = [
+    '/tab/hackathon/architectures/events-stream?namespace=hackathon&version=1.0.0',
+    '/node/hackathon/architectures/events-stream/web-service?namespace=hackathon&selectedElement=web-service',
+    '/namespaces/hackathon/architectures/events-stream/status',
+    '/history/namespaces/hackathon/architectures/events-stream/deployments',
+    '/card',
+    '/screen',
+  ];
+
+  it('shows a CALM Hub that does not answer as a problem on every read route, never a 5xx', async () => {
+    for (const url of routes) {
+      const w = make();
+      slowHub(w);
+      const r: any = await call(w, 'GET', url);
+      expect(r.status, url).toBe(200);
+      if (url === '/card') {
+        // The card has only counts (CALM Hub draws no more): a problem is neither in sync nor drifted, like a cluster
+        // read that failed. The screen, read from the same rows, names it.
+        expect(r.body.blocks[0].items.map((i: any) => i.value)).toEqual(['1', '0', '0']);
+      } else {
+        expect(JSON.stringify(r.body), url).toContain('CALM Hub did not answer GET http://hub.test/');
+      }
+    }
+  });
+
+  it('shows a Gitea that does not answer as a problem on every route that reads it, never a 5xx', async () => {
+    for (const url of routes) {
+      const w = make();
+      slowGitea(w);
+      const r: any = await call(w, 'GET', url);
+      expect(r.status, url).toBe(200);
+      // The history reads only CALM Hub.
+      if (!url.startsWith('/history')) expect(JSON.stringify(r.body), url).toContain('Gitea did not answer GET http://gitea.test/');
+    }
+    const w = make();
+    slowGitea(w);
+    const tabBlocks = ((await call(w, 'GET', routes[0])).body as any).blocks;
+    expect(tabBlocks[0]).toEqual({
+      type: 'alert',
+      tone: 'warning',
+      text: expect.stringMatching(/^Cannot read the service repository: Gitea did not answer GET .* within 0.02 s$/),
+    });
+    const status: any = (await call(w, 'GET', routes[2])).body;
+    expect(status.problems).toEqual([status.reason]);
+  });
+
+  it('keeps the rest of the status when only CALM Hub’s records time out, and is neither in sync nor drifted', async () => {
+    const w = make();
+    slowHub(w, /\/decorators/);
+    const s: any = (await call(w, 'GET', routes[2])).body;
+    expect(s).toMatchObject({ managed: true, deployedVersion: '1.0.0', latestVersion: '1.0.1', inSync: false, drift: [] });
+    expect(s.problems).toEqual([expect.stringMatching(/^Cannot read CALM Hub's deployment records: CALM Hub did not answer GET/)]);
+  });
+
+  it('shows the overlay read timing out as a problem, not as image drift', async () => {
+    const w = make();
+    slowGitea(w, /k8s-overlay/);
+    const s: any = (await call(w, 'GET', routes[2])).body;
+    expect(s).toMatchObject({ managed: true, inSync: false, drift: [] });
+    expect(s.problems).toEqual([expect.stringMatching(/^Cannot read the image Git asks for: Gitea did not answer GET/)]);
   });
 });
 
@@ -312,6 +417,40 @@ describe('deploy', () => {
     await w.deps.jobs.idle();
     expect(w.hub.latest().data.status).toBe('pending');
     expect(lines).toContainEqual(expect.stringContaining('Could not record that events-stream-1.0.1-aaaa1111 failed: CALM Hub refused'));
+    // The outcome is not lost: history and status show it from memory, in place of the stale record.
+    const id = Math.max(...w.hub.decorators.keys());
+    const h: any = await call(w, 'GET', '/history/namespaces/hackathon/architectures/events-stream/deployments');
+    expect(h.body.deployments).toHaveLength(1);
+    expect(h.body.deployments[0]).toMatchObject({ id, version: '1.0.1', status: 'failed' });
+    expect(h.body.deployments[0].notes).toContain('CALM Hub did not record this');
+    expect(((await call(w, 'GET', '/namespaces/hackathon/architectures/events-stream/status')).body as any).running).toBeUndefined();
+  });
+
+  it('keeps the outcome in memory when CALM Hub does not take the final update, until it takes one', async () => {
+    // CALM Hub refuses both final updates (completed, then failed): the decorator still says in-progress.
+    const w = make();
+    w.hub.rejectPut = (_n, d) => d.data.status === 'completed' || d.data.status === 'failed';
+    await call(w, 'POST', '/deploy/hackathon/architectures/events-stream/1.0.1', {});
+    await w.deps.jobs.idle();
+    const id = Math.max(...w.hub.decorators.keys());
+    expect(w.hub.decorators.get(id).data.status).toBe('in-progress');
+    const h: any = await call(w, 'GET', '/history/namespaces/hackathon/architectures/events-stream/deployments');
+    expect(h.body.deployments).toHaveLength(1);
+    expect(h.body.deployments[0]).toMatchObject({ id, status: 'failed', endTime: expect.any(String) });
+    expect(h.body.deployments[0].notes).toMatch(/^Deployment failed: CALM Hub refused the decorator.*\(CALM Hub did not record this: /);
+    const s: any = (await call(w, 'GET', '/namespaces/hackathon/architectures/events-stream/status')).body;
+    expect(s.running).toBeUndefined();
+    expect(s.hubRecord).toMatchObject({ status: 'failed' });
+
+    // CALM Hub refuses only "completed" and takes "failed": history reads CALM Hub's record, once.
+    const v = make();
+    v.hub.rejectPut = (_n, d) => d.data.status === 'completed';
+    await call(v, 'POST', '/deploy/hackathon/architectures/events-stream/1.0.1', {});
+    await v.deps.jobs.idle();
+    const hv: any = await call(v, 'GET', '/history/namespaces/hackathon/architectures/events-stream/deployments');
+    expect(hv.body.deployments).toHaveLength(1);
+    expect(hv.body.deployments[0]).toMatchObject({ status: 'failed' });
+    expect(hv.body.deployments[0].notes).not.toContain('CALM Hub did not record this');
   });
 
   it('keeps CALM Hub’s reason in memory when it refuses the first record, and gives the claim back', async () => {

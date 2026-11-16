@@ -118,8 +118,8 @@ export class FakeHub {
   architectures = new Map<string, { numericId: number; versions: Map<string, any> }>();
   decorators = new Map<number, any>();
   puts: { id: number; status: string; notes: string }[] = [];
-  /** Makes CALM Hub refuse the n-th PUT (1-based) as not matching its $schema. */
-  rejectPut?: (n: number) => boolean;
+  /** Makes CALM Hub refuse the n-th PUT (1-based), or one of decorator `d`, as not matching its $schema. */
+  rejectPut?: (n: number, d: any) => boolean;
   private putCount = 0;
   private nextId = 100;
 
@@ -189,7 +189,7 @@ export class FakeHub {
         if (!this.decorators.has(id)) return reply(404);
         const d = JSON.parse(init.body);
         const errors = standardErrors(d);
-        if (this.rejectPut?.(++this.putCount)) errors.push({ location: '/data/kubernetes', error: 'refused by the test' });
+        if (this.rejectPut?.(++this.putCount, d)) errors.push({ location: '/data/kubernetes', error: 'refused by the test' });
         if (errors.length) return rejection(errors);
         this.decorators.set(id, d);
         this.puts.push({ id, status: d.data.status, notes: d.data.notes });
@@ -410,6 +410,8 @@ export interface Cluster {
   scaled: Record<string, number>;
   /** Ready replicas per Deployment (default: all of `spec.replicas`). */
   ready: Record<string, number>;
+  /** The image a Deployment's `calm-service` containers run, as if someone ran `kubectl set image` (default: the overlay's). */
+  images: Record<string, string>;
   /** Flux applied an older commit than `main`'s. */
   fluxBehind: boolean;
   /** kubectl reads of Deployments and NetworkPolicies fail (the cluster cannot be reached). */
@@ -425,7 +427,7 @@ const OLD_COMMIT = '0123456789abcdef0123456789abcdef01234567';
  */
 export function fakeKubectl(gitea: FakeGitea, opts: { fluxReady?: boolean; noKustomization?: boolean } = {}) {
   const calls: string[] = [];
-  const cluster: Cluster = { scaled: {}, ready: {}, fluxBehind: false, unreachable: false };
+  const cluster: Cluster = { scaled: {}, ready: {}, images: {}, fluxBehind: false, unreachable: false };
   const docs = (svc: string) =>
     gitea
       .files(svc, 'deploy/k8s')
@@ -467,7 +469,7 @@ export function fakeKubectl(gitea: FakeGitea, opts: { fluxReady?: boolean; noKus
           const ready = Math.min(cluster.ready[name] ?? replicas, replicas);
           const containers = (d.spec?.template?.spec?.containers ?? []).map((c: any) => ({
             ...c,
-            image: c.image === 'calm-service' ? image : c.image,
+            image: c.image === 'calm-service' ? cluster.images[name] ?? image : c.image,
           }));
           return {
             ...d,

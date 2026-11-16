@@ -74,7 +74,12 @@ export function recordLine(p: Platform): string {
   return c ? `${head}; newest completed ${c.version ?? 'unknown version'}${verdict ? ` — ${verdict}` : ''}` : head;
 }
 
-const notManaged = (s: Status): Block => ({ type: 'alert', tone: 'info', text: `Not deployed through GitOps. ${s.reason ?? ''}`.trim() });
+/** Not managed, or (a read timed out) not known to be: then the problem is the reason, as a warning. */
+const notManaged = (view: PlatformView): Block => {
+  const s: Status = view.status;
+  if (s.reason && view.problems?.includes(s.reason)) return { type: 'alert', tone: 'warning', text: s.reason };
+  return { type: 'alert', tone: 'info', text: `Not deployed through GitOps. ${s.reason ?? ''}`.trim() };
+};
 
 /** The designer tab for an architecture version: what runs, and whether it matches Git and CALM Hub's record. */
 export function tabReply(view: PlatformView, version?: string): BlocksReply {
@@ -83,7 +88,7 @@ export function tabReply(view: PlatformView, version?: string): BlocksReply {
     return {
       hubApi: 0,
       blocks: [
-        notManaged(s),
+        notManaged(view),
         {
           type: 'markdown',
           text: 'This extension deploys services created from a CALM pattern with a starter and deployment rules (calm-backstage), which live in Git and are applied by Flux.',
@@ -123,7 +128,7 @@ const listOr = (names: string[], none = 'none') => (names.length ? names.join(';
 /** The detail panel for one node (or relationship) of the diagram: what the platform runs for it. */
 export function nodeReply(view: PlatformView, node: string): BlocksReply {
   const { status: s, platform: p } = view;
-  if (!s.managed || !p) return { hubApi: 0, blocks: [notManaged(s)] };
+  if (!s.managed || !p) return { hubApi: 0, blocks: [notManaged(view)] };
   const workloads = p.workloads.filter(w => w.node === node);
   // Deployments Git asks for that the cluster read did not return (deleted, or the cluster could not be read).
   const absent = (view.service?.deployments ?? []).filter(d => d.node === node && !workloads.some(w => w.name === d.name));

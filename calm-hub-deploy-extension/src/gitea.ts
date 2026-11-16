@@ -1,4 +1,5 @@
 import { GiteaClient, type FetchLike } from '@internal/backstage-plugin-calm-common';
+import { READ_TIMEOUT_MS, timedGets } from './errors';
 
 const enc = encodeURIComponent;
 const REPO_PAGE = 50;
@@ -14,19 +15,24 @@ export interface PullRequestState {
 /**
  * calm-common's GiteaClient plus the reads this extension needs: a file at a ref (the read side never touches a
  * working copy, so a tab opened during a deployment cannot disturb it), a folder listing, and a pull request's state
- * (to wait for a human to merge it).
+ * (to wait for a human to merge it). The read side's reads (files, folders, branches, repositories) give up after
+ * `readTimeoutMs` (4 s) with `ReadTimeout`; the deployment job's pull request polls have no timeout.
  */
 export class Gitea extends GiteaClient {
+  private readonly timedFetcher: FetchLike;
+
   constructor(
     baseUrl: string,
     private readonly credentials: { username: string; password: string },
     private readonly fetcher?: FetchLike,
+    opts: { readTimeoutMs?: number } = {},
   ) {
     super(baseUrl, credentials, fetcher);
+    this.timedFetcher = timedGets('Gitea', fetcher, opts.readTimeoutMs ?? READ_TIMEOUT_MS);
   }
 
-  private async get(path: string): Promise<{ status: number; text: string }> {
-    const f = this.fetcher ?? ((globalThis as any).fetch as FetchLike);
+  private async get(path: string, timed = true): Promise<{ status: number; text: string }> {
+    const f = timed ? this.timedFetcher : this.fetcher ?? ((globalThis as any).fetch as FetchLike);
     const res = await f(`${this.baseUrl}/api/v1${path}`, {
       method: 'GET',
       headers: {
@@ -80,7 +86,8 @@ export class Gitea extends GiteaClient {
   }
 
   async pullRequest(owner: string, repo: string, number: number): Promise<PullRequestState> {
-    const r = await this.get(`/repos/${enc(owner)}/${enc(repo)}/pulls/${number}`);
+    // Polled by the deployment job while it waits for a merge: no read timeout.
+    const r = await this.get(`/repos/${enc(owner)}/${enc(repo)}/pulls/${number}`, false);
     if (r.status >= 300) throw new Error(`Gitea GET pull ${owner}/${repo}#${number} returned ${r.status}`);
     const pr = JSON.parse(r.text);
     return {
