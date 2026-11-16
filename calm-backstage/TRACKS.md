@@ -106,7 +106,7 @@ Scope: GitHub publish, dry run, register the architecture in the Hub.
     read-back after a POST that worked (the version exists). A failure after the store (git publish, build, deploy)
     still leaves the stored version, which cannot be deleted (a rerun with the same document reuses it, and a failed
     deploy is recorded on it), and the published folder, so a rerun with that name is refused.
-  - In a dry run `calm:image:build`, `calm:deploy:k8s` and `calm:deploy:gitops` only plan: they check their inputs, write the overlay in the dry-run folder, log what they would run and output the image, namespace and the nodes, deployments and services read from the rendered manifests (no Docker, kubectl, git or Flux). `calm:decorate:deployment` has no dry run yet.
+  - In a dry run `calm:image:build`, `calm:deploy:k8s` and `calm:deploy:gitops` only plan: they check their inputs, write the overlay in the dry-run folder, log what they would run and output the image, namespace and the nodes, deployments and services read from the rendered manifests (no Docker, kubectl, git or Flux). `calm:decorate:deployment` builds the decorator and logs it without storing it (its id is `dry-run`), and `calm:register:local` logs the location it would add.
 - `calm:publish:local` still writes `output/<name>/` and `calm:register:local` adds a file location.
 - Done (part 3): services are pushed to Gitea and deployed by Flux (`calm:git:publish`, `calm:deploy:gitops`); the
   card shows the Flux status and the commit applied; upgrades go through a merged pull request. Each Kustomization

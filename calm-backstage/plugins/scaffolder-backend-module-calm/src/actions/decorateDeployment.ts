@@ -53,6 +53,8 @@ export interface DeploymentRecord {
   taskId?: string;
   /** Appended to the unique-id, e.g. `-failed`, so a failed and a successful run of one task differ. */
   uniqueIdSuffix?: string;
+  /** Builds the decorator and logs it, without storing it: the id is `dry-run`. Hub reads still happen. */
+  dryRun?: boolean;
 }
 
 /**
@@ -64,7 +66,12 @@ export async function recordDeployment(
   appBaseUrl: string,
   input: DeploymentRecord,
   logger: LoggerService,
-): Promise<{ id: number; uniqueId: string; target: string; url: string }> {
+): Promise<{
+  id: number | 'dry-run';
+  uniqueId: string;
+  target: string;
+  url: string;
+}> {
   const { hubNamespace, architecture, version, name, cluster, namespace } =
     input;
   const status: DeploymentStatus = input.status ?? 'completed';
@@ -94,9 +101,22 @@ export async function recordDeployment(
   }
 
   // CALM Hub's UI finds an architecture's decorators by its numeric id, so name that target as well.
-  const numericId = (await hub.architectures(hubNamespace)).find(
-    a => a.customId === architecture,
-  )?.numericId;
+  let numericId: number | undefined;
+  try {
+    numericId = (await hub.architectures(hubNamespace)).find(
+      a => a.customId === architecture,
+    )?.numericId;
+  } catch (e) {
+    // A dry run carries on without the extra target; a real run fails as before.
+    if (!input.dryRun) {
+      throw e;
+    }
+    logger.warn(
+      `CALM Hub could not be asked for the numeric id of ${hubNamespace}/${architecture} (${
+        e instanceof Error ? e.message : e
+      }), so the dry run leaves out that target`,
+    );
+  }
   if (numericId === undefined) {
     logger.warn(
       `CALM Hub lists no numeric id for ${hubNamespace}/${architecture}, so its Deployments tab will not show this deployment`,
@@ -136,6 +156,18 @@ export async function recordDeployment(
           )} to the cluster ${cluster}, namespace ${namespace}.`
         : `Deployed by Backstage to the cluster ${cluster}, namespace ${namespace}.`),
   });
+  if (input.dryRun) {
+    logger.info(`Dry run: would store the decorator ${uniqueId}`);
+    logger.info(`Dry run: would post ${JSON.stringify(decorator, null, 2)}`);
+    return {
+      id: 'dry-run',
+      uniqueId,
+      target,
+      url: `${hub.baseUrl}/api/calm/namespaces/${encodeURIComponent(
+        hubNamespace,
+      )}/decorators/dry-run`,
+    };
+  }
   const id = await hub.createDecorator(hubNamespace, decorator);
   // Read it back the way the architecture card does: by the target filter, then by id.
   const found = await hub.listDecorators(hubNamespace, {
@@ -173,8 +205,9 @@ export function createCalmDecorateDeploymentAction(options: {
   const { hub } = options;
   return createTemplateAction({
     id: 'calm:decorate:deployment',
+    supportsDryRun: true,
     description:
-      "Records a deployment in CALM Hub: posts one deployment decorator (draft deployment standard) that targets the architecture version and applies to the deployed nodes, with the status, the start and end time, the cluster and namespace in the notes and the service's Backstage page as deployment-details. No dry run: its inputs come from calm:deploy:k8s, which a dry run skips.",
+      "Records a deployment in CALM Hub: posts one deployment decorator (draft deployment standard) that targets the architecture version and applies to the deployed nodes, with the status, the start and end time, the cluster and namespace in the notes and the service's Backstage page as deployment-details. In a dry run it builds and logs the decorator without storing it, and its id is dry-run.",
     schema: {
       input: {
         hubNamespace: z =>
@@ -239,9 +272,11 @@ export function createCalmDecorateDeploymentAction(options: {
       output: {
         id: z =>
           z
-            .number()
+            .union([z.number(), z.literal('dry-run')])
             .optional()
-            .describe("The decorator's id in the Hub; none in a dry run"),
+            .describe(
+              "The decorator's id in the Hub; the placeholder dry-run in a dry run",
+            ),
         uniqueId: z => z.string().describe("The decorator's unique-id"),
         target: z =>
           z
@@ -261,6 +296,7 @@ export function createCalmDecorateDeploymentAction(options: {
           ...ctx.input,
           workspacePath: ctx.workspacePath,
           taskId: ctx.task?.id,
+          dryRun: ctx.isDryRun,
         },
         ctx.logger,
       );

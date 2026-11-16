@@ -13,6 +13,7 @@ import {
   createCalmDeployK8sAction,
   overlayKustomization,
   parseImage,
+  planFromBase,
   summariseObjects,
   writeOverlay,
 } from './deployK8s';
@@ -760,13 +761,18 @@ describe('calm:deploy:k8s: a dry run', () => {
 
   it('calls no kubectl, writes the overlay in the dry-run folder and derives the outputs from the base', async () => {
     const kubectl = jest.fn(async () => '');
-    const c = context();
+    const { hub } = fakeRecordingHub();
+    const c = context({ record });
     await createCalmDeployK8sAction({
       settings: settings(),
       localDir: localDir(),
       kubectl: () => kubectl,
+      hub,
+      appBaseUrl: 'http://backstage',
     }).handler(c);
     expect(kubectl).not.toHaveBeenCalled();
+    // Nothing failed and nothing is recorded: no decorator is posted.
+    expect(hub.createDecorator).not.toHaveBeenCalled();
     expect(outs(c)).toMatchObject({
       namespace: 'calm-orders',
       deployments: ['web-deployment'],
@@ -810,5 +816,21 @@ describe('calm:deploy:k8s: a dry run', () => {
         localDir: localDir(),
       }).handler(context({ dir: path.join(root, 'elsewhere') })),
     ).rejects.toThrow(/outside/i);
+  });
+});
+
+describe('planFromBase', () => {
+  it('names an object without a metadata.name as Kind/?', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'calm-plan-'));
+    try {
+      await fs.mkdir(path.join(dir, 'deploy', 'k8s'), { recursive: true });
+      await fs.writeFile(
+        path.join(dir, 'deploy', 'k8s', 'objects.yaml'),
+        'apiVersion: v1\nkind: ConfigMap\n',
+      );
+      expect((await planFromBase(dir)).objects).toEqual(['ConfigMap/?']);
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
   });
 });

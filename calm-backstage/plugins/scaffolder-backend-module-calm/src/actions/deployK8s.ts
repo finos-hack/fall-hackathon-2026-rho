@@ -285,7 +285,7 @@ export async function planFromBase(
   }
   return {
     deployed: summariseObjects(items),
-    objects: items.map(i => `${i.kind}/${i.metadata?.name}`),
+    objects: items.map(i => `${i.kind}/${i.metadata?.name ?? '?'}`),
   };
 }
 
