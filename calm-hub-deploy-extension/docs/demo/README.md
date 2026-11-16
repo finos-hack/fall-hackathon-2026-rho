@@ -64,9 +64,15 @@ node docs/demo/record-hub-demo.cjs <out-dir> --audio-only    # speak and time th
 - **Restarts:** it restarts CALM Hub twice (without the extension, then with it) and runs the backend with manual
   approval. It leaves the backend running on auto approval afterwards.
 - **Drift:** it scales `stream-app` to 0 and asks Flux to reconcile. Flux would put it back by itself within a
-  minute, so the take reads Flux's log and waits for Flux's next run when that run is too close. If Flux still puts
+  minute, so the take reads Flux's log at the start of chapter 4. It spreads any wait over the pauses after chapter
+  4's beats, so the scale starts just after one of Flux's runs, then checks again before scaling. If Flux still puts
   the workload back before the drift is shown, the take stops with a message saying so. Nothing else has changed by
   then, so run it again.
+- **Checks during the take:** the home page card's counts are read before the take, for the narration, and checked
+  again before they are spoken. Once a version is stored, a step that only shows something (a page, a badge, a
+  highlight) warns and carries on rather than stopping the take with a pull request left open. The steps that check
+  real state still stop it: the record exists, the pull request is open, the deployment completed, the version was
+  refused.
 - **New versions:** it stores two new versions of `events-stream` in CALM Hub, which can't be deleted. One flips
   the broker's storage between PostgreSQL and SQLite, so every take deploys a real change. The other has a
   connection the pattern forbids.

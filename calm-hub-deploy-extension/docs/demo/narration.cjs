@@ -3,11 +3,17 @@
 // Keep spoken text free of what a voice mangles (file names, dotted paths, tool names): put those in `term`, and
 // respell words the voice gets wrong in pronunciation.cjs.
 //
-// ctx: { name, running, storage, choice, valid, invalid } worked out from what runs (see record-hub-demo.cjs).
+// ctx: { name, running, storage, choice, valid, invalid, card } worked out from what runs (see record-hub-demo.cjs);
+// card is the home page card's counts: { services, inSync, drifted }.
 const short = choice => (choice.startsWith('SQLite') ? 'SQLite on its own volume' : 'PostgreSQL');
+const WORDS = ['no', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten'];
+const count = n => WORDS[n] ?? String(n);
+/** The card's counts, as spoken: "one service, one in sync, none drifted". */
+const cardText = ({ services, inSync, drifted }) =>
+  `${count(services)} service${services === 1 ? '' : 's'}, ${inSync === 0 ? 'none' : count(inSync)} in sync, ${drifted === 0 ? 'none' : count(drifted)} drifted`;
 
 module.exports = function narration(ctx) {
-  const { name, running, storage, choice, valid, invalid } = ctx;
+  const { name, running, storage, choice, valid, invalid, card } = ctx;
   const toSqlite = choice.startsWith('SQLite');
   const beats = [
     // ---- 1. CALM Hub today
@@ -120,7 +126,7 @@ module.exports = function narration(ctx) {
     // ---- 4. Woven in
     {
       id: 'home-card',
-      text: 'Back on the home page, there is now an Extensions section with the connector’s card: one service, in sync, none drifted.',
+      text: `Back on the home page, there is now an Extensions section with the connector’s card: ${cardText(card)}.`,
     },
     {
       id: 'blocks',
