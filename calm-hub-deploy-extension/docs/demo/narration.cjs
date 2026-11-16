@@ -64,7 +64,7 @@ module.exports = function narration(ctx) {
     },
     {
       id: 'write-only',
-      text: 'But these records are write-only. CALM Hub draws what it is told. It cannot tell whether a record is still true. It cannot start a deployment. And it cannot stop one that would break a control.',
+      text: 'But these records are write-only. CALM Hub draws what it is told, and cannot tell whether a record is still true. It cannot start a deployment, or stop one that would break a control.',
     },
 
     // ---- 3. A Platform Connector

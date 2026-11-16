@@ -59,7 +59,7 @@ const TYPE_DELAY = 18 * SLOW;
 const GAP = 700; // silence after each beat
 // Flux reconciles the service every minute (with up to 5% jitter) and puts a scaled workload back. Showing the drift
 // takes this long from the start of the scale beat; the take waits for Flux's next run when it is closer than that.
-const DRIFT_WINDOW_MS = 25000;
+const DRIFT_WINDOW_MS = 35000;
 const FLUX_SHORTEST_INTERVAL_MS = 57000;
 
 const CHAPTERS = [
@@ -620,7 +620,11 @@ const srtTime = s => {
   });
   await beat('drift-tab', async () => {
     await refreshExtensions();
-    await extensionText(drifted).waitFor({ timeout: 15000 });
+    try {
+      await extensionText(drifted).waitFor({ timeout: 15000 });
+    } catch (e) {
+      throw new Error(`Flux healed ${DRIFT_WORKLOAD} before the drift was shown (retake; nothing else changed): ${e.message}`);
+    }
   });
   await beat('badge-stale', async () => {
     await tab('Diagram');
@@ -713,7 +717,13 @@ const srtTime = s => {
       `hub-audit.sh ${jti}`,
     ),
   );
+  const deploymentRecords = async () => (await getJson(`${HUB}/api/calm/namespaces/hackathon/decorators?type=deployment`)).values.length;
+  const recordsBefore = await deploymentRecords();
   await beat('validated', clear, termBeat('validated', `broken-copy.sh ${deployed.id}`));
+  // broken-copy.sh's exit status does not reach the recorder: count the records instead.
+  if ((await deploymentRecords()) !== recordsBefore) {
+    log(`WARNING: CALM Hub stored the broken copy of decorator ${deployed.id}: the take shows it accepted; check and retake`);
+  }
   await beat(
     'sub-standard',
     clear,
@@ -734,23 +744,29 @@ const srtTime = s => {
   await beat('refused', clear, termBeat('refused', () => sh(`watch-deploy.sh ${NAME} ${ctx.invalid}`)));
   const refusal = await newest(ctx.invalid);
   if (refusal?.status !== 'refused') throw new Error(`${ctx.invalid} was not refused at the controls gate: ${JSON.stringify(refusal)}`);
+  // Not seen live before this take (no control evaluation existed): each step falls back and warns rather than
+  // throwing, since the take has already stored its two versions.
   await beat('evaluation', async () => {
     await tab('Diagram');
     // The overlay re-reads decorators every 5 s.
     const evaluated = viewBadge('Control evaluations');
-    if (!(await evaluated.waitFor({ timeout: 15000 }).then(() => true, () => false))) {
+    const seen = () => evaluated.waitFor({ timeout: 15000 }).then(() => true, () => false);
+    if (!(await seen())) {
       // Its legend entry may start switched off.
-      await page.getByText(/^Control evaluations · Built-in/).first().click();
-      await evaluated.waitFor({ timeout: 15000 });
+      await page.getByText(/^Control evaluations · Built-in/).first().click({ timeout: 5000 }).catch(() => {});
+      if (!(await seen())) log('WARNING: no Control evaluations badge on the diagram');
     }
   });
   await beat('finding', async () => {
-    await viewBadge('Control evaluations', 'stream-app').click();
-    await hold(1200);
-    const all = page.getByText('View all Control evaluations', { exact: true });
-    if (await all.isVisible().catch(() => false)) await all.click();
-    else await show(ctx.invalid, 'decorators&type=control-evaluation');
-    await page.getByText('findings', { exact: true }).first().waitFor();
+    if (await viewBadge('Control evaluations', 'stream-app').click({ timeout: 5000 }).then(() => true, () => false)) {
+      await hold(1200);
+      const all = page.getByText('View all Control evaluations', { exact: true });
+      if (await all.isVisible().catch(() => false)) await all.click().catch(() => {});
+    }
+    if (!/type=control-evaluation/.test(page.url())) await show(ctx.invalid, 'decorators&type=control-evaluation');
+    if (!(await page.getByText('not-met').first().waitFor({ timeout: 15000 }).then(() => true, () => false))) {
+      log('WARNING: the control evaluation (not-met) is not on the Decorators tab');
+    }
     await highlight(['status', 'findings']);
   });
   await beat(
@@ -775,7 +791,7 @@ const srtTime = s => {
     ),
     async () => {
       await show(ctx.valid);
-      await fit();
+      await tab('Diagram');
       await selectNode(DRIFT_WORKLOAD, `In sync: ${DRIFT_WORKLOAD} runs as Git asks.`);
     },
   );
