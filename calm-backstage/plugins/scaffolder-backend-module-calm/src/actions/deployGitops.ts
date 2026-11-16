@@ -290,6 +290,7 @@ export function createCalmDeployGitopsAction(options: {
                 startTime,
                 error,
                 logger: ctx.logger,
+                signal: ctx.signal,
               });
             }
             throw error;

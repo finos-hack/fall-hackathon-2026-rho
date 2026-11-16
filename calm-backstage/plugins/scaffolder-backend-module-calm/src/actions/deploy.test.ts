@@ -356,6 +356,8 @@ function fakeRecordingHub(opts: { failPost?: boolean } = {}) {
     getDecorator: jest.fn(async (_ns: string, id: number) => ({
       uniqueId: posted[id - 1]['unique-id'],
     })),
+    // The real client gives a copy that sends the signal with each request; this one is the same fake.
+    withSignal: jest.fn((): any => hub),
   };
   return { hub: hub as any, posted };
 }
@@ -421,6 +423,7 @@ describe('calm:deploy:k8s: a failed deployment', () => {
     namespace?: object;
     failRollout?: string;
     failApply?: string;
+    signal?: AbortSignal;
   }) => {
     await fs.writeFile(kubeconfig(), '');
     const c = {
@@ -434,6 +437,7 @@ describe('calm:deploy:k8s: a failed deployment', () => {
       output: jest.fn(),
       workspacePath: root,
       task: { id: 'task-1' },
+      signal: opts.signal,
     } as any;
     const kubectl = jest.fn(async (args: string[]) => {
       const a = args.join(' ');
@@ -602,6 +606,19 @@ describe('calm:deploy:k8s: a failed deployment', () => {
     const { result, kubectl } = await run({ input: { record }, hub });
     await expect(result).rejects.toThrow(/k8s-overlay/);
     expect(kubectl).not.toHaveBeenCalled();
+    expect(hub.createDecorator).not.toHaveBeenCalled();
+  });
+
+  it('records nothing, and still rejects with the deploy error, when the task was cancelled', async () => {
+    const { hub } = fakeRecordingHub();
+    const { result } = await run({
+      input: { record },
+      hub,
+      failRollout: rollout,
+      signal: AbortSignal.abort(),
+    });
+    await expect(result).rejects.toThrow(/timed out waiting/);
+    expect(hub.architectures).not.toHaveBeenCalled();
     expect(hub.createDecorator).not.toHaveBeenCalled();
   });
 

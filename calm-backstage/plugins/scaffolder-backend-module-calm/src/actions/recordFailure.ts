@@ -11,6 +11,9 @@ import {
 import YAML from 'yaml';
 import { deployedNodes, recordDeployment } from './decorateDeployment';
 
+/** How long recording a failed deployment may take before it is given up, so a hanging Hub cannot hold back the deploy error. */
+export const RECORD_FAILURE_TIMEOUT_MS = 30_000;
+
 /** The workload kinds that name the architecture node they run (see `workloadNode`). */
 const WORKLOAD_KINDS = ['Deployment', 'StatefulSet', 'DaemonSet'];
 const MAX_NOTE_ERROR = 300;
@@ -62,7 +65,8 @@ export function oneLine(error: unknown): string {
  * Records a failed deployment in CALM Hub as a deployment decorator with the status `failed`: it applies to the
  * architecture nodes the rendered workloads name (all the architecture's nodes when none of them names one) and says
  * what failed. Its unique-id ends in `-failed`, so a retry that succeeds does not reuse it. Never
- * throws: a problem recording it is logged as a warning, so the caller's own error is the one that surfaces.
+ * throws: a problem recording it is logged as a warning, so the caller's own error is the one that surfaces. Nothing
+ * is recorded for a task that was cancelled, and the recording gives up after `timeoutMs`.
  */
 export async function recordFailedDeployment(opts: {
   hub?: CalmHubWriteClient;
@@ -78,9 +82,25 @@ export async function recordFailedDeployment(opts: {
   startTime: string;
   error: unknown;
   logger: LoggerService;
+  /** The task's signal: a cancelled task is not recorded as failed. */
+  signal?: AbortSignal;
+  /** Default `RECORD_FAILURE_TIMEOUT_MS`. */
+  timeoutMs?: number;
 }): Promise<void> {
-  const { hub, record, logger } = opts;
+  const { record, logger, signal } = opts;
+  if (signal?.aborted) {
+    logger.info(
+      'The task was cancelled, so the cancelled deployment is not recorded as failed in CALM Hub',
+    );
+    return;
+  }
+  const timeoutMs = opts.timeoutMs ?? RECORD_FAILURE_TIMEOUT_MS;
+  let timeout: AbortSignal | undefined;
   try {
+    timeout = AbortSignal.timeout(timeoutMs);
+    const hub = opts.hub?.withSignal(
+      AbortSignal.any([...(signal ? [signal] : []), timeout]),
+    );
     if (!hub) {
       throw new Error('the action has no CALM Hub client');
     }
@@ -132,8 +152,10 @@ export async function recordFailedDeployment(opts: {
       logger,
     );
   } catch (e) {
-    logger.warn(
-      `Could not record the failed deployment in CALM Hub: ${oneLine(e)}`,
-    );
+    const why =
+      timeout?.aborted && !signal?.aborted
+        ? `CALM Hub did not answer within ${timeoutMs / 1000} s`
+        : oneLine(e);
+    logger.warn(`Could not record the failed deployment in CALM Hub: ${why}`);
   }
 }
