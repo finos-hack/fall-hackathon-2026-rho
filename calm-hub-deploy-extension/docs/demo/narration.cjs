@@ -1,5 +1,7 @@
-// The demo's voiceover, as data. record-hub-demo.cjs speaks each beat with macOS `say` and shows the same words as
-// the caption; `term` is the short comment typed in the terminal for that beat (so the left pane reads on its own).
+// The demo's voiceover, as data. record-hub-demo.cjs speaks each beat (voice.cjs) and shows the same words as the
+// caption; `term` is the short comment typed in the terminal for that beat (so the left pane reads on its own).
+// Keep spoken text free of what a voice mangles (file names, dotted paths, tool names): put those in `term`, and
+// respell words the voice gets wrong in pronunciation.cjs.
 //
 // ctx: { name, running, storage, choice, valid, invalid } worked out from what runs (see record-hub-demo.cjs).
 const short = choice => (choice.startsWith('SQLite') ? 'SQLite on its own volume' : 'PostgreSQL');
@@ -8,69 +10,92 @@ module.exports = function narration(ctx) {
   const { name, running, storage, choice, valid, invalid } = ctx;
   const toSqlite = choice.startsWith('SQLite');
   const beats = [
-    // ---- 1. CALM Hub on its own
+    // ---- 1. CALM Hub today
     {
-      id: 'intro',
-      text: `This is CALM Hub, the FINOS architecture-as-code repository. On the right is an architecture: ${name}, an event-streaming service created from a CALM pattern. On the left is a terminal on the local Kubernetes cluster where that service runs.`,
+      id: 'hub-home',
+      text: 'This is CALM Hub, the FINOS architecture-as-code repository, as it ships. Its home page lists the namespaces that hold architectures and patterns, and the control domains that hold controls. There is no Extensions section: nothing is plugged in.',
     },
     {
-      id: 'tabs',
-      text: 'Look at the tabs across the top: Diagram, JSON and Decorators. This is CALM Hub as it ships, with no extensions installed, so there is no Extensions tab.',
+      id: 'namespace',
+      text: 'The hackathon namespace holds the architectures a developer portal created, and the patterns it created them from.',
+    },
+    {
+      id: 'pattern',
+      text: 'A pattern is a template for architectures. This one is an event-streaming service: a web client, an API gateway, a stream app, and a Nisshi broker.',
+    },
+    {
+      id: 'decisions',
+      text: 'A pattern can leave decisions open. This one leaves one: where the broker keeps its topics, in PostgreSQL, or in SQLite on the broker’s own volume. Each architecture records its choice.',
+    },
+    {
+      id: 'control',
+      text: 'Controls live in control domains. In the hackathon security domain, Permitted Connection says that every connection must name its protocol and give a business reason.',
+    },
+    {
+      id: 'architecture',
+      text: `And this is ${name}, an architecture made from that pattern, at version ${running}. Its broker keeps its topics in ${storage}. It runs on the local Kubernetes cluster that the terminal on the left can reach.`,
+    },
+    {
+      id: 'connection-control',
+      text: 'Every connection carries that control, as security. So a change to a connection can be checked against the firm’s rules.',
     },
     {
       id: 'registry-before',
       term: 'Which extensions has CALM Hub loaded?',
-      text: 'Ask CALM Hub which extensions it has loaded. Two built-in ones come back, and both are only views: one for deployments, one for control evaluations. Neither has a backend.',
-    },
-    {
-      id: 'decorators',
-      text: 'Those views draw decorators. Decorators are the simplest way to integrate with CALM Hub: any tool with write access can attach a fact to an architecture version. These are deployments that were recorded when this service was deployed.',
-    },
-    {
-      id: 'overlay-before',
-      text: 'The built-in Deployments view draws the same records on the diagram, node by node. But all of this is read-only. CALM Hub can show a deployment. It cannot start one.',
+      text: 'Ask CALM Hub which extensions it has loaded. Two come back, both built in, and both are only views: one for deployment records, one for control evaluations. Neither has a backend.',
     },
 
-    // ---- 2. An extension is a manifest and a backend
+    // ---- 2. Deployment records are write-only
     {
-      id: 'ext-intro',
-      text: 'An extension changes that. It has two parts. A manifest tells CALM Hub what the extension offers, and a backend does the work. The backend belongs to whoever owns the tool, and runs anywhere CALM Hub can reach. This one deploys through Git and Flux, the way the firm in this example already deploys.',
+      id: 'overlay',
+      text: 'The deployments view draws deployment records on the diagram. Each node the last deployment covered has a badge: completed.',
     },
     {
-      id: 'manifest-id',
+      id: 'badge',
+      text: 'A badge opens the record behind it: its status, and when it started.',
+    },
+    {
+      id: 'view-all',
+      text: 'View all opens the Decorators tab, filtered to deployments. This is the record itself: a standard CALM deployment decorator, with its status, its times and its notes.',
+    },
+    {
+      id: 'any-tool',
+      text: 'Because the record is a standard, any tool can write one, and CALM Hub will draw it: a pipeline, a script, or a person.',
+    },
+    {
+      id: 'write-only',
+      text: 'But these records are write-only. CALM Hub draws what it is told. It cannot tell whether a record is still true. It cannot start a deployment. And it cannot stop one that would break a control.',
+    },
+
+    // ---- 3. A Platform Connector
+    {
+      id: 'connector',
+      text: 'That is what a Platform Connector adds. It is a CALM Hub extension that a firm writes to connect its own delivery platform. This one is the reference connector for GitOps on Kubernetes: Git, a pull request, and Flux.',
+    },
+    {
+      id: 'manifest',
       term: 'The manifest: one JSON file',
-      text: 'The manifest is one JSON file. It names the extension, platform-connector, and the version of CALM Hub’s extension API it was written for.',
+      text: 'An extension is a manifest and a backend. The manifest is one JSON file that tells CALM Hub what the connector offers.',
     },
     {
-      id: 'routes-a',
+      id: 'routes',
       term: 'Routes: method, scope, path on the backend',
-      text: 'Routes come first. Each route is a method and a path on the backend, with the scope a caller needs. CALM Hub serves every route under its own API, at slash api, slash calm, slash extensions, slash platform-connector.',
-    },
-    {
-      id: 'routes-b',
-      text: 'Before a call reaches the backend, CALM Hub checks that the caller has that scope on the namespace in the path. Read for the tab, the status and the history. Write for a deployment.',
+      text: 'Routes are paths on the connector’s backend, each with the scope a caller needs. CALM Hub checks that scope before it passes a call on: read for the views, write to deploy.',
     },
     {
       id: 'contributes',
       term: 'Contributions: where it shows in CALM Hub',
-      text: 'Contributions say where the extension appears in CALM Hub’s own screens. This one adds a tab called Deployment to an architecture, and an action called Deploy this version. Both point at routes.',
+      text: 'Contributions say where it appears in CALM Hub’s own screens: an action on an architecture, a tab, a panel in the node sidebar, a card on the home page, and a screen of its own.',
     },
     {
       id: 'commands',
       term: 'Commands: the same routes, with schemas',
-      text: 'Commands are routes with input and output schemas. CALM Hub turns each one into a command line command, and into a tool that agents can call over MCP.',
-    },
-
-    // ---- 3. Plugging it in
-    {
-      id: 'config',
-      term: 'Installing it: configuration on the CALM Hub side',
-      text: 'Installing the extension is configuration on the CALM Hub side. The manifest folder is mounted into CALM Hub. The backend URL says where the extension runs. And a signing key lets CALM Hub vouch for every call it passes on.',
+      text: 'Commands are routes with input and output schemas. CALM Hub turns each one into a command line command, and into a tool that agents can call.',
     },
     {
       id: 'start-backend',
       term: 'Start the backend: changes need approval',
-      text: 'Start the backend. It is a small Node service. Approval is set to manual, so a person has to approve each change before it reaches the cluster.',
+      text: 'Start the backend. Approval is manual, so a person has to approve each change before it reaches the cluster.',
     },
     {
       id: 'restart',
@@ -78,8 +103,8 @@ module.exports = function narration(ctx) {
       text: 'Now restart CALM Hub with the manifest in place.',
     },
     {
-      id: 'identity',
-      text: 'Every call CALM Hub passes on carries a signed assertion. It names the caller, the route, and the namespace whose scope CALM Hub checked. It covers the method, the path and a hash of the body, and it carries an audit id. It is short-lived, and it can be used only once.',
+      id: 'signed',
+      text: 'CALM Hub signs every call it passes on. The signature names the caller, the route, the scope CALM Hub checked, and an audit id. The connector refuses any call that CALM Hub did not sign.',
     },
     {
       id: 'registry-after',
@@ -87,208 +112,213 @@ module.exports = function narration(ctx) {
       text: 'CALM Hub now lists platform-connector, next to its built-in views.',
     },
     {
-      id: 'jwks',
-      term: 'CALM Hub’s public signing key',
-      text: 'The backend checks each assertion against CALM Hub’s public key, which CALM Hub publishes here. A call without a valid assertion from CALM Hub is refused.',
-    },
-    {
       id: 'mcp-tools',
       term: 'The commands are MCP tools already',
-      text: 'And the three commands are already tools on CALM Hub’s MCP server: deploy, history and status.',
+      text: 'And its commands are already tools on CALM Hub’s MCP server, for agents: status, history and deploy.',
     },
 
-    // ---- 4. The Hub hooks in
-    { id: 'reload', text: 'Reload the architecture. There is now an Extensions tab.' },
+    // ---- 4. Woven in
     {
-      id: 'ext-tab',
-      text: 'Inside it are the extension’s Deployment tab and its Deploy this version action. To draw this tab, CALM Hub called the extension’s tab route.',
-    },
-    {
-      id: 'log-tab',
-      term: 'The backend’s log: the call CALM Hub just made',
-      text: 'The backend’s log shows that call: a GET on the tab route, verified as coming from CALM Hub, with the scope, the namespace, the caller and the audit id. This CALM Hub runs without sign-in, so the caller is no-auth. With sign-in turned on, it is the person at the screen.',
+      id: 'home-card',
+      text: 'Back on the home page, there is now an Extensions section with the connector’s card: one service, in sync, none drifted.',
     },
     {
       id: 'blocks',
-      text: 'The extension sends no HTML. It answers with blocks: a list of fields, an alert and a table. CALM Hub draws them in its own style, so the extension has no front-end code at all.',
+      text: 'The connector sends no HTML. It answers with blocks, a list of fields, an alert or a table, and CALM Hub draws them in its own style.',
     },
     {
-      id: 'fields',
-      text: 'The tab says where this version runs: the local environment, the deployment rules it was rendered with, the Git repository that Flux watches, Flux’s status, and the commit Flux applied. And it says this version is the one deployed.',
+      id: 'ext-tab',
+      text: 'On the architecture there is now an Extensions tab, with the Deploy this version action and the connector’s Deployment tab.',
+    },
+    {
+      id: 'tab-facts',
+      text: 'The tab holds only what the platform knows: the version running, Flux’s status, the commit it applied, and whether CALM Hub’s newest record matches. History stays in CALM Hub’s own deployments view.',
+    },
+    {
+      id: 'node-panel',
+      text: 'Select a node. The node sidebar now has an Extensions section, with the connector’s Platform panel.',
+    },
+    {
+      id: 'node-facts',
+      text: 'For the stream app, it shows the workload that runs it, the replicas ready against the replicas Git asks for, its image, the network policies that let traffic in and out, and the deployment record that covers it.',
+    },
+    {
+      id: 'log-calls',
+      term: 'The calls CALM Hub made to the connector',
+      text: 'The connector’s log shows each call CALM Hub made for these views: the card, the tab and the node panel. Each one was signed by CALM Hub, with the scope it checked and the caller.',
     },
 
-    // ---- 5. Where the service runs
+    // ---- 5. Drift: what a record can't know
     {
-      id: 'deploys',
-      term: `The cluster runs ${running}: topics in ${storage}`,
-      text: `In the cluster, ${name} runs version ${running}. Its broker keeps its topics in ${storage === 'PostgreSQL' ? 'PostgreSQL, so a PostgreSQL Deployment runs next to the broker, the stream app and the gateway' : 'SQLite on its own volume, so there is no database Deployment'}.`,
+      id: 'scale',
+      term: 'Change the cluster behind Git’s back',
+      text: 'Now change the cluster behind Git’s back. Scale the stream app to zero.',
     },
     {
-      id: 'status',
-      term: 'The status command, through CALM Hub',
-      text: 'Scripts get the same facts through CALM Hub. This is the status command, called through CALM Hub’s proxy: the version deployed, the newest version, the deployment rules, and whether Flux is ready.',
+      id: 'drift-panel',
+      text: 'Select the stream app again. The panel shows drift: it runs zero replicas, and Git asks for one.',
+    },
+    { id: 'drift-tab', text: 'The Deployment tab leads with the same drift.' },
+    {
+      id: 'badge-stale',
+      text: 'But on the diagram, the deployment badge still says completed. The record cannot know. It says what happened, not what is true now.',
+    },
+    {
+      id: 'reconcile',
+      term: 'Ask Flux to put it back now',
+      text: 'Flux would put the replicas back at its next reconcile, within a minute. Ask it to reconcile now, and wait for the stream app.',
+    },
+    {
+      id: 'in-sync',
+      text: 'Select it again: in sync. Only the platform can say whether a record is still true, and the connector is how CALM Hub asks it.',
     },
 
-    // ---- 6. An architect changes a pattern decision
-    {
-      id: 'pattern',
-      text: `The pattern ${name} was made from leaves a few decisions open. One is where the broker keeps its topics: in PostgreSQL, or in SQLite on the broker’s own volume.`,
-    },
+    // ---- 6. A decision changes, and the connector deploys it
     {
       id: 'new-version',
       term: `A new version: broker storage = ${short(choice)}`,
-      text: `An architect stores a new version, ${valid}, that changes that one decision to ${short(choice)}. The script generates the architecture from the pattern, validates it, and posts it to CALM Hub.`,
+      text: `An architect changes the pattern decision. In a new version, ${valid}, the broker keeps its topics in ${short(choice)}. The script generates it from the pattern, validates it, and stores it in CALM Hub.`,
     },
     {
       id: 'diagram-new',
-      text: `Here is ${valid} in CALM Hub. ${toSqlite ? 'The PostgreSQL node and its connection are gone: the broker keeps its topics itself.' : 'A PostgreSQL node and its connection are back: the broker keeps its topics there.'}`,
+      text: `Here is ${valid}. ${toSqlite ? 'The PostgreSQL node and its connection are gone: the broker keeps its topics itself.' : 'A PostgreSQL node and its connection are back: the broker keeps its topics there.'}`,
     },
     {
       id: 'warning',
-      text: `The Deployment tab compares the version on screen with the version running, and warns that the cluster still runs ${running}.`,
+      text: `The Deployment tab compares the version on screen with the one running, and warns that the cluster still runs ${running}.`,
     },
-
-    // ---- 7. Asking CALM Hub to deploy
     {
       id: 'click',
-      text: 'Choose Deploy this version. The action changes something, so CALM Hub asks first.',
-    },
-    {
-      id: 'dialog',
-      text: 'When it runs, CALM Hub checks that the caller can write to the hackathon namespace, writes an audit entry, signs the request, and passes it on. CALM Hub gives the backend ten seconds to answer, so the backend replies at once and does the work in the background.',
+      text: 'Choose Deploy this version. It changes something, so CALM Hub asks first, and checks that the caller can write to the namespace.',
     },
     {
       id: 'run',
       term: `Follow the deployment of ${valid}`,
-      text: `Run. The backend records a deployment decorator on version ${valid}, with the status pending, and starts the job. On the right is that record, on CALM Hub’s Decorators tab.`,
+      text: 'Run. First the connector checks the version against its pattern and against the controls in CALM Hub. That is the controls gate.',
     },
     {
-      id: 'step-validate',
-      text: 'First it validates the version against its pattern and against the controls in CALM Hub, with calm validate. This is the controls gate: a version that fails stops here.',
+      id: 'record-pending',
+      text: `${valid} passes, so the connector writes a standard deployment record on it, pending. That is the record on the right, in CALM Hub’s Decorators tab.`,
     },
     {
-      id: 'step-render',
-      text: `Then it renders the service’s deployment rules, the k8s-deploy bundle, against version ${valid} on a new branch, and commits the result.`,
-    },
-    {
-      id: 'step-pr',
-      text: 'It pushes the branch and opens a pull request in Gitea. Each step updates the decorator, so CALM Hub always shows where the deployment has got to.',
+      id: 'steps',
+      text: 'Then it renders the service’s Kubernetes manifests from the new version, on a branch, and opens a pull request. Each step updates the same record.',
     },
     {
       id: 'waiting',
-      text: 'Now it waits. The record says so: in progress, waiting for someone to approve the pull request. In this firm, a change to a running service needs that approval.',
+      text: 'Now it waits: in progress, waiting for someone to approve the pull request. In this firm, a change to a running service needs that approval.',
     },
     {
-      id: 'log-steps',
-      term: 'The trail in the backend’s log',
-      text: 'On the diagram, the nodes this deployment touches are marked in progress. And the backend’s log has the whole trail: the POST from CALM Hub, with write scope and its audit id, then each step recorded on the decorator.',
+      id: 'overlay-progress',
+      text: 'The built-in deployments view on the diagram follows the same record. The nodes this deployment covers show it in progress.',
     },
-
-    // ---- 8. The firm's change gate
     {
       id: 'pr',
-      term: 'The pull request the extension opened',
-      text: 'This is the pull request the extension opened, in Gitea on the right. It is an ordinary change, in the service’s own repository.',
+      term: 'The pull request the connector opened',
+      text: 'This is the pull request the connector opened, in Gitea. It is an ordinary change in the service’s own repository.',
     },
     {
       id: 'files',
       term: 'What it changes',
-      text: `It changes the Kubernetes manifests that Flux applies, and the architecture version recorded in the service’s catalog file. ${toSqlite ? 'The PostgreSQL Deployment and its network policies are deleted, because the new architecture has no PostgreSQL node.' : 'A PostgreSQL Deployment and its network policies are added, because the new architecture has a PostgreSQL node.'}`,
+      text: `It changes the Kubernetes manifests that Flux applies, and the architecture version in the service’s catalog file. ${toSqlite ? 'The PostgreSQL Deployment and its network policies are deleted.' : 'A PostgreSQL Deployment and its network policies are added.'}`,
     },
     {
       id: 'commit',
       term: 'Who asked, and CALM Hub’s audit id',
-      text: 'The commit message says who asked, through CALM Hub, and carries the audit id of that call. So the change can be traced from Git back to CALM Hub’s audit log.',
+      text: 'The commit message says who asked, through CALM Hub, and carries the audit id of that call.',
     },
     {
-      id: 'gate',
-      text: 'This is where a firm’s own approvals sit: code owners, a change ticket, or a release manager. CALM Hub does not need to know about any of them. It sees the deployment wait, then carry on.',
+      id: 'approve',
+      term: 'The approver merges it',
+      text: 'The firm’s own approval sits here, whatever form it takes. CALM Hub does not need to know about it. The approver merges the pull request.',
     },
-    { id: 'approve', term: 'The approver merges it', text: 'The approver merges the pull request.' },
-
-    // ---- 9. Flux applies it
     {
       id: 'flux',
-      text: 'The pull request is merged. The extension sees the merge and asks Flux to reconcile, and the record in CALM Hub says Flux is applying the merge commit.',
+      text: 'The connector sees the merge and asks Flux to reconcile, and the record says Flux is applying the merge commit.',
     },
     {
-      id: 'policies',
-      text: `${toSqlite ? 'The PostgreSQL Deployment goes, and so do its two network policies.' : 'A PostgreSQL Deployment starts, with its two network policies.'} The network policies are made from the architecture’s connections, so they follow the architecture.`,
-    },
-    {
-      id: 'rollouts',
-      text: 'When Flux has applied the commit and every rollout has finished, the extension marks the deployment completed, with the commit and the pull request.',
+      id: 'completed',
+      text: 'When Flux has applied the commit and every rollout has finished, the connector marks the record completed, with the commit and the pull request.',
     },
     {
       id: 'overlay-after',
-      text: `On the diagram, CALM Hub re-reads decorators every five seconds, so the Deployments overlay followed every step. Each node now shows version ${valid} completed.`,
-    },
-
-    // ---- 10. The results back in CALM Hub
-    {
-      id: 'decorators-after',
-      text: 'This is the other half of the integration. The extension writes its results back through CALM Hub’s decorator API, the same way any other tool would.',
+      text: `On the diagram, each node now shows ${valid}, completed.`,
     },
     {
-      id: 'record',
-      text: 'The record has the status and the times, the environment, the architecture version, who asked, the extension that did the work, the commit, and CALM Hub’s audit id for the call.',
-    },
-    { id: 'deployed', text: `The Deployment tab now says that ${valid} is the version deployed.` },
-    {
-      id: 'history',
-      text: 'Below it is every deployment of this architecture, whichever tool started it.',
+      id: 'standard-record',
+      term: 'The record: the Kubernetes deployment standard',
+      text: 'The record follows the Kubernetes deployment standard: the cluster and the namespace. The connector adds its GitOps details: the repository, the pull request, the commit, who asked, and CALM Hub’s audit id.',
     },
     {
       id: 'audit',
       term: 'CALM Hub’s audit log: the same id',
-      text: 'And CALM Hub’s own audit log has the call, with the same audit id as the decorator and the commit.',
+      text: 'CALM Hub’s own audit log has the call, with the same audit id. So the change traces from Git back to CALM Hub.',
     },
     {
-      id: 'two-ways',
-      text: 'So the integration runs both ways. CALM Hub calls out to the extension through its proxy, with the caller’s scope checked and the call signed. The extension calls back in through the decorator API, and CALM Hub shows the result in its own views.',
+      id: 'validated',
+      term: 'CALM Hub validates it: a copy without its namespace',
+      text: 'And CALM Hub validates the record. Post a copy without its Kubernetes namespace, and CALM Hub refuses it: it does not match its schema.',
+    },
+    {
+      id: 'sub-standard',
+      term: 'The GitOps details, as a standard in CALM Hub',
+      text: 'The GitOps details are written up as a sub-standard, published in CALM Hub’s Standards, so other tools know how to read them.',
     },
 
-    // ---- 11. The controls gate
+    // ---- 7. The controls gate, as a control evaluation
     {
       id: 'forbidden',
       term: 'A version the pattern does not allow',
       text: `Now a version the pattern does not allow. In ${invalid}, the browser connects to the stream app directly, past the gateway. CALM Hub stores any valid CALM document, so it accepts it.`,
     },
-    { id: 'deploy-invalid', text: `Deploy ${invalid}.` },
+    { id: 'deploy-invalid', text: `Deploy ${invalid}, the same way.` },
     {
-      id: 'failed',
-      text: 'Validation against the pattern fails, so the extension records the deployment as failed, with the reason.',
+      id: 'refused',
+      term: `Follow the deployment of ${invalid}`,
+      text: 'The connector checks the version first, and the pattern does not allow that connection. It is refused at the controls gate.',
+    },
+    {
+      id: 'evaluation',
+      text: 'There is no deployment record. Instead, the connector records a control evaluation, and CALM Hub’s built-in view marks the connection and both its nodes: not met.',
+    },
+    {
+      id: 'finding',
+      text: 'Its details say which control was not met, and the finding: what the validation refused.',
     },
     {
       id: 'unchanged',
       term: 'No pull request, and the cluster is unchanged',
-      text: `No pull request was opened, and the cluster still runs ${valid}. The pattern’s rule was enforced when it mattered, not just written down.`,
+      text: `No pull request was opened, and the cluster still runs ${valid}. The rule was enforced when it mattered, not just written down.`,
     },
-    { id: 'failed-record', text: 'CALM Hub shows the failed attempt with the others, and says why it failed.' },
 
-    // ---- 12. The same extension for an agent
+    // ---- 8. The same connector for an agent
     {
-      id: 'mcp',
-      term: 'The history command, as an MCP tool',
-      text: 'An agent connected to CALM Hub’s MCP server can call the same commands. This is the history tool.',
+      id: 'mcp-status',
+      term: 'The status command, as an MCP tool',
+      text: 'An agent connected to CALM Hub’s MCP server calls the same connector. The status tool says the service is in sync, with no drift, and gives the workloads and CALM Hub’s newest record.',
+    },
+    {
+      id: 'mcp-history',
+      term: 'The history command: deployments and refusals',
+      text: 'The history tool lists the deployments and the refusal, read back from the same standard records.',
     },
     {
       id: 'mcp-same',
-      text: 'It goes through the same route, with the same scope check, signed identity and audit as the button in CALM Hub. The extension has no code for MCP.',
+      text: 'It goes through the same route, with the same scope check, signature and audit as the button in CALM Hub. The connector has no code for agents.',
     },
 
-    // ---- 13. The integration pattern
+    // ---- 9. The pattern
     {
       id: 'recap-1',
-      text: 'So that is how a tool plugs into CALM Hub. A manifest declares routes, scopes, screens and commands. CALM Hub proxies each call, checks the caller’s scope, audits the call and signs it.',
+      text: 'So, the pattern. CALM Hub’s standards keep it neutral: any tool can write a deployment record or a control evaluation, and CALM Hub draws it.',
     },
     {
       id: 'recap-2',
-      text: 'The tool answers with blocks that CALM Hub knows how to draw, and records what happened as decorators on the architecture.',
+      text: 'A Platform Connector adds what only the platform knows: what really runs, whether it has drifted, and how to deploy, behind the firm’s own approval and CALM Hub’s controls.',
     },
     {
       id: 'recap-3',
-      text: 'This extension deploys with Gitea and Flux. A firm with a different deployment platform can implement the same commands and the same decorator fields, written up in the extension’s profile, and CALM Hub, its command line and its agents work with it unchanged.',
+      text: 'This one is for GitOps on Kubernetes. Another firm writes one for its own platform, against the profile that comes with this one, and CALM Hub, its command line and its agents work with it unchanged.',
     },
   ];
   const ids = new Set();
