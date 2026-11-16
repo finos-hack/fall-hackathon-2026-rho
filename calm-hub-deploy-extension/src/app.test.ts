@@ -59,6 +59,24 @@ describe('designer tab', () => {
     expect((await tab(w, 'events-stream', '1.0.0')).status).toBe(401);
   });
 
+  it('logs each request CALM Hub vouched for, and not a refused one', async () => {
+    const { createLogger } = await import('./logger');
+    const lines: string[] = [];
+    const w = make();
+    w.deps.logger = createLogger('test', 'info', l => lines.push(l));
+    await tab(w, 'events-stream', '1.0.0');
+    expect(lines.filter(l => l.includes('← CALM Hub'))).toEqual([
+      expect.stringContaining('GET /tab/hackathon/architectures/events-stream ← CALM Hub route=tab scope=- ns=hackathon sub=alice jti=aaaa1111-2222'),
+    ]);
+    lines.length = 0;
+    w.deps.verify = async () => {
+      const { AssertionError } = await import('./identity');
+      throw new AssertionError('bad signature');
+    };
+    await tab(w, 'events-stream', '1.0.0');
+    expect(lines.some(l => l.includes('← CALM Hub'))).toBe(false);
+  });
+
   it('refuses a request whose checked namespace is not the one in the path', async () => {
     const w = make();
     const verify = w.deps.verify;
