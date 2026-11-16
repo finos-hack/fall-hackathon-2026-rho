@@ -42,6 +42,8 @@ export interface JobState {
   decoratorId?: number;
   /** The control-evaluation decorator that records the refusal, when the controls gate refused the version. */
   evaluationId?: number;
+  /** The pull request the job waits for a person to merge (manual approval), while it waits. */
+  pendingApproval?: { number: number; url: string };
 }
 
 /** One deployment job per service at a time; jobs live in memory (a restart marks unfinished ones failed). */
@@ -66,6 +68,11 @@ export class Jobs {
 
   release(key: string): void {
     this.reserved.delete(key);
+  }
+
+  /** The state of the job running for `key`; undefined when none runs. */
+  current(key: string): JobState | undefined {
+    return this.running.has(key) ? this.latest.get(key) : undefined;
   }
 
   /** Runs the job for `key`; `state` is what the job reports as it goes. */
@@ -454,7 +461,12 @@ export async function runDeployment(
       await mergeWithRetry(deps, owner, name, pr.number, title);
     } else {
       await update({ pullRequest: pr.url, details: pr.url, notes: `Waiting for approval: merge pull request #${pr.number} in Gitea` });
-      await waitForMerge(deps, owner, name, pr.number);
+      state.pendingApproval = { number: pr.number, url: pr.url };
+      try {
+        await waitForMerge(deps, owner, name, pr.number);
+      } finally {
+        delete state.pendingApproval;
+      }
     }
 
     await git(dir, ['fetch', '-q', repo.pushUrl, settings.gitops.branch], { ...gitOpts, auth: settings.gitops.auth });

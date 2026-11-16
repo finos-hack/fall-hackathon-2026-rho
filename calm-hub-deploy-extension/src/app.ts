@@ -1,10 +1,12 @@
 import { CalmHubError } from '@internal/backstage-plugin-calm-common';
-import { errorReply, tabReply } from './blocks';
+import { cardReply, errorReply, nodeReply, screenReply, tabReply, type BlocksReply } from './blocks';
 import { HttpError } from './errors';
 import { AssertionError, type HubClaims, type VerifyAssertion } from './identity';
-import { readService, resolveArchitecture, findArchitecture } from './resolve';
+import { resolveArchitecture, findArchitecture } from './resolve';
 import { RouteTable } from './routes';
-import { readHistory, readStatus } from './status';
+import { platformFacts, readPlatform } from './platform';
+import { readServices } from './services';
+import { publicEntry, readHistory } from './status';
 import { requestDeployment, type DeployDeps } from './deploy/job';
 import { oneLine } from './deploy/kube';
 
@@ -31,15 +33,12 @@ const decode = (s: string) => decodeURIComponent(s);
 type Handler = (deps: AppDeps, p: Record<string, string>, q: URLSearchParams, claims: HubClaims) => Promise<Response>;
 
 const handlers: Record<string, Handler> = {
-  /** The designer tab: where the service runs and whether the version on screen is the one deployed. */
+  /** The designer tab: what runs, whether it matches Git and CALM Hub's record, and the version on screen. */
   async tab(deps, p, q) {
     try {
       const arch = await resolveArchitecture(deps.hub, p.namespace, p.resourceType, p.resourceId);
-      const service = (await readService(deps.gitea, deps.settings, arch.name)) ?? null;
-      const versions = await deps.hub.architectureVersions(arch.namespace, arch.name);
-      const history = await readHistory(deps.hub, arch.namespace, arch.name, versions, deps.jobs.unrecorded(arch.name));
-      const status = await readStatus(deps, arch.namespace, arch.name, { service, history });
-      return { status: 200, body: tabReply(status, history, q.get('version') ?? undefined) };
+      const view = await readPlatform(deps, arch.namespace, arch.name);
+      return { status: 200, body: tabReply(view, q.get('version') ?? undefined) };
     } catch (e) {
       // A tab shows its own error rather than CALM Hub's generic "Extension request failed."
       if (e instanceof HttpError) return { status: 200, body: errorReply(e.message) };
@@ -47,18 +46,40 @@ const handlers: Record<string, Handler> = {
     }
   },
 
+  /** The detail panel of a node: the workload the platform runs for it, its network policies and CALM Hub's record. */
+  async node(deps, p) {
+    return panel(deps, 'node panel', async () => {
+      const arch = await resolveArchitecture(deps.hub, p.namespace, p.resourceType, p.resourceId);
+      return nodeReply(await readPlatform(deps, arch.namespace, arch.name), p.selectedElement);
+    });
+  },
+
+  /** The landing card: how many services run, in sync and drifted. */
+  async card(deps) {
+    return panel(deps, 'landing card', async () => cardReply(await readServices(deps)));
+  },
+
+  /** The extension's screen: every service the platform runs, with its drift. */
+  async screen(deps) {
+    return panel(deps, 'services screen', async () =>
+      screenReply(await readServices(deps), {
+        servicesOrg: deps.settings.gitops.servicesOrg,
+        namespaces: deps.settings.deployNamespaces,
+      }),
+    );
+  },
+
   async status(deps, p) {
     const arch = await findArchitecture(deps.hub, p.namespace, p.architecture);
-    const versions = await deps.hub.architectureVersions(arch.namespace, arch.name);
-    const history = await readHistory(deps.hub, arch.namespace, arch.name, versions, deps.jobs.unrecorded(arch.name));
-    return { status: 200, body: await readStatus(deps, arch.namespace, arch.name, { history }) };
+    const { status, platform } = await readPlatform(deps, arch.namespace, arch.name);
+    return { status: 200, body: platform ? { ...status, ...platformFacts(platform) } : status };
   },
 
   async history(deps, p) {
     const arch = await findArchitecture(deps.hub, p.namespace, p.architecture);
     const versions = await deps.hub.architectureVersions(arch.namespace, arch.name);
     const deployments = await readHistory(deps.hub, arch.namespace, arch.name, versions, deps.jobs.unrecorded(arch.name));
-    return { status: 200, body: { deployments } };
+    return { status: 200, body: { deployments: deployments.map(publicEntry) } };
   },
 
   /** The "Deploy this version" action: the version on screen. */
@@ -74,6 +95,17 @@ const handlers: Record<string, Handler> = {
     return { status: 202, body: accepted };
   },
 };
+
+/** Blocks for a panel, card or screen; any failure is shown in it as an alert rather than as an error status. */
+async function panel(deps: AppDeps, what: string, build: () => Promise<BlocksReply>): Promise<Response> {
+  try {
+    return { status: 200, body: await build() };
+  } catch (e) {
+    if (!(e instanceof HttpError)) deps.logger.error(`The ${what} failed: ${oneLine(e)}`);
+    const prefix = e instanceof CalmHubError ? 'CALM Hub: ' : '';
+    return { status: 200, body: errorReply(`${prefix}${oneLine(e)}`) };
+  }
+}
 
 /** Handles one request: match the route, verify CALM Hub's assertion, run the handler. */
 export async function handle(deps: AppDeps, req: Request): Promise<Response> {

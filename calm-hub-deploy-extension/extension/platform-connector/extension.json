@@ -10,12 +10,15 @@
     { "id": "status", "method": "GET", "path": "/namespaces/{namespace}/architectures/{architecture}/status", "scope": "read", "readOnly": true },
     { "id": "history", "method": "GET", "path": "/history/namespaces/{namespace}/architectures/{architecture}/deployments", "scope": "read", "readOnly": true },
     { "id": "deploy-here", "method": "POST", "path": "/deploy/{namespace}/{resourceType}/{resourceId}/{version}", "scope": "write" },
-    { "id": "deploy", "method": "POST", "path": "/namespaces/{namespace}/architectures/{architecture}/versions/{version}/deployments", "scope": "write" }
+    { "id": "deploy", "method": "POST", "path": "/namespaces/{namespace}/architectures/{architecture}/versions/{version}/deployments", "scope": "write" },
+    { "id": "node", "method": "GET", "path": "/node/{namespace}/{resourceType}/{resourceId}/{selectedElement}", "scope": "read", "readOnly": true },
+    { "id": "card", "method": "GET", "path": "/card", "scope": "authenticated", "readOnly": true },
+    { "id": "screen", "method": "GET", "path": "/screen", "scope": "authenticated", "readOnly": true }
   ],
   "commands": {
     "status": {
       "route": "status",
-      "description": "Where an architecture's service runs: its repository, deployment rules, Flux status, the commit applied and the architecture version deployed.",
+      "description": "Where an architecture's service runs and what really runs: its repository, deployment rules, Flux status, the commit applied, the architecture version on main, the workloads in the cluster, CALM Hub's newest deployment record, and drift (why the platform does not match Git or that record; empty when in sync).",
       "input": {
         "type": "object",
         "properties": {
@@ -39,7 +42,45 @@
           "ready": { "type": "boolean" },
           "message": { "type": "string" },
           "commit": { "type": "string" },
-          "commitUrl": { "type": "string" }
+          "commitUrl": { "type": "string" },
+          "mainCommit": { "type": "string", "description": "The commit main points at" },
+          "fluxAtMain": { "type": "boolean", "description": "Flux applied main's head commit" },
+          "inSync": { "type": "boolean", "description": "Nothing deploying, nothing unreadable, no drift" },
+          "drift": { "type": "array", "items": { "type": "string" }, "description": "Why the platform does not match Git or CALM Hub's newest completed record; empty when in sync" },
+          "deploying": {
+            "type": "object",
+            "description": "A connector job running for the service (drift is not reported meanwhile)",
+            "properties": { "version": { "type": "string" }, "status": { "type": "string" }, "notes": { "type": "string" } }
+          },
+          "problems": { "type": "array", "items": { "type": "string" }, "description": "Reads that failed: the state is unknown" },
+          "pendingApproval": { "type": "string", "description": "The pull request a connector job waits for a person to merge" },
+          "workloads": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": { "type": "string" },
+                "node": { "type": "string", "description": "The architecture node (label calm.finos.org/node)" },
+                "desired": { "type": "number", "description": "Replicas Git asks for" },
+                "replicas": { "type": "number", "description": "spec.replicas in the cluster" },
+                "ready": { "type": "number", "description": "Ready replicas in the cluster" },
+                "images": { "type": "array", "items": { "type": "string" } }
+              },
+              "required": ["name", "replicas", "ready", "images"]
+            }
+          },
+          "hubRecord": {
+            "type": "object",
+            "description": "CALM Hub's newest deployment record for the architecture (any version, any writer)",
+            "properties": {
+              "version": { "type": "string" },
+              "status": { "type": "string" },
+              "startTime": { "type": "string" },
+              "endTime": { "type": "string" },
+              "appliesTo": { "type": "array", "items": { "type": "string" } }
+            },
+            "required": ["status"]
+          }
         },
         "required": ["namespace", "architecture", "managed"]
       },
@@ -116,6 +157,9 @@
   },
   "contributes": {
     "designer-tab": [{ "id": "deployment", "title": "Deployment", "route": "tab" }],
-    "action": [{ "id": "deploy-version", "title": "Deploy this version", "route": "deploy-here" }]
+    "action": [{ "id": "deploy-version", "title": "Deploy this version", "route": "deploy-here" }],
+    "detail-panel": [{ "id": "platform", "title": "Platform", "route": "node" }],
+    "landing-card": [{ "id": "services", "title": "Platform Connector", "route": "card" }],
+    "screen": [{ "id": "services", "title": "Services", "route": "screen" }]
   }
 }

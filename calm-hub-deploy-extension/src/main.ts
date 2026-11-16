@@ -40,7 +40,7 @@ async function main() {
     }),
   };
   // Only the namespaces in DEPLOY_NAMESPACES (default hackathon) are scanned.
-  await closeInterrupted(deps, (process.env.DEPLOY_NAMESPACES ?? 'hackathon').split(',').filter(Boolean));
+  await closeInterrupted(deps, settings.deployNamespaces);
   createServer(deps).listen(settings.port, () =>
     logger.info(
       `platform-connector listening on :${settings.port} (Hub ${settings.hubUrl}, environment ${settings.environment}, approval ${settings.approval})`,

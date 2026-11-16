@@ -17,7 +17,7 @@ export const BASE_DIR = 'deploy/k8s';
 export const OVERLAY_DIR = 'deploy/k8s-overlay';
 const PLACEHOLDER_IMAGE = 'calm-service';
 const ROLLOUT_TIMEOUT = '300s';
-const NODE_LABEL = 'calm.finos.org/node';
+export const NODE_LABEL = 'calm.finos.org/node';
 const WORKLOAD_KINDS = ['Deployment', 'StatefulSet', 'DaemonSet'];
 const MAX_NOTE = 300;
 
@@ -45,6 +45,31 @@ export function nodesInManifests(texts: string[]): string[] {
     }
   }
   return [...nodes].sort();
+}
+
+/** A Deployment as Git asks for it: its name, node label and replicas (1 when `spec.replicas` is absent). */
+export interface GitDeployment {
+  name: string;
+  node?: string;
+  replicas: number;
+}
+
+/** The Deployments in some YAML texts, as Git asks for them. */
+export function deploymentsInManifests(texts: string[]): GitDeployment[] {
+  const out: GitDeployment[] = [];
+  for (const text of texts) {
+    for (const doc of YAML.parseAllDocuments(text).map(d => d.toJS())) {
+      if (doc?.kind !== 'Deployment' || typeof doc.metadata?.name !== 'string') continue;
+      const node = doc.metadata?.labels?.[NODE_LABEL] ?? doc.spec?.template?.metadata?.labels?.[NODE_LABEL];
+      const replicas = doc.spec?.replicas;
+      out.push({
+        name: doc.metadata.name,
+        ...(typeof node === 'string' ? { node } : {}),
+        replicas: typeof replicas === 'number' ? replicas : 1,
+      });
+    }
+  }
+  return out;
 }
 
 /** `nodesInManifests` over the YAML files of a folder. */

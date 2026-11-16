@@ -159,6 +159,8 @@ export interface HistoryEntry {
   details?: string;
   notes?: string;
   deployedBy?: string;
+  /** The nodes a deployment decorator applies to (read side only: the history route leaves it out). */
+  appliesTo?: string[];
 }
 
 /** Reads any deployment decorator (this connector's, in either layout, or Backstage's) into a history entry. */
