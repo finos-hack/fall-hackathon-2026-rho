@@ -25,6 +25,8 @@ const STATUS_TONE: Record<string, Tone> = {
   pending: 'info',
   failed: 'negative',
   'rolled-back': 'warning',
+  validating: 'info',
+  refused: 'negative',
 };
 
 const http = (u?: string) => (u && /^https?:\/\//.test(u) ? u : undefined);

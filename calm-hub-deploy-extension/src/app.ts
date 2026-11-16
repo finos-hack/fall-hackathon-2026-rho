@@ -37,7 +37,7 @@ const handlers: Record<string, Handler> = {
       const arch = await resolveArchitecture(deps.hub, p.namespace, p.resourceType, p.resourceId);
       const service = (await readService(deps.gitea, deps.settings, arch.name)) ?? null;
       const versions = await deps.hub.architectureVersions(arch.namespace, arch.name);
-      const history = await readHistory(deps.hub, arch.namespace, arch.name, versions);
+      const history = await readHistory(deps.hub, arch.namespace, arch.name, versions, deps.jobs.unrecorded(arch.name));
       const status = await readStatus(deps, arch.namespace, arch.name, { service, history });
       return { status: 200, body: tabReply(status, history, q.get('version') ?? undefined) };
     } catch (e) {
@@ -49,13 +49,16 @@ const handlers: Record<string, Handler> = {
 
   async status(deps, p) {
     const arch = await findArchitecture(deps.hub, p.namespace, p.architecture);
-    return { status: 200, body: await readStatus(deps, arch.namespace, arch.name) };
+    const versions = await deps.hub.architectureVersions(arch.namespace, arch.name);
+    const history = await readHistory(deps.hub, arch.namespace, arch.name, versions, deps.jobs.unrecorded(arch.name));
+    return { status: 200, body: await readStatus(deps, arch.namespace, arch.name, { history }) };
   },
 
   async history(deps, p) {
     const arch = await findArchitecture(deps.hub, p.namespace, p.architecture);
     const versions = await deps.hub.architectureVersions(arch.namespace, arch.name);
-    return { status: 200, body: { deployments: await readHistory(deps.hub, arch.namespace, arch.name, versions) } };
+    const deployments = await readHistory(deps.hub, arch.namespace, arch.name, versions, deps.jobs.unrecorded(arch.name));
+    return { status: 200, body: { deployments } };
   },
 
   /** The "Deploy this version" action: the version on screen. */

@@ -9,11 +9,14 @@ import type { Settings } from './config';
 import type { Gitea } from './gitea';
 import type { HubClient } from './hub';
 import type { Logger } from './logger';
+import { evaluationEntry, isOwnEvaluation } from './evaluation';
 import { historyEntry, newestFirst, type HistoryEntry } from './record';
 import { readService, type ServiceInfo } from './resolve';
 import { oneLine, readKustomization, type Kubectl } from './deploy/kube';
 
 const HISTORY_LIMIT = 20;
+/** Statuses of an attempt that has not finished: `validating` is a job at the controls gate (from memory). */
+const RUNNING = new Set(['validating', 'pending', 'in-progress']);
 const KUBECTL_TIMEOUT_MS = 5_000;
 
 export interface ReadDeps {
@@ -46,26 +49,34 @@ export interface Status {
   running?: { version?: string; status: DeploymentStatus | string; notes?: string };
 }
 
-/** The deployments recorded on every version of an architecture, newest first (at most 20). */
+/**
+ * The deployment attempts on every version of an architecture, newest first (at most 20): its deployment decorators,
+ * this connector's refusals at the controls gate (control-evaluation decorators), and `unrecorded` (jobs CALM Hub
+ * holds no record of yet, from memory).
+ */
 export async function readHistory(
   hub: HubClient,
   namespace: string,
   architecture: string,
   versions: string[],
+  unrecorded: HistoryEntry[] = [],
 ): Promise<HistoryEntry[]> {
-  const ids = new Map<number, string>();
+  const ids = new Map<number, { version: string; type: string }>();
   for (const v of versions) {
-    const list = await hub.listDecorators(namespace, {
-      target: architectureVersionPath(namespace, architecture, v),
-      type: 'deployment',
-    });
-    for (const id of list) if (!ids.has(id)) ids.set(id, v);
+    for (const type of ['deployment', 'control-evaluation']) {
+      const list = await hub.listDecorators(namespace, { target: architectureVersionPath(namespace, architecture, v), type });
+      for (const id of list) if (!ids.has(id)) ids.set(id, { version: v, type });
+    }
   }
   const newest = [...ids.entries()].sort((a, b) => b[0] - a[0]).slice(0, HISTORY_LIMIT);
   const read = await Promise.all(
-    newest.map(async ([id, v]) => historyEntry({ ...(await hub.getDecorator(namespace, id)), id }, v)),
+    newest.map(async ([id, { version, type }]) => {
+      const d = { ...(await hub.getDecorator(namespace, id)), id };
+      if (type === 'deployment') return historyEntry(d, version);
+      return isOwnEvaluation(d) ? evaluationEntry(d, version) : undefined;
+    }),
   );
-  return newestFirst(read);
+  return newestFirst([...unrecorded, ...read.filter((e): e is HistoryEntry => e !== undefined)]).slice(0, HISTORY_LIMIT);
 }
 
 /** The status of `<namespace>/<architecture>`; `service` is passed when the caller already read it. */
@@ -121,7 +132,7 @@ export async function readStatus(
     Object.assign(status, { message: `Flux status unavailable: ${oneLine(e)}` });
   }
   const history = opts.history ?? (await readHistory(deps.hub, namespace, architecture, versions));
-  const running = history.find(h => h.status === 'pending' || h.status === 'in-progress');
+  const running = history.find(h => RUNNING.has(h.status));
   if (running) {
     status.running = {
       status: running.status,

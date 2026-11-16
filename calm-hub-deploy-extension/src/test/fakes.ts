@@ -15,6 +15,7 @@ import type { HubClaims } from '../identity';
 import { silentLogger } from '../logger';
 import { RouteTable } from '../routes';
 import { Jobs, type Render, type Validate } from '../deploy/job';
+import { CONTROL_EVALUATION_STANDARD } from '../evaluation';
 import { KUBERNETES_DEPLOYMENT_STANDARD } from '../record';
 import type { Kubectl } from '../deploy/kube';
 
@@ -49,6 +50,7 @@ export function architectureDoc(name: string, version: string, extras: string[])
  * required fields, and `data.kubernetes` holding exactly a cluster and a namespace), in its `errors` shape.
  */
 export function standardErrors(d: any): { location: string; error: string }[] {
+  if (d?.$schema === CONTROL_EVALUATION_STANDARD) return evaluationErrors(d);
   if (d?.$schema !== KUBERNETES_DEPLOYMENT_STANDARD) return [];
   const errors: { location: string; error: string }[] = [];
   if (d.type !== 'deployment') errors.push({ location: '/type', error: 'must be "deployment"' });
@@ -66,6 +68,45 @@ export function standardErrors(d: any): { location: string; error: string }[] {
     for (const k of Object.keys(kube)) {
       if (k !== 'cluster' && k !== 'namespace') errors.push({ location: '/data/kubernetes', error: `property ${k} is not allowed` });
     }
+  }
+  return errors;
+}
+
+const nonEmpty = (v: unknown) => typeof v === 'string' && v.length > 0;
+
+/**
+ * What CALM Hub would refuse in a decorator stamped with the control-evaluation standard: the type, target-type
+ * `architecture`, the control's unique-id and requirement-url, the status enum, evaluated-at, and findings (each with
+ * a subject and a description) required for `not-met` and refused otherwise.
+ */
+export function evaluationErrors(d: any): { location: string; error: string }[] {
+  const errors: { location: string; error: string }[] = [];
+  if (d.type !== 'control-evaluation') errors.push({ location: '/type', error: 'must be "control-evaluation"' });
+  const tt = d['target-type'];
+  if (!Array.isArray(tt) || !tt.length || tt.some((t: unknown) => t !== 'architecture')) {
+    errors.push({ location: '/target-type', error: 'must be ["architecture"]' });
+  }
+  if (!Array.isArray(d.target) || !d.target.length) errors.push({ location: '/target', error: 'required' });
+  const data = d.data ?? {};
+  for (const k of ['unique-id', 'requirement-url']) {
+    if (!nonEmpty(data.control?.[k])) errors.push({ location: '/data/control', error: `required property ${k} missing` });
+  }
+  if (!['met', 'not-met', 'not-applicable'].includes(data.status)) errors.push({ location: '/data/status', error: 'not in enum' });
+  if (!nonEmpty(data['evaluated-at']) || Number.isNaN(Date.parse(data['evaluated-at']))) {
+    errors.push({ location: '/data/evaluated-at', error: 'must be a date-time' });
+  }
+  if (data.status === 'not-met') {
+    if (!Array.isArray(data.findings) || !data.findings.length) {
+      errors.push({ location: '/data', error: 'required property findings missing' });
+    } else {
+      data.findings.forEach((f: any, i: number) => {
+        for (const k of ['subject', 'description']) {
+          if (!nonEmpty(f?.[k])) errors.push({ location: `/data/findings/${i}`, error: `required property ${k} missing` });
+        }
+      });
+    }
+  } else if (data.findings !== undefined) {
+    errors.push({ location: '/data/findings', error: 'only allowed when not-met' });
   }
   return errors;
 }
