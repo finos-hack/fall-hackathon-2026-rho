@@ -37,7 +37,7 @@ const AUDIO_ONLY = args.includes('--audio-only');
 const OUT = args.find(a => !a.startsWith('--')) || fs.mkdtempSync(path.join(os.tmpdir(), 'calm-hub-demo-'));
 const KUBECONFIG = process.env.CALM_KUBECONFIG || path.join(BACKSTAGE, '.kube/config');
 const HUB = 'http://localhost:8090';
-const EXT = `${HUB}/api/calm/extensions/gitops-deploy/api`;
+const EXT = `${HUB}/api/calm/extensions/platform-connector/api`;
 const GITEA = 'http://localhost:3300/api/v1/repos/calm-services';
 const NAME = 'events-stream';
 const TTYD_PORT = 7682;
@@ -422,11 +422,11 @@ const srtTime = s => {
   // ---- 2. An extension is a manifest and a backend
   await chapter(1);
   await beat('ext-intro', clear);
-  await beat('manifest-id', termBeat('manifest-id', `jq '{id, name, version, hubApi}' extension/gitops-deploy/extension.json`));
-  await beat('routes-a', termBeat('routes-a', `jq -r '.routes[] | "\\(.method)\\t\\(.scope)\\t\\(.path)"' extension/gitops-deploy/extension.json | column -t`));
+  await beat('manifest-id', termBeat('manifest-id', `jq '{id, name, version, hubApi}' extension/platform-connector/extension.json`));
+  await beat('routes-a', termBeat('routes-a', `jq -r '.routes[] | "\\(.method)\\t\\(.scope)\\t\\(.path)"' extension/platform-connector/extension.json | column -t`));
   await narrate('routes-b');
-  await beat('contributes', clear, termBeat('contributes', `jq -c '.contributes[][]' extension/gitops-deploy/extension.json`));
-  await beat('commands', termBeat('commands', `jq -r '.commands | to_entries[] | "\\(.key)  → route \\(.value.route), input: \\(.value.input.required | join(", "))"' extension/gitops-deploy/extension.json`));
+  await beat('contributes', clear, termBeat('contributes', `jq -c '.contributes[][]' extension/platform-connector/extension.json`));
+  await beat('commands', termBeat('commands', `jq -r '.commands | to_entries[] | "\\(.key)  → route \\(.value.route), input: \\(.value.input.required | join(", "))"' extension/platform-connector/extension.json`));
 
   // ---- 3. Plugging it in
   await chapter(2);
@@ -571,7 +571,7 @@ const srtTime = s => {
   await beat(
     'mcp',
     clear,
-    termBeat('mcp', `mcp.sh ext_gitops-deploy_history '{"namespace":"hackathon","architecture":"${NAME}"}' | jq -c '.deployments[:3][] | {version, status, requestedBy}'`),
+    termBeat('mcp', `mcp.sh ext_platform-connector_history '{"namespace":"hackathon","architecture":"${NAME}"}' | jq -c '.deployments[:3][] | {version, status, requestedBy}'`),
   );
   await narrate('mcp-same');
 

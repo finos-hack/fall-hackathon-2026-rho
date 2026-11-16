@@ -8,7 +8,7 @@ const ORDER: Record<Level, number> = { debug: 0, info: 1, warn: 2, error: 3 };
 
 /** A plain console logger: `<time> <level> [<scope>] message {meta}`. */
 export function createLogger(
-  scope = 'gitops-deploy',
+  scope = 'platform-connector',
   minLevel: Level = (process.env.LOG_LEVEL as Level) ?? 'info',
   sink: (line: string) => void = line => process.stdout.write(`${line}\n`),
 ): Logger {

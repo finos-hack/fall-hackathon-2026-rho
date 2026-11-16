@@ -18,6 +18,7 @@ import {
   type ValidateArchitectureResult,
 } from '@internal/backstage-plugin-calm-node';
 import { HttpError } from '../errors';
+import { DecoratorRejected } from '../hub';
 import type { HubClaims } from '../identity';
 import { decoratorOf, type DeploymentRecord } from '../record';
 import { CATALOG_INFO_FILE, bindingProblem, findArchitecture, readService, type ServiceInfo } from '../resolve';
@@ -173,7 +174,9 @@ async function accept(
     status: 'pending',
     startTime: new Date(now()).toISOString(),
     notes: `Requested by ${req.claims.sub} through CALM Hub; ${settings.environment} runs ${service.deployedVersion ?? 'an unknown version'}`,
+    kubernetes: { cluster: settings.kubernetes.context, namespace: service.kubernetesNamespace },
     environment: settings.environment,
+    repository: service.webUrl,
     requestedBy: req.claims.sub,
     hubAuditId: req.claims.jti,
     details: service.webUrl,
@@ -276,6 +279,8 @@ export async function runDeployment(
     try {
       await hub.updateDecorator(record.namespace, decoratorId, decoratorOf(record));
     } catch (e) {
+      // CALM Hub refused the record itself: the step fails (with its reason) rather than going on unrecorded.
+      if (e instanceof DecoratorRejected) throw e;
       logger.warn(`Could not update decorator ${decoratorId}: ${oneLine(e)}`);
     }
   };
@@ -283,7 +288,7 @@ export async function runDeployment(
   const owner = service.owner;
   const name = record.architecture;
   const gitOpts = { logger };
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'gitops-deploy-'));
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'platform-connector-'));
   try {
     const architecturePath = path.join(tmp, 'architecture.json');
     await fs.writeFile(architecturePath, `${JSON.stringify(ctx.doc, null, 2)}\n`);
@@ -344,7 +349,7 @@ export async function runDeployment(
       head: branch,
       base: settings.gitops.branch,
       title,
-      body: `${message}\n\nOpened by the CALM Hub extension gitops-deploy for ${settings.environment}.`,
+      body: `${message}\n\nOpened by the CALM Hub extension platform-connector for ${settings.environment}.`,
     });
     if (settings.approval === 'auto') {
       await update({ pullRequest: pr.url, details: pr.url, notes: `Merging pull request #${pr.number}` });
@@ -378,7 +383,9 @@ export async function runDeployment(
     });
   } catch (e) {
     logger.error(`${record.uniqueId} failed: ${oneLine(e)}`);
-    await update({ status: 'failed', endTime: iso(), notes: `Deployment failed: ${oneLine(e)}` });
+    await update({ status: 'failed', endTime: iso(), notes: `Deployment failed: ${oneLine(e)}` }).catch(e2 =>
+      logger.error(`Could not record that ${record.uniqueId} failed: ${oneLine(e2)}`),
+    );
   } finally {
     await fs.rm(tmp, { recursive: true, force: true });
   }

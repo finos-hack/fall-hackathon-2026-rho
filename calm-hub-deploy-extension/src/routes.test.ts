@@ -2,7 +2,7 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { RouteTable } from './routes';
 
-const table = RouteTable.fromManifest(path.join(__dirname, '../extension/gitops-deploy/extension.json'));
+const table = RouteTable.fromManifest(path.join(__dirname, '../extension/platform-connector/extension.json'));
 
 describe('RouteTable (from the manifest)', () => {
   it('matches each route with its parameters', () => {
