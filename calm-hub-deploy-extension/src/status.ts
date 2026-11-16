@@ -20,6 +20,7 @@ const RUNNING = new Set(['validating', 'pending', 'in-progress']);
 /** Each kubectl read on the read side gives up after this, to stay within CALM Hub's 10 s for a proxied call. */
 export const KUBECTL_TIMEOUT_MS = 5_000;
 const RECORD_TYPES = ['deployment', 'control-evaluation'];
+const MAX_HISTORY_PAGES = 5;
 
 export interface ReadDeps {
   settings: Settings;
@@ -74,9 +75,11 @@ export async function readHistory(
     for (const id of list) if (!ids.has(id)) ids.set(id, pairs[i]);
   });
   const newest = [...ids.entries()].sort((a, b) => b[0] - a[0]);
-  // Other connectors' evaluations are dropped only once read: read newest first, a page at a time, until 20 are kept.
+  // Other connectors' evaluations are dropped only once read: read newest first, a page at a time, until 20 are kept
+  // (at most 5 pages, so many foreign evaluations cannot eat CALM Hub's 10 s).
   const kept: HistoryEntry[] = [];
-  for (let i = 0; i < newest.length && kept.length < HISTORY_LIMIT; i += HISTORY_LIMIT) {
+  const end = Math.min(newest.length, HISTORY_LIMIT * MAX_HISTORY_PAGES);
+  for (let i = 0; i < end && kept.length < HISTORY_LIMIT; i += HISTORY_LIMIT) {
     const read = await Promise.all(
       newest.slice(i, i + HISTORY_LIMIT).map(async ([id, { version, type }]) => {
         const d = { ...(await hub.getDecorator(namespace, id)), id };
