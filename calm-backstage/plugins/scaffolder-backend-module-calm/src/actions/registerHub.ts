@@ -158,7 +158,13 @@ export function createCalmRegisterHubAction(options: {
         namespace: z => z.string().describe('Hub namespace'),
         architecture: z => z.string().describe('Architecture name in the Hub'),
         version: z => z.string().describe('The version it is stored as'),
-        url: z => z.string().describe("The version's Hub URL: the $id"),
+        url: z =>
+          z
+            .string()
+            .optional()
+            .describe(
+              "The version's Hub URL: the $id. None in a dry run that would store the version, as the Hub does not hold it",
+            ),
         created: z =>
           z
             .boolean()
@@ -286,7 +292,10 @@ export function createCalmRegisterHubAction(options: {
       ctx.output('namespace', namespace);
       ctx.output('architecture', name);
       ctx.output('version', version);
-      ctx.output('url', url);
+      // A dry run that would store the version has no Hub page for it yet.
+      if (!(ctx.isDryRun && mode !== 'prepare' && !reuse)) {
+        ctx.output('url', url);
+      }
       ctx.output('created', mode !== 'prepare' && !reuse && !ctx.isDryRun);
     },
   });
@@ -432,6 +441,8 @@ async function storePrepared(
 
   // Everything from here on may fail with nothing stored for this run: the folder this run published is then removed.
   let created = false;
+  // Set in a dry run that would store the version: the Hub does not hold it, so it has no URL to give.
+  let wouldStore = false;
   // Set when the POST itself failed (a network error or a 5xx): the Hub may have committed the version.
   let postFailed = false;
   try {
@@ -473,6 +484,7 @@ async function storePrepared(
     if (versions.includes(version)) {
       await reuse(await hub.architecture(namespace, name, version));
     } else if (ctx.isDryRun) {
+      wouldStore = true;
       ctx.logger.info(
         `Dry run: would store the architecture as ${namespace}/${name} ${version} (${url})`,
       );
@@ -521,7 +533,9 @@ async function storePrepared(
   ctx.output('namespace', namespace);
   ctx.output('architecture', name);
   ctx.output('version', version);
-  ctx.output('url', url);
+  if (!wouldStore) {
+    ctx.output('url', url);
+  }
   ctx.output('created', created);
 }
 

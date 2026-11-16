@@ -511,6 +511,10 @@ describe('templateEntity: CALM Hub', () => {
     ).content;
     expect(hubContent).toContain('steps["store-hub"].output.version');
     expect(hubContent).not.toContain('register-hub');
+    // A dry run gives no url (nothing is stored, nothing is recorded): the text must not print "undefined".
+    expect(hubContent).toContain(
+      '(", at " + steps["store-hub"].output.url) if steps["store-hub"].output.url else ""',
+    );
     expect(t.step('publish').input).toMatchObject({
       hubNamespace: '${{ steps["register-hub"].output.namespace }}',
       hubArchitecture: '${{ steps["register-hub"].output.architecture }}',
@@ -535,6 +539,16 @@ describe('templateEntity: CALM Hub', () => {
         status: 'completed',
       },
     });
+  });
+
+  it('leaves the link out of the output text when a dry run gives no url', () => {
+    const t = template([bundle('3.0.0', 'kubernetes')]);
+    const content = t.spec.output.text.find(
+      (x: any) => x.title === 'CALM Hub',
+    ).content;
+    expect(content).toContain(
+      '(": " + steps.decorate.output.url if steps.decorate.output.url else "")',
+    );
   });
 
   it('asks for a name CALM Hub accepts: a letter first', () => {
