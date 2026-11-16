@@ -84,6 +84,20 @@ const getJson = async url => {
   if (!r.ok) throw new Error(`${url} -> ${r.status}`);
   return r.json();
 };
+/**
+ * A value read from live data that the take types into the terminal (or puts in a URL): it must have the expected
+ * shape, so nothing unexpected is ever typed. Throws early otherwise.
+ */
+const SHAPES = {
+  version: v => typeof v === 'string' && /^\d+\.\d+\.\d+$/.test(v),
+  jti: v => typeof v === 'string' && /^[0-9a-f-]{8,64}$/i.test(v),
+  integer: v => Number.isSafeInteger(v) && v >= 0,
+  sha: v => typeof v === 'string' && /^[0-9a-f]{7,40}$/.test(v),
+};
+const checked = (shape, value, what) => {
+  if (!SHAPES[shape](value)) throw new Error(`${what} is not a ${shape}: ${JSON.stringify(value)}`);
+  return value;
+};
 const run = (cmd, argv, opts = {}) => execFileSync(cmd, argv, { stdio: 'inherit', cwd: DIR, ...opts });
 /** Runs a command without blocking the event loop (the narration and Playwright keep going); resolves with stdout. */
 const capture = (cmd, argv) =>
@@ -104,18 +118,19 @@ async function plan() {
   if (!standards.values.some(s => s.name === 'gitops-deployment')) {
     throw new Error('The GitOps sub-standard is not in CALM Hub: run npx tsx scripts/publish-standard.ts first');
   }
-  const running = await getJson(`${HUB}/calm/namespaces/hackathon/architectures/${NAME}/versions/${status.deployedVersion}`);
+  const runningVersion = checked('version', status.deployedVersion, 'the running version');
+  const running = await getJson(`${HUB}/calm/namespaces/hackathon/architectures/${NAME}/versions/${runningVersion}`);
   const storage = running.relationships.find(r => r['unique-id'] === 'broker-storage')['relationship-type'].options[0].description;
   const choice = storage === 'PostgreSQL' ? 'SQLite on the broker’s volume' : 'PostgreSQL';
   const bump = v => v.replace(/(\d+)$/, n => String(Number(n) + 1));
-  const valid = bump(status.latestVersion);
+  const valid = checked('version', bump(checked('version', status.latestVersion, 'the latest version')), 'the next version');
   return {
     name: NAME,
-    running: status.deployedVersion,
+    running: runningVersion,
     storage: storage === 'PostgreSQL' ? 'PostgreSQL' : 'SQLite',
     choice,
     valid,
-    invalid: bump(valid),
+    invalid: checked('version', bump(valid), 'the version after it'),
     card: await cardCounts(),
   };
 }
@@ -737,10 +752,11 @@ const srtTime = s => {
     await show(ctx.valid);
     await fit();
   }));
-  await beat('warning', soft('the tab\'s warning', async () => {
+  // Hard: the page must show the version about to be deployed before Deploy/Run is clicked (no job exists yet).
+  await beat('warning', async () => {
     await tab('Extensions');
     await extensionText(`this page shows ${ctx.valid}`).waitFor();
-  }));
+  });
   await beat('click', async () => {
     await page.getByRole('button', { name: 'Deploy this version' }).click();
     await page.getByRole('button', { name: 'Run' }).waitFor();
@@ -763,8 +779,10 @@ const srtTime = s => {
 
   const pr = await latestPr('open');
   if (!pr || (prBefore && pr.number <= prBefore.number)) throw new Error('no new pull request is open');
+  checked('integer', pr.number, 'the pull request number');
   const prPage = `http://localhost:3300/calm-services/${NAME}/pulls/${pr.number}`;
   const [prCommit] = await getJson(`${GITEA}/${NAME}/pulls/${pr.number}/commits`);
+  checked('sha', prCommit?.sha, 'the pull request commit');
   await beat('pr', clear, soft('the pull request page', () => visit(prPage)), termBeat('pr', `curl -s "$GITEA/${NAME}/pulls?state=open" | jq -r '.[] | "#\\(.number)  \\(.title)\\n    \\(.head.ref) → \\(.base.ref)"'`));
   await beat('files', soft('the files page', () => visit(`${prPage}/files`)), termBeat('files', `curl -s $GITEA/${NAME}/pulls/${pr.number}/files | jq -r '.[] | "\\(.filename)  +\\(.additions) -\\(.deletions)"' | column -t`), soft('scrolling the files', () => scroll(700)));
   await beat('commit', clear, soft('the commit page', () => visit(`http://localhost:3300/calm-services/${NAME}/commit/${prCommit.sha}`)), termBeat('commit', `curl -s $GITEA/${NAME}/pulls/${pr.number}/commits | jq -r '.[0].commit.message'`));
@@ -782,9 +800,11 @@ const srtTime = s => {
 
   const deployed = await newest(ctx.valid);
   if (deployed?.status !== 'completed') throw new Error(`the deployment of ${ctx.valid} did not complete: ${JSON.stringify(deployed)}`);
+  checked('integer', deployed.id, 'the deployment decorator id');
   const decorator = await getJson(`${HUB}/api/calm/namespaces/hackathon/decorators/${deployed.id}`);
   const jti = decorator.data?.gitops?.['hub-audit-id'] ?? decorator.data?.['hub-audit-id'];
   if (!jti) throw new Error(`decorator ${deployed.id} has no hub-audit-id`);
+  checked('jti', jti, `the hub-audit-id of decorator ${deployed.id}`);
   await beat(
     'standard-record',
     clear,
@@ -822,8 +842,9 @@ const srtTime = s => {
   await soft(`showing ${ctx.invalid}`, async () => {
     await show(ctx.invalid, 'extensions');
     await collapseSidebar();
-    await extensionText(`this page shows ${ctx.invalid}`).waitFor();
   })();
+  // Hard: the page must show the version about to be deployed before Deploy/Run is clicked (no job exists yet).
+  await extensionText(`this page shows ${ctx.invalid}`).waitFor();
   await beat('deploy-invalid', async () => {
     await page.getByRole('button', { name: 'Deploy this version' }).click();
     await page.getByRole('button', { name: 'Run' }).click();
