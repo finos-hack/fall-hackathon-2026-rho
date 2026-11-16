@@ -4,11 +4,16 @@
 //   DEMO_TTS=elevenlabs   ElevenLabs text to speech: ELEVENLABS_API_KEY, DEMO_VOICE (a voice id),
 //                         DEMO_MODEL (default eleven_multilingual_v2), DEMO_SPEED (default 1.0)
 //
-// speak(beats, dir) adds `file` and `seconds` to every beat and returns them.
+// speak(beats, dir) adds `file` and `seconds` to every beat and returns them. Words the voice gets wrong are respelt
+// for it in pronunciation.cjs.
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { execFileSync } = require('child_process');
+const pronunciation = require('./pronunciation.cjs');
+
+/** The text the voice is given: the beat with pronunciation.cjs's respellings. */
+const spokenText = text => pronunciation.reduce((t, [pattern, say]) => t.replace(pattern, say), text);
 
 const seconds = file =>
   Number(execFileSync('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', file]).toString().trim());
@@ -61,11 +66,12 @@ async function speak(beats, dir) {
   fs.mkdirSync(dir, { recursive: true });
   let made = 0;
   for (const b of beats) {
-    const hash = crypto.createHash('sha1').update(`${p.key}|${b.text}`).digest('hex').slice(0, 16);
+    const spoken = spokenText(b.text);
+    const hash = crypto.createHash('sha1').update(`${p.key}|${spoken}`).digest('hex').slice(0, 16);
     b.file = path.join(dir, `${b.id}-${hash}.${p.ext}`);
     if (!fs.existsSync(b.file)) {
       const part = b.file.replace(/(\.[a-z0-9]+)$/, '.part$1');
-      await p.render(b.text, part);
+      await p.render(spoken, part);
       fs.renameSync(part, b.file);
       made++;
     }
@@ -74,4 +80,4 @@ async function speak(beats, dir) {
   return Object.assign(beats, { describe: p.describe, made });
 }
 
-module.exports = { speak };
+module.exports = { speak, spokenText };
