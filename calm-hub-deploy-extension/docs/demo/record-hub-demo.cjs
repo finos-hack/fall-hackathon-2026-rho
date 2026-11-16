@@ -1,49 +1,73 @@
-// Records the deployment extension demo: a terminal (left) on the local cluster and CALM Hub (right), side by side,
-// live, in one take. An architect changes a pattern decision in CALM Hub, deploys the new version from CALM Hub, and
-// the terminal watches Git, Flux and the cluster follow; then a version the pattern forbids stops at the controls
-// gate; then an agent asks the same extension over MCP.
+// Records the deployment extension demo, narrated: a terminal (left) on the local cluster and CALM Hub (right), side
+// by side, live, in one take. It starts with CALM Hub as it ships (no extensions), walks through the extension's
+// manifest, plugs the extension in, and then deploys a pattern decision from CALM Hub: the request, the firm's
+// approval of the pull request, Flux, and the results written back to CALM Hub. Then a version the pattern forbids
+// stops at the controls gate, and an agent calls the same extension over MCP.
+//
+// The voiceover is narration.cjs, spoken with macOS `say`; each beat is also the caption. Every step is held until
+// its beat has been spoken, and the pacing is 3x the first take's (typing, holds and waits).
 //
 // Patterned on calm-backstage's docs/demo/record-cluster-demo.cjs (ttyd + two Playwright pages + ffmpeg).
 //
 // Needs: calm-backstage's stack (yarn hub:up && yarn hub:seed, yarn k8s:up) with the service events-stream deployed
-// through Flux, this extension's Hub (npm run hub:up) and backend (npm start), ttyd, ffmpeg and jq on the PATH, and
-// calm-backstage's node_modules (for Playwright). Writes <out>/calm-hub-deploy-demo.mp4, <out>/chapters.json and two
-// stills (deployment-tab.png, diagram-overlay.png).
+// through Flux, this extension's Hub (npm run hub:up) and backend (npm start), ttyd, ffmpeg and jq on the PATH, macOS
+// `say`, and calm-backstage's node_modules (for Playwright). Writes <out>/calm-hub-deploy-demo.mp4 (with the
+// voiceover), <out>/calm-hub-deploy-demo.srt, <out>/chapters.json and stills.
 //
-//   node docs/demo/record-hub-demo.cjs [out-dir]
+//   node docs/demo/record-hub-demo.cjs [out-dir]               # the take
+//   node docs/demo/record-hub-demo.cjs [out-dir] --audio-only  # only speak the beats (cached) and time them
 //
 // Each take stores two new architecture versions (CALM Hub versions cannot be deleted): one that flips the broker's
-// storage between PostgreSQL and SQLite, and one with a connection the pattern forbids.
+// storage between PostgreSQL and SQLite, and one with a connection the pattern forbids. It restarts CALM Hub twice
+// (without, then with, the extension) and the backend (manual approval during the take, auto afterwards).
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const crypto = require('crypto');
 const { spawn, execFileSync } = require('child_process');
 const { createRequire } = require('module');
+const narration = require('./narration.cjs');
 
 const DIR = path.resolve(__dirname, '../..');
 const BACKSTAGE = process.env.CALM_BACKSTAGE_DIR || path.resolve(DIR, '../calm-backstage');
 const { chromium } = createRequire(path.join(BACKSTAGE, 'package.json'))('playwright');
-const OUT = process.argv[2] || fs.mkdtempSync(path.join(os.tmpdir(), 'calm-hub-demo-'));
+const args = process.argv.slice(2);
+const AUDIO_ONLY = args.includes('--audio-only');
+const OUT = args.find(a => !a.startsWith('--')) || fs.mkdtempSync(path.join(os.tmpdir(), 'calm-hub-demo-'));
 const KUBECONFIG = process.env.CALM_KUBECONFIG || path.join(BACKSTAGE, '.kube/config');
 const HUB = 'http://localhost:8090';
 const EXT = `${HUB}/api/calm/extensions/gitops-deploy/api`;
+const GITEA = 'http://localhost:3300/api/v1/repos/calm-services';
 const NAME = 'events-stream';
 const TTYD_PORT = 7682;
+const VOICE = process.env.DEMO_VOICE || 'Daniel';
+const RATE = process.env.DEMO_RATE || '170';
+const AUDIO_DIR = path.join(DIR, '.work/demo-audio');
 // Terminal on the left, CALM Hub on the right: 1920×1080 together. CALM Hub renders at 1.15× the size it is
 // recorded at, with its sidebar collapsed, so the diagram and the tab have room.
 const TW = 860,
   BW = 1060,
   H = 1080,
   ZOOM = 1.15;
+// Pacing: 3× the first take (see ~/.claude CLAUDE.md "Demo videos"): typing, holds and waits.
+const SLOW = 3;
+const TYPE_DELAY = 18 * SLOW;
+const GAP = 700; // silence after each beat
 
 const CHAPTERS = [
-  'CALM Hub with a deployment extension',
+  'CALM Hub on its own',
+  'An extension is a manifest and a backend',
+  'Plugging it in',
+  'CALM Hub hooks in',
   'Where the service runs',
   'An architect changes a pattern decision',
-  'Deploy this version, from CALM Hub',
-  'Deployed: Git, Flux and the record in CALM Hub',
+  'Asking CALM Hub to deploy',
+  'The firm’s change gate',
+  'Flux applies it',
+  'The results, back in CALM Hub',
   'The controls gate',
-  'The same extension, for an agent (MCP)',
+  'The same extension, for an agent',
+  'The integration pattern',
 ];
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -52,12 +76,25 @@ const getJson = async url => {
   if (!r.ok) throw new Error(`${url} -> ${r.status}`);
   return r.json();
 };
+const run = (cmd, argv, opts = {}) => execFileSync(cmd, argv, { stdio: 'inherit', cwd: DIR, ...opts });
 let onFailure = async () => {};
 
-(async () => {
-  fs.mkdirSync(OUT, { recursive: true });
+/** Speaks every beat to an AIFF (cached by voice, rate and text) and adds its length in seconds. */
+function speak(beats) {
+  fs.mkdirSync(AUDIO_DIR, { recursive: true });
+  for (const b of beats) {
+    const hash = crypto.createHash('sha1').update(`${VOICE}|${RATE}|${b.text}`).digest('hex').slice(0, 16);
+    b.file = path.join(AUDIO_DIR, `${b.id}-${hash}.aiff`);
+    if (!fs.existsSync(b.file)) execFileSync('say', ['-v', VOICE, '-r', RATE, '-o', b.file, b.text]);
+    b.seconds = Number(
+      execFileSync('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', b.file]).toString().trim(),
+    );
+  }
+  return beats;
+}
 
-  // ---- What this take deploys: the other storage choice than the one running, as the next version.
+/** What this take deploys: the other storage choice than the one running, as the next version. */
+async function plan() {
   const status = await getJson(`${EXT}/namespaces/hackathon/architectures/${NAME}/status`);
   if (!status.managed || !status.ready) throw new Error(`${NAME} is not deployed and ready: ${JSON.stringify(status)}`);
   const running = await getJson(`${HUB}/calm/namespaces/hackathon/architectures/${NAME}/versions/${status.deployedVersion}`);
@@ -65,8 +102,35 @@ let onFailure = async () => {};
   const choice = storage === 'PostgreSQL' ? 'SQLite on the broker’s volume' : 'PostgreSQL';
   const bump = v => v.replace(/(\d+)$/, n => String(Number(n) + 1));
   const valid = bump(status.latestVersion);
-  const invalid = bump(valid);
-  console.log(`running ${status.deployedVersion} (${storage}); will store ${valid} (${choice}) and ${invalid} (forbidden)`);
+  return { name: NAME, running: status.deployedVersion, storage: storage === 'PostgreSQL' ? 'PostgreSQL' : 'SQLite', choice, valid, invalid: bump(valid) };
+}
+
+const srtTime = s => {
+  const ms = Math.round(s * 1000);
+  const p = (n, w = 2) => String(n).padStart(w, '0');
+  return `${p(Math.floor(ms / 3600000))}:${p(Math.floor(ms / 60000) % 60)}:${p(Math.floor(ms / 1000) % 60)},${p(ms % 1000, 3)}`;
+};
+
+(async () => {
+  fs.mkdirSync(OUT, { recursive: true });
+  const ctx = await plan();
+  const beats = speak(narration(ctx));
+  const byId = new Map(beats.map(b => [b.id, b]));
+  const spoken = beats.reduce((s, b) => s + b.seconds + GAP / 1000, 0);
+  console.log(`running ${ctx.running} (${ctx.storage}); will store ${ctx.valid} (${ctx.choice}) and ${ctx.invalid} (forbidden)`);
+  console.log(`${beats.length} beats, ${Math.round(spoken)} s of narration (${(spoken / 60).toFixed(1)} min), voice ${VOICE} at ${RATE}`);
+  if (AUDIO_ONLY) {
+    for (const b of beats) console.log(`${b.seconds.toFixed(1).padStart(5)} s  ${b.id}`);
+    return;
+  }
+
+  // ---- Off camera: CALM Hub as it ships. Stop the backend, restart CALM Hub without the extension.
+  try {
+    run('pkill', ['-f', `${DIR}/node_modules/.bin/tsx src/main.ts`], { stdio: 'ignore' });
+  } catch {
+    // not running
+  }
+  run('scripts/hub-up.sh', ['--without-extensions'], { stdio: 'ignore' });
 
   const prompts = path.join(OUT, 'prompts');
   fs.writeFileSync(prompts, '');
@@ -114,22 +178,33 @@ let onFailure = async () => {};
   const B = await recorded(BW, 'hub', ZOOM);
   const term = T.page;
   const page = B.page;
+  const restoreBackend = () => {
+    try {
+      run(path.join(__dirname, 'start-extension.sh'), ['auto'], { stdio: 'ignore' });
+    } catch (e) {
+      console.error('could not restart the backend with auto approval:', e.message);
+    }
+  };
   onFailure = async () => {
     await term.screenshot({ path: path.join(OUT, 'failed-terminal.png') }).catch(() => {});
     await page.screenshot({ path: path.join(OUT, 'failed-hub.png') }).catch(() => {});
     await T.context.close();
     await B.context.close();
     await browser.close();
+    // Leave the stack as it was: CALM Hub with the extension, the backend on auto approval.
+    try {
+      run('scripts/hub-up.sh', [], { stdio: 'ignore' });
+    } catch {}
+    restoreBackend();
   };
   page.setDefaultTimeout(60000);
   const pause = ms => page.waitForTimeout(ms);
+  const hold = ms => pause(ms * SLOW);
   let t0 = Date.now();
+  const now = () => (Date.now() - t0) / 1000;
   const marks = [];
-  const log = m => console.log(`${((Date.now() - t0) / 1000).toFixed(0).padStart(4)}s ${m}`);
-  const chapter = i => {
-    marks.push({ chapter: i + 1, title: CHAPTERS[i], start: Math.round((Date.now() - t0) / 1000) });
-    log(`chapter ${i + 1}: ${CHAPTERS[i]}`);
-  };
+  const said = [];
+  const log = m => console.log(`${now().toFixed(0).padStart(4)}s ${m}`);
 
   // ---- Terminal: type a command, wait for the prompt to come back (the rc counts prompts in a file).
   async function until(check, timeout, what) {
@@ -139,10 +214,10 @@ let onFailure = async () => {};
       await sleep(250);
     }
   }
-  async function sh(cmd, { wait = true, timeout = 180000, after = 1200 } = {}) {
+  async function sh(cmd, { wait = true, timeout = 300000, after = 1200 * SLOW } = {}) {
     const before = promptCount();
-    await term.keyboard.type(cmd, { delay: 18 });
-    await sleep(250);
+    await term.keyboard.type(cmd, { delay: TYPE_DELAY });
+    await sleep(250 * SLOW);
     await term.keyboard.press('Enter');
     const done = () => until(() => promptCount() > before, timeout, cmd);
     if (!wait) return done;
@@ -150,41 +225,114 @@ let onFailure = async () => {};
     await sleep(after);
     return undefined;
   }
-  const say = (text, after = 1200) => sh(`# ${text}`, { after });
+  const comment = text => sh(`# ${text}`, { after: 400 * SLOW });
+  const clear = () => sh('clear', { after: 300 });
 
   // ---- CALM Hub helpers.
-  async function caption(text) {
-    await page.evaluate(t => {
-      let el = document.getElementById('__demo_caption');
-      if (!el) {
-        el = document.createElement('div');
-        el.id = '__demo_caption';
-        Object.assign(el.style, {
-          position: 'fixed',
-          left: '50%',
-          bottom: '28px',
-          transform: 'translateX(-50%)',
-          zIndex: 99999,
-          background: 'rgba(20,24,33,0.92)',
-          color: '#fff',
-          font: '600 19px/1.35 system-ui, sans-serif',
-          padding: '12px 22px',
-          borderRadius: '10px',
-          maxWidth: '86%',
-          textAlign: 'center',
-          boxShadow: '0 6px 24px rgba(0,0,0,0.3)',
-          border: '1px solid rgba(122,162,255,0.4)',
-          pointerEvents: 'none',
-        });
-        document.body.appendChild(el);
+  async function overlay(id, text, style) {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await drawOverlay(id, text, style);
+      } catch (e) {
+        // The page navigated under us: wait for it and draw again.
+        if (attempt >= 3) throw e;
+        await page.waitForLoadState('domcontentloaded').catch(() => {});
+        await sleep(500);
       }
-      el.textContent = t;
-    }, text);
+    }
   }
+  async function drawOverlay(id, text, style) {
+    await page.evaluate(
+      ({ id, text, style }) => {
+        let el = document.getElementById(id);
+        if (!el) {
+          el = document.createElement('div');
+          el.id = id;
+          Object.assign(el.style, style);
+          document.body.appendChild(el);
+        }
+        el.textContent = text;
+        el.style.display = text ? 'block' : 'none';
+      },
+      { id, text, style },
+    );
+  }
+  const caption = text =>
+    overlay('__demo_caption', text, {
+      position: 'fixed',
+      left: '50%',
+      bottom: '26px',
+      transform: 'translateX(-50%)',
+      zIndex: 99999,
+      background: 'rgba(14,18,28,0.94)',
+      color: '#fff',
+      font: '500 20px/1.4 system-ui, sans-serif',
+      padding: '14px 24px',
+      borderRadius: '10px',
+      width: '88%',
+      textAlign: 'left',
+      boxShadow: '0 6px 24px rgba(0,0,0,0.35)',
+      border: '1px solid rgba(122,162,255,0.45)',
+      pointerEvents: 'none',
+    });
+  const badge = text =>
+    overlay('__demo_badge', text, {
+      position: 'fixed',
+      right: '18px',
+      top: '14px',
+      zIndex: 99999,
+      background: 'rgba(122,162,255,0.95)',
+      color: '#0b1020',
+      font: '700 17px/1.2 system-ui, sans-serif',
+      padding: '8px 14px',
+      borderRadius: '8px',
+      pointerEvents: 'none',
+    });
+  /** The overlays are lost when the page reloads: put them back. */
+  let lastCaption = '';
+  let lastBadge = '';
+  const restoreOverlays = async () => {
+    await badge(lastBadge);
+    await caption(lastCaption);
+  };
+
+  // ---- Narration: one beat at a time, in order; the caption shows the words being spoken.
+  let voice = Promise.resolve();
+  const narrate = id =>
+    (voice = voice.then(async () => {
+      const b = byId.get(id);
+      if (!b) throw new Error(`no beat ${id}`);
+      lastCaption = b.text;
+      await caption(b.text);
+      said.push({ id, start: now(), seconds: b.seconds, text: b.text, file: b.file });
+      log(`  "${id}" (${b.seconds.toFixed(1)} s)`);
+      await sleep(b.seconds * 1000 + GAP);
+    }));
+  /** A beat, and its actions one after another while it is spoken; resolves when both are done (no beat is cut off). */
+  const beat = (id, ...actions) =>
+    Promise.all([
+      narrate(id),
+      (async () => {
+        for (const a of actions) await a();
+      })(),
+    ]);
+  /** A beat whose terminal part starts with its short comment. */
+  const termBeat = (id, ...cmds) => async () => {
+    const b = byId.get(id);
+    if (b.term) await comment(b.term);
+    for (const c of cmds) await (typeof c === 'string' ? sh(c) : c());
+  };
+  const chapter = async i => {
+    marks.push({ chapter: i + 1, title: CHAPTERS[i], start: Math.round(now()) });
+    log(`chapter ${i + 1}: ${CHAPTERS[i]}`);
+    lastBadge = `${i + 1} · ${CHAPTERS[i]}`;
+    await badge(lastBadge);
+  };
+
   /** Shows an architecture version (hash route: no reload, so no blank frame). */
   const show = async (version, tab) => {
     await page.evaluate(h => (window.location.hash = h), `#/hackathon/architectures/${NAME}/${version}${tab ? `?tab=${tab}` : ''}`);
-    await pause(1200);
+    await hold(1200);
   };
   /** Fits the diagram to its pane (it opens at the zoom it had, which can cut nodes off). */
   const fit = async () => {
@@ -194,7 +342,7 @@ let onFailure = async () => {};
   };
   const tab = async name => {
     await page.getByRole('tab', { name }).click();
-    await pause(1000);
+    await hold(800);
     if (name === 'Diagram') await fit();
   };
   /** Re-reads the Extensions tab (it loads once when shown). */
@@ -205,202 +353,222 @@ let onFailure = async () => {};
     await pause(800);
   };
   const extensionText = text => page.locator('main, body').getByText(text).first();
-  const scrollDown = async px => {
-    await page.mouse.move(BW * ZOOM * 0.6, H * ZOOM * 0.5);
+  const scroll = async px => {
+    await page.mouse.move(BW * ZOOM * 0.6, H * ZOOM * 0.45);
     await page.mouse.wheel(0, px);
-    await pause(700);
+    await hold(600);
   };
+  const latestPr = async state => (await getJson(`${GITEA}/${NAME}/pulls?state=${state}&limit=1`))[0];
+  const newest = async version =>
+    (await getJson(`${EXT}/history/namespaces/hackathon/architectures/${NAME}/deployments`)).deployments.find(d => d.version === version);
 
-  // ---- Off camera (trimmed): the terminal prompt, CALM Hub on the running version.
+  // ---- Off camera (trimmed): the terminal prompt, CALM Hub on the running version, without extensions.
   await term.goto(`http://127.0.0.1:${TTYD_PORT}/`);
   await until(() => promptCount() > 0, 30000, 'the terminal prompt');
-  await page.goto(`${HUB}/#/hackathon/architectures/${NAME}/${status.deployedVersion}`);
-  await page.getByRole('tab', { name: 'Extensions' }).waitFor();
+  await page.goto(`${HUB}/#/hackathon/architectures/${NAME}/${ctx.running}`);
+  await page.getByRole('tab', { name: 'Decorators' }).waitFor();
   const dark = page.getByRole('button', { name: 'Switch to dark theme' });
   if (await dark.isVisible().catch(() => false)) await dark.click();
   const collapse = page.getByRole('button', { name: 'Collapse sidebar' });
   if (await collapse.isVisible().catch(() => false)) await collapse.click();
-  await pause(1000);
+  await pause(1500);
+  if (await page.getByRole('tab', { name: 'Extensions' }).isVisible()) throw new Error('CALM Hub still shows an Extensions tab');
   await fit();
   await pause(1500);
+  const prBefore = await latestPr('all');
   t0 = Date.now();
-  const both = (...parts) => Promise.all(parts.map(f => f()));
 
-  // ---- 1. CALM Hub with a deployment extension
-  chapter(0);
-  await both(
-    async () => {
-      await say('CALM Hub has loaded the gitops-deploy extension: its routes and commands');
-      await sh(
-        `curl -s $HUB/api/calm/extensions | jq '.values[] | select(.id=="gitops-deploy") | {id, routes: [.routes[] | "\\(.method) \\(.path) [\\(.scope)]"], commands: (.commands | keys)}'`,
-        { after: 2500 },
-      );
-    },
-    async () => {
-      await caption('CALM Hub (right) and a terminal on the local Kubernetes cluster (left)');
-      await pause(4500);
-      await caption('events-stream: a Nisshi event-streaming service, made from a CALM pattern and deployed by Flux');
-      await pause(4500);
-      await caption('The Deployments overlay: each deployed node shows the deployment recorded on this version');
-      await pause(4000);
-    },
-  );
-  await page.screenshot({ path: path.join(OUT, 'diagram-overlay.png') });
+  // ---- 1. CALM Hub on its own
+  await chapter(0);
+  await beat('intro');
+  await page.screenshot({ path: path.join(OUT, 'hub-before.png') });
+  await beat('tabs', async () => {
+    await page.getByRole('tab', { name: 'Diagram' }).hover();
+    await hold(1500);
+    await page.getByRole('tab', { name: 'Decorators' }).hover();
+  });
+  await beat('registry-before', termBeat('registry-before', `curl -s $HUB/api/calm/extensions | jq -c '.values[] | {id, routes: (.routes | length), contributes: (.contributes | keys)}'`));
+  await beat('decorators', () => tab('Decorators'));
+  await beat('overlay-before', () => tab('Diagram'));
 
-  // ---- 2. Where the service runs
-  chapter(1);
-  await both(
-    async () => {
-      await sh('clear', { after: 300 });
-      await say(`The cluster runs version ${status.deployedVersion}: broker storage ${storage}`);
-      await sh('k -n $NS get deploy', { after: 1500 });
-      await say('The extension reads Git and Flux; the status command, through the CALM Hub proxy');
-      await sh(
-        `curl -s $EXT/namespaces/hackathon/architectures/${NAME}/status | jq '{deployedVersion, latestVersion, deploymentRules, ready, commit}'`,
-        { after: 2500 },
-      );
-    },
-    async () => {
-      await tab('Extensions');
-      await page.getByText('Deployment', { exact: true }).first().waitFor();
-      await caption('The extension adds a Deployment tab and a "Deploy this version" action to every architecture');
-      await pause(5000);
-      await caption('Where this version runs: the environment, the deployment rules, Flux and the commit it applied');
-      await pause(5000);
-    },
-  );
-  await page.screenshot({ path: path.join(OUT, 'deployment-tab.png') });
+  // ---- 2. An extension is a manifest and a backend
+  await chapter(1);
+  await beat('ext-intro', clear);
+  await beat('manifest-id', termBeat('manifest-id', `jq '{id, name, version, hubApi}' extension/gitops-deploy/extension.json`));
+  await beat('routes-a', termBeat('routes-a', `jq -r '.routes[] | "\\(.method)\\t\\(.scope)\\t\\(.path)"' extension/gitops-deploy/extension.json | column -t`));
+  await narrate('routes-b');
+  await beat('contributes', clear, termBeat('contributes', `jq -c '.contributes[][]' extension/gitops-deploy/extension.json`));
+  await beat('commands', termBeat('commands', `jq -r '.commands | to_entries[] | "\\(.key)  → route \\(.value.route), input: \\(.value.input.required | join(", "))"' extension/gitops-deploy/extension.json`));
 
-  // ---- 3. An architect changes a pattern decision
-  chapter(2);
-  await both(
-    async () => {
-      await sh('clear', { after: 300 });
-      await say(`An architect changes the pattern's storage decision to ${choice}`);
-      await sh(`npx tsx scripts/new-version.ts hackathon ${NAME} --choose "broker-storage=${choice}"`, { after: 2500 });
-    },
-    async () => {
-      await caption('A pattern allows only its decisions to change: here, where the broker keeps its topics');
-      await pause(3000);
-    },
-  );
-  await show(valid);
+  // ---- 3. Plugging it in
+  await chapter(2);
+  await beat('config', clear, termBeat('config', `grep -E 'calm-extensions|calm-keys|mcp.enabled|backend-url|private-key' hub/compose.override.yml | sed -E 's/^ +(- )?//'`));
+  await beat('start-backend', termBeat('start-backend', 'start-extension.sh manual'));
+  await beat('restart', termBeat('restart', `scripts/hub-up.sh 2>&1 | grep -E 'Recreated|Started|Waiting'`));
+  await narrate('identity');
+  await beat('registry-after', clear, termBeat('registry-after', `curl -s $HUB/api/calm/extensions | jq -r '.values[].id'`));
+  await beat('jwks', termBeat('jwks', `curl -s $HUB/api/calm/auth/jwks | jq -c '.keys[] | {kty, crv, alg, kid}'`));
+  await beat('mcp-tools', termBeat('mcp-tools', 'mcp.sh --list ext_'));
+
+  // ---- 4. CALM Hub hooks in
+  await chapter(3);
+  await voice;
+  await page.reload();
+  await page.getByRole('tab', { name: 'Extensions' }).waitFor();
+  await restoreOverlays();
   await fit();
-  await caption(`Version ${valid} in CALM Hub: the broker now keeps its topics in ${choice.startsWith('SQLite') ? 'SQLite' : 'PostgreSQL'}`);
-  await pause(4500);
-  await tab('Extensions');
-  await extensionText(`this page shows ${valid}`).waitFor();
-  await caption(`The tab warns: the cluster still runs ${status.deployedVersion}`);
-  await pause(4500);
+  await beat('reload', () => page.getByRole('tab', { name: 'Extensions' }).hover());
+  await beat('ext-tab', async () => {
+    await tab('Extensions');
+    await page.getByText('Deployment', { exact: true }).first().waitFor();
+  });
+  await page.screenshot({ path: path.join(OUT, 'deployment-tab.png') });
+  await beat('log-tab', clear, termBeat('log-tab', 'ext-log.sh 2'));
+  await narrate('blocks');
+  await narrate('fields');
 
-  // ---- 4. Deploy this version
-  chapter(3);
-  await page.getByRole('button', { name: 'Deploy this version' }).click();
-  await page.getByRole('button', { name: 'Run' }).waitFor();
-  await caption('CALM Hub asks first, checks the caller can write to the namespace, and audits the call');
-  await pause(4500);
+  // ---- 5. Where the service runs
+  await chapter(4);
+  await beat('deploys', clear, termBeat('deploys', 'k -n $NS get deploy'));
+  await beat(
+    'status',
+    termBeat('status', `curl -s $EXT/namespaces/hackathon/architectures/${NAME}/status | jq '{deployedVersion, latestVersion, deploymentRules, ready}'`),
+  );
+
+  // ---- 6. An architect changes a pattern decision
+  await chapter(5);
+  await beat('pattern', clear);
+  await beat('new-version', termBeat('new-version', `npx tsx scripts/new-version.ts hackathon ${NAME} --choose "broker-storage=${ctx.choice}"`));
+  await beat('diagram-new', async () => {
+    await show(ctx.valid);
+    await fit();
+  });
+  await beat('warning', async () => {
+    await tab('Extensions');
+    await extensionText(`this page shows ${ctx.valid}`).waitFor();
+  });
+
+  // ---- 7. Asking CALM Hub to deploy
+  await chapter(6);
+  await beat('click', async () => {
+    await page.getByRole('button', { name: 'Deploy this version' }).click();
+    await page.getByRole('button', { name: 'Run' }).waitFor();
+  });
+  await narrate('dialog');
   await page.getByRole('button', { name: 'Run' }).click();
-  const watching = await sh(`watch-deploy.sh ${NAME} ${valid}`, { wait: false });
-  await caption('The extension validates the version, re-renders the deployment rules and opens a pull request');
-  await pause(3000);
-  await tab('Diagram');
-  await caption('Every step updates the deployment decorator: the overlay follows it live');
+  let watching;
+  await beat('run', clear, async () => {
+    await comment(byId.get('run').term);
+    watching = await sh(`UNTIL=approval watch-deploy.sh ${NAME} ${ctx.valid}`, { wait: false });
+  });
+  await beat('step-validate', () => tab('Diagram'));
+  await narrate('step-render');
+  await narrate('step-pr');
+  await watching();
+  await beat('waiting', () => hold(1000));
+  await beat('log-steps', clear, termBeat('log-steps', 'ext-log.sh 7'));
+
+  // ---- 8. The firm's change gate
+  await chapter(7);
+  const pr = await latestPr('open');
+  if (!pr || (prBefore && pr.number <= prBefore.number)) throw new Error('no new pull request is open');
+  await beat('pr', clear, termBeat('pr', `curl -s "$GITEA/${NAME}/pulls?state=open" | jq -r '.[] | "#\\(.number)  \\(.title)\\n    \\(.head.ref) → \\(.base.ref)"'`));
+  await beat('files', termBeat('files', `curl -s $GITEA/${NAME}/pulls/${pr.number}/files | jq -r '.[] | "\\(.filename)  +\\(.additions) -\\(.deletions)"' | column -t`));
+  await beat('commit', clear, termBeat('commit', `curl -s $GITEA/${NAME}/pulls/${pr.number}/commits | jq -r '.[0].commit.message'`));
+  await narrate('gate');
+  await beat('approve', termBeat('approve', `approve-pr.sh ${NAME} ${pr.number}`));
+
+  // ---- 9. Flux applies it
+  await chapter(8);
+  watching = undefined;
+  await beat('flux', clear, async () => {
+    watching = await sh(`watch-deploy.sh ${NAME} ${ctx.valid}`, { wait: false });
+  });
+  await narrate('policies');
   await watching();
   log('deployment finished');
-  await pause(3500);
+  await narrate('rollouts');
+  await beat('overlay-after', () => hold(3000));
+  await page.screenshot({ path: path.join(OUT, 'diagram-overlay.png') });
 
-  // ---- 5. Deployed
-  chapter(4);
-  await both(
-    async () => {
-      await sh('clear', { after: 300 });
-      await say('A pull request in Gitea, merged; Flux applied the merge commit');
-      await sh(
-        `curl -s "http://localhost:3300/api/v1/repos/calm-services/${NAME}/pulls?state=closed&limit=3" | jq -r '.[] | "#\\(.number)  \\(.title)  merged: \\(.merged)"'`,
-        { after: 1500 },
-      );
-      await sh('k -n $NS get deploy,networkpolicy', { after: 3000 });
-    },
-    async () => {
-      await tab('Decorators');
-      await caption('The record: status, pull request, commit, who asked, and the call\'s id in CALM Hub\'s audit log');
-      await pause(6500);
-      await refreshExtensions();
-      await caption(`The tab now says ${valid} is the version deployed`);
-      await pause(3500);
-      await scrollDown(500);
-      await caption('And lists every deployment of this architecture, from Backstage or from CALM Hub');
-      await pause(4000);
-    },
+  // ---- 10. The results, back in CALM Hub
+  await chapter(9);
+  await beat('decorators-after', () => tab('Decorators'));
+  await narrate('record');
+  await beat('deployed', refreshExtensions);
+  await beat('history', () => scroll(500));
+  const deployed = await newest(ctx.valid);
+  const decorator = await getJson(`${HUB}/api/calm/namespaces/hackathon/decorators/${deployed.id}`);
+  const jti = decorator.data['hub-audit-id'];
+  await beat(
+    'audit',
+    clear,
+    termBeat(
+      'audit',
+      `curl -s $HUB/api/calm/namespaces/hackathon/decorators/${deployed.id} | jq -r '.data["hub-audit-id"]'`,
+      `hub-audit.sh ${jti}`,
+    ),
   );
+  await narrate('two-ways');
 
-  // ---- 6. The controls gate
-  chapter(5);
-  await both(
-    async () => {
-      await sh('clear', { after: 300 });
-      await say('Now a version the pattern does not allow: the browser talks to the service directly');
-      await sh(`npx tsx scripts/new-version.ts hackathon ${NAME} --connect web-client:stream-app`, { after: 2500 });
-    },
-    async () => {
-      await caption('CALM Hub stores any valid CALM document; the pattern is checked when it is deployed');
-      await pause(3000);
-    },
+  // ---- 11. The controls gate
+  await chapter(10);
+  await beat('forbidden', clear, termBeat('forbidden', `npx tsx scripts/new-version.ts hackathon ${NAME} --connect web-client:stream-app`));
+  await show(ctx.invalid, 'extensions');
+  await extensionText(`this page shows ${ctx.invalid}`).waitFor();
+  await beat('deploy-invalid', async () => {
+    await page.getByRole('button', { name: 'Deploy this version' }).click();
+    await page.getByRole('button', { name: 'Run' }).click();
+  });
+  await beat('failed', clear, () => sh(`watch-deploy.sh ${NAME} ${ctx.invalid}`));
+  await beat(
+    'unchanged',
+    clear,
+    termBeat(
+      'unchanged',
+      `curl -s "$GITEA/${NAME}/pulls?state=all&limit=1" | jq -r '.[] | "newest pull request: #\\(.number)  \\(.title)"'`,
+      `curl -s $EXT/namespaces/hackathon/architectures/${NAME}/status | jq '{deployedVersion, latestVersion}'`,
+    ),
   );
-  await show(invalid, 'extensions');
-  await extensionText(`this page shows ${invalid}`).waitFor();
-  await caption(`Deploy ${invalid}…`);
-  await pause(2500);
-  await page.getByRole('button', { name: 'Deploy this version' }).click();
-  await page.getByRole('button', { name: 'Run' }).click();
-  await sh(`watch-deploy.sh ${NAME} ${invalid}`, { after: 2500 });
-  await refreshExtensions();
-  await scrollDown(500);
-  await caption('Stopped at the controls gate: calm validate failed, so nothing reached Git or the cluster');
-  await both(
-    async () => {
-      await sh('clear', { after: 300 });
-      await say('No new pull request, and the cluster still runs the last good version');
-      await sh(
-        `curl -s "http://localhost:3300/api/v1/repos/calm-services/${NAME}/pulls?state=all&limit=1" | jq -r '.[] | "latest: #\\(.number)  \\(.title)"'`,
-        { after: 1200 },
-      );
-      await sh(`curl -s $EXT/namespaces/hackathon/architectures/${NAME}/status | jq '{deployedVersion, latestVersion}'`, {
-        after: 2500,
-      });
-    },
-    async () => pause(6000),
-  );
+  await beat('failed-record', async () => {
+    await refreshExtensions();
+    await scroll(500);
+  });
 
-  // ---- 7. MCP
-  chapter(6);
-  await both(
-    async () => {
-      await sh('clear', { after: 300 });
-      await say('Each command is also an MCP tool on CALM Hub: what an agent would call');
-      await sh(
-        `mcp.sh ext_gitops-deploy_history '{"namespace":"hackathon","architecture":"${NAME}"}' | jq -c '.deployments[:3][] | {version, status, requestedBy, notes}'`,
-        { after: 4000 },
-      );
-    },
-    async () => {
-      await caption('ext_gitops-deploy_status, _history and _deploy: the same scopes, checks and audit as the UI');
-      await pause(6000);
-      await caption('A firm plugs its own deployment platform into CALM Hub the same way (PROFILE.md)');
-      await pause(5000);
-    },
+  // ---- 12. The same extension, for an agent
+  await chapter(11);
+  await beat(
+    'mcp',
+    clear,
+    termBeat('mcp', `mcp.sh ext_gitops-deploy_history '{"namespace":"hackathon","architecture":"${NAME}"}' | jq -c '.deployments[:3][] | {version, status, requestedBy}'`),
   );
-  const duration = (Date.now() - t0) / 1000;
+  await narrate('mcp-same');
 
-  // ---- Save the two videos and join them side by side.
+  // ---- 13. The integration pattern
+  await chapter(12);
+  await beat('recap-1', async () => {
+    await scroll(-1000);
+  });
+  await narrate('recap-2');
+  await narrate('recap-3');
+  await caption('');
+  await hold(1000);
+  const duration = now();
+
+  // ---- Save the two videos, join them side by side, and lay the voiceover under them.
   const tPath = await term.video().path();
   const bPath = await page.video().path();
   await T.context.close();
   await B.context.close();
   await browser.close();
   ttyd.kill();
+  restoreBackend();
+
   const out = path.join(OUT, 'calm-hub-deploy-demo.mp4');
   const at = created => ((t0 - created) / 1000).toFixed(2);
+  const inputs = said.flatMap(s => ['-i', s.file]);
+  const delays = said.map((s, i) => `[${i + 2}:a]aresample=48000,adelay=delays=${Math.round(s.start * 1000)}:all=1[a${i}]`);
+  const mix = `${said.map((_, i) => `[a${i}]`).join('')}amix=inputs=${said.length}:normalize=0:duration=longest,apad[aout]`;
   execFileSync(
     'ffmpeg',
     [
@@ -415,25 +583,42 @@ let onFailure = async () => {};
       at(B.created),
       '-i',
       bPath,
+      ...inputs,
       '-filter_complex',
-      '[0:v]setpts=PTS-STARTPTS,fps=25[t];[1:v]setpts=PTS-STARTPTS,fps=25[b];[t][b]hstack=inputs=2,format=yuv420p[v]',
+      [
+        '[0:v]setpts=PTS-STARTPTS,fps=25[t]',
+        '[1:v]setpts=PTS-STARTPTS,fps=25[b]',
+        '[t][b]hstack=inputs=2,format=yuv420p[v]',
+        ...delays,
+        mix,
+      ].join(';'),
       '-map',
       '[v]',
+      '-map',
+      '[aout]',
       '-t',
       duration.toFixed(2),
       '-c:v',
       'libx264',
       '-crf',
       '20',
+      '-c:a',
+      'aac',
+      '-b:a',
+      '128k',
       '-movflags',
       '+faststart',
       out,
     ],
     { stdio: 'inherit' },
   );
+  const srt = said
+    .map((s, i) => `${i + 1}\n${srtTime(s.start)} --> ${srtTime(s.start + s.seconds + 0.3)}\n${s.text}\n`)
+    .join('\n');
+  fs.writeFileSync(path.join(OUT, 'calm-hub-deploy-demo.srt'), srt);
   fs.writeFileSync(path.join(OUT, 'chapters.json'), `${JSON.stringify(marks, null, 2)}\n`);
   console.log('video:', out);
-  console.log('chapters:', JSON.stringify(marks));
+  console.log('chapters:', marks.map(m => `${Math.floor(m.start / 60)}:${String(m.start % 60).padStart(2, '0')} ${m.title}`).join('\n'));
 })().catch(async e => {
   console.error(e);
   await onFailure().catch(() => {});

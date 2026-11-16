@@ -2,7 +2,8 @@
 # watch-deploy.sh <architecture> <version> [timeout-seconds]: a live view of a deployment started from CALM Hub,
 # redrawn every 2 s: the newest deployment recorded for the version (from the extension's history), Flux, the
 # Deployments and the network policies in calm-<architecture>. Exits when the deployment is completed (and every
-# Deployment is available) or failed. Uses $KUBECONFIG, context calm-backstage, and $EXT.
+# Deployment is available) or failed, or, with UNTIL=approval, when it waits for its pull request to be approved.
+# Uses $KUBECONFIG, context calm-backstage, and $EXT.
 set -u
 NAME="${1:?usage: watch-deploy.sh <architecture> <version> [timeout-seconds]}"
 VERSION="${2:?usage: watch-deploy.sh <architecture> <version> [timeout-seconds]}"
@@ -46,6 +47,10 @@ while :; do
   notready=$(awk '{ split($2, r, "/"); if (r[1] != r[2]) n++ } END { print n + 0 }' <<<"$deploys")
   if [ "$status" = completed ] && [ "$notready" = 0 ]; then
     printf '\n%sDeployed after %d:%02d%s\n' "$G" $((now / 60)) $((now % 60)) "$R"
+    exit 0
+  fi
+  if [ "${UNTIL:-}" = approval ] && [[ "$notes" == "Waiting for approval"* ]]; then
+    printf '\n%sWaiting for someone to approve the pull request%s\n' "$Y" "$R"
     exit 0
   fi
   if [ "$status" = failed ]; then
