@@ -46,8 +46,9 @@ export function createCalmImageBuildAction(options: {
 }) {
   return createTemplateAction({
     id: 'calm:image:build',
+    supportsDryRun: true,
     description:
-      'Builds the Dockerfile of a published service folder into the local cluster (minikube -p <calm.deploy.kubernetes.minikubeProfile> image build -t <name>:<tag> <dir>). Needs the cluster from `yarn k8s:up`.',
+      'Builds the Dockerfile of a published service folder into the local cluster (minikube -p <calm.deploy.kubernetes.minikubeProfile> image build -t <name>:<tag> <dir>). Needs the cluster from `yarn k8s:up`. In a dry run it checks the inputs and logs the build command, without running it.',
     schema: {
       input: {
         dir: z =>
@@ -72,16 +73,26 @@ export function createCalmImageBuildAction(options: {
       },
     },
     async handler(outer) {
+      const dryRun = outer.isDryRun
+        ? { dryRunWorkspace: outer.workspacePath }
+        : undefined;
       await withServiceLock(
         outer,
         {
-          dir: publishedFolder(options.localDir, outer.input.dir),
+          dir: publishedFolder(options.localDir, outer.input.dir, dryRun),
           acquire: false,
         },
         async ctx => {
           const settings = await requireKubernetesDeploy(options.settings);
           const image = imageReference(ctx.input.name, ctx.input.tag);
-          const dir = publishedFolder(options.localDir, ctx.input.dir);
+          const dir = publishedFolder(options.localDir, ctx.input.dir, dryRun);
+          if (ctx.isDryRun) {
+            ctx.logger.info(
+              `Dry run: would run KUBECONFIG=${settings.kubeconfig} minikube -p ${settings.minikubeProfile} image build -t ${image} ${dir}`,
+            );
+            ctx.output('image', image);
+            return;
+          }
           ctx.logger.info(
             `KUBECONFIG=${settings.kubeconfig} minikube -p ${settings.minikubeProfile} image build -t ${image} ${dir}`,
           );

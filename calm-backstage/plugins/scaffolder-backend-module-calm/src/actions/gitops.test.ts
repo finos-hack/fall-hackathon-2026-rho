@@ -144,6 +144,46 @@ describe('calm:git:publish', () => {
     );
   });
 
+  it('in a dry run makes no commit, push or repository, and reports the repository', async () => {
+    const dir = path.join(root, 'dry-run-output', 'orders');
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(path.join(dir, 'a.txt'), 'a');
+    await fs.writeFile(path.join(dir, 'b.txt'), 'b');
+    const c = { ...ctx({ dir, name: 'orders' }), isDryRun: true };
+    await createCalmGitPublishAction({ settings: gitops(), localDir }).handler(
+      c,
+    );
+    expect(outputs(c)).toEqual({
+      repoUrl: `file://${remoteBase}/calm-services/orders`,
+      commit: 'dry-run',
+      shortCommit: 'dry-run',
+    });
+    expect(c.logger.info).toHaveBeenCalledWith(
+      `Dry run: would create file://${remoteBase}/calm-services/orders and push 2 files on main`,
+    );
+    expect(await fs.readdir(dir)).toEqual(['a.txt', 'b.txt']);
+    expect(await fs.readdir(path.join(remoteBase, 'calm-services'))).toEqual(
+      [],
+    );
+  });
+
+  it('in a dry run still refuses a missing gitops config and a folder outside both', async () => {
+    const dir = path.join(root, 'dry-run-output', 'orders');
+    await fs.mkdir(dir, { recursive: true });
+    await expect(
+      createCalmGitPublishAction({ localDir }).handler({
+        ...ctx({ dir, name: 'orders' }),
+        isDryRun: true,
+      }),
+    ).rejects.toThrow(/calm.gitops is not configured/);
+    await expect(
+      createCalmGitPublishAction({ settings: gitops(), localDir }).handler({
+        ...ctx({ dir: path.join(root, 'elsewhere'), name: 'orders' }),
+        isDryRun: true,
+      }),
+    ).rejects.toThrow(/outside/i);
+  });
+
   it('refuses a remote that has commits the working copy lacks', async () => {
     const remote = await bare('orders');
     const earlier = path.join(root, 'earlier');

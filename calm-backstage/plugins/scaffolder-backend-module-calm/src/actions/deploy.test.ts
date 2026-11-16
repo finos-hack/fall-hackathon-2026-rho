@@ -252,6 +252,54 @@ describe('the actions without a cluster', () => {
     ).rejects.toThrow(/are not set.*yarn k8s:up/);
   });
 
+  it('image build in a dry run spawns nothing and gives the image', async () => {
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'calm-image-dry-'));
+    const kubeconfig = path.join(tmp, 'config');
+    await fs.writeFile(kubeconfig, '');
+    const settings = {
+      kubeconfig,
+      context: 'calm-backstage',
+      minikubeProfile: 'calm-backstage',
+      namespacePrefix: 'calm-',
+    };
+    const dryDir = path.join(tmp, 'dry-run-output', 'stock-api');
+    const c = {
+      ...ctx({ ...build, dir: dryDir }),
+      workspacePath: tmp,
+      isDryRun: true,
+    };
+    const path0 = process.env.PATH;
+    process.env.PATH = '';
+    try {
+      await createCalmImageBuildAction({ settings, localDir }).handler(c);
+      expect(c.output).toHaveBeenCalledWith('image', 'stock-api:run-1');
+      expect(c.logger.info).toHaveBeenCalledWith(
+        expect.stringMatching(
+          /^Dry run: would run .*minikube -p calm-backstage image build -t stock-api:run-1 .*dry-run-output.stock-api$/,
+        ),
+      );
+      await expect(
+        createCalmImageBuildAction({ settings, localDir }).handler({
+          ...c,
+          input: { ...build, dir: dryDir, tag: 'latest' },
+        }),
+      ).rejects.toThrow(/latest is refused/);
+      await expect(
+        createCalmImageBuildAction({ localDir }).handler(c),
+      ).rejects.toThrow(/are not set/);
+      // Without a dry run the dry-run folder is refused.
+      await expect(
+        createCalmImageBuildAction({ settings, localDir }).handler({
+          ...c,
+          isDryRun: false,
+        }),
+      ).rejects.toThrow(/outside/i);
+    } finally {
+      process.env.PATH = path0;
+      await fs.rm(tmp, { recursive: true, force: true });
+    }
+  });
+
   it('refuse to run when the kubeconfig file is missing, and say how to get it', async () => {
     const settings = {
       kubeconfig: path.join(os.tmpdir(), 'calm-no-such-folder', 'config'),

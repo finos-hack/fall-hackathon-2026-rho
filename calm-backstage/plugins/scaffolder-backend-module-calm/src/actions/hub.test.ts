@@ -843,6 +843,32 @@ describe('with a workspace', () => {
         expect(await exists(published())).toBe(true);
       });
 
+      it('in a dry run accepts the dry-run publishedDir, stores nothing and removes nothing', async () => {
+        const hub = fakeHub(base);
+        await register(hub, ctx({ name: 'billing-api', mode: 'prepare' }));
+        const dryDir = path.join(workspace, 'dry-run-output', 'billing-api');
+        const c = ctx(
+          { name: 'billing-api', mode: 'store', publishedDir: dryDir },
+          { isDryRun: true },
+        );
+        await register(hub, c);
+        expect(hub.posts()).toEqual([]);
+        expect(c.outputs).toMatchObject({ version: '1.0.0', created: false });
+      });
+
+      it('refuses the dry-run publishedDir without a dry run', async () => {
+        const hub = fakeHub(base);
+        await register(hub, ctx({ name: 'billing-api', mode: 'prepare' }));
+        const dryDir = path.join(workspace, 'dry-run-output', 'billing-api');
+        await expect(
+          register(
+            hub,
+            ctx({ name: 'billing-api', mode: 'store', publishedDir: dryDir }),
+          ),
+        ).rejects.toThrow(/publishedDir must be the folder calm:publish:local/);
+        expect(hub.posts()).toEqual([]);
+      });
+
       it('removes nothing in a dry run', async () => {
         const hub = fakeHub(base);
         await prepareAndPublish(hub);
