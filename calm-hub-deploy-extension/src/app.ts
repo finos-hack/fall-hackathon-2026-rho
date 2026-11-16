@@ -139,6 +139,11 @@ export async function handle(deps: AppDeps, req: Request): Promise<Response> {
       deps.logger.warn(`Refused ${req.method} ${pathname}: ${e.message}`);
       return { status: 401, body: { error: 'unauthorized' } };
     }
+    if (e instanceof ReadTimeout) {
+      // CALM Hub's keys could not be read in time: the caller is not verified, so nothing can be shown to it.
+      deps.logger.warn(`Could not verify ${req.method} ${pathname}: ${e.message}`);
+      return { status: 503, body: { error: `cannot verify the request: ${e.message}` } };
+    }
     throw e;
   }
   if (claims.route !== undefined && claims.route !== match.route.id) {
