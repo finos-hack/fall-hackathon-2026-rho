@@ -225,6 +225,32 @@ describe('node detail panel', () => {
     expect(value(blocks, 'Replicas ready')).toBe('0/1 (the cluster asks for 0)');
   });
 
+  it('shows the cluster read problem, not "Not run by the platform", for a node Git asks for', async () => {
+    const w = make();
+    w.cluster.unreachable = true;
+    const blocks = await node(w, 'web-service');
+    expect(blocks[0]).toEqual({
+      type: 'alert',
+      tone: 'warning',
+      text: expect.stringContaining('Cannot read the workloads: Unable to connect to the server'),
+    });
+    expect(value(blocks, 'Workload')).toBe('web-service');
+    expect(value(blocks, 'Replicas ready')).toBe('unknown/1 (cannot read the cluster)');
+  });
+
+  it('shows the drift of a node whose Deployment Git asks for is missing from the cluster', async () => {
+    const w = make();
+    const kubectl = w.deps.kubectl;
+    // Someone deleted the Deployment: the cluster lists none.
+    w.deps.kubectl = async (args, quiet, timeout) =>
+      args.join(' ').includes('get deploy -o json') ? JSON.stringify({ items: [] }) : kubectl(args, quiet, timeout);
+    const blocks = await node(w, 'web-service');
+    expect(blocks[0]).toEqual({ type: 'alert', tone: 'warning', text: 'Drift: web-service is in Git but does not run in the cluster' });
+    expect(value(blocks, 'Workload')).toBe('web-service');
+    expect(value(blocks, 'Replicas ready')).toBe('0/1 (not in the cluster)');
+    expect(value(blocks, 'Image')).toBe('none');
+  });
+
   it('says a node is not run by the platform, with the policies naming it', async () => {
     const w = make();
     const blocks = await node(w, 'database');
