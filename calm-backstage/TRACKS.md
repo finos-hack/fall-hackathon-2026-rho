@@ -115,12 +115,12 @@ Scope: GitHub publish, dry run, register the architecture in the Hub.
   service's namespace only) with `targetNamespace`; `calm:deploy:gitops` applies the Namespace, the service account,
   the RoleBinding and a ClusterRole allowing `get` on that one Namespace (Flux reads it to skip its prune) itself, so
   a push to a service repository can only change objects in the service's namespace. The namespace enforces Pod
-  Security `baseline`, so `admin` there cannot run privileged or host-access pods.
+  Security `baseline`, so `admin` there cannot run privileged or host-access pods. `calm:deploy:k8s` labels its
+  namespace the same way.
   A Kustomization without a service account (deployed before this) is applied as `flux-system/default`, which has no
   permissions, so it stops reconciling until the service is redeployed with `calm:deploy:gitops`.
 - Left (part 3): a GitHub client next to `GiteaClient` (push-to-create, pull requests and anonymous Flux reads are
-  Gitea's); `user-cookie` auth or a separate origin for the app proxy (FINDINGS, part 3, Security); the Pod Security
-  labels on the namespace `calm:deploy:k8s` (the kubectl path) creates too.
+  Gitea's); `user-cookie` auth or a separate origin for the app proxy (FINDINGS, part 3, Security).
 - Swap in `publish:github` + `catalog:register` (url location) for a real repository; no GitHub credentials are set up.
 - `calm:generate`, `calm:fill`, `calm:validate` support dry runs; the template editor's dry run can use them.
 

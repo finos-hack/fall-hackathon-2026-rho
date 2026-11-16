@@ -28,7 +28,19 @@ export const CALM_KUBERNETES = {
   uniqueIdAnnotation: 'calm.finos.org/unique-id',
 } as const;
 
-/** The Namespace of a service: found again by the Kubernetes plugin's label, and marked as made for this service. */
+/**
+ * Pod Security admission at `baseline` for a service's namespace: `admin` there cannot run privileged pods or pods
+ * that use the host's namespaces, paths or ports. The bundles' workloads need none of that.
+ */
+const POD_SECURITY_LABELS = {
+  'pod-security.kubernetes.io/enforce': 'baseline',
+  'pod-security.kubernetes.io/warn': 'baseline',
+};
+
+/**
+ * The Namespace of a service: found again by the Kubernetes plugin's label, marked as made for this service, and
+ * enforcing Pod Security `baseline` (on both deploy paths).
+ */
 export function namespaceManifest(
   name: string,
   namespace: string,
@@ -41,6 +53,7 @@ export function namespaceManifest(
       labels: {
         [KUBERNETES_ID_LABEL]: name,
         [CALM_KUBERNETES.serviceLabel]: name,
+        ...POD_SECURITY_LABELS,
       },
     },
   };
