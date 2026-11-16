@@ -569,7 +569,7 @@ describe('calm:deploy:gitops: a failed deployment', () => {
     expect(posted[0].data.notes).toContain('kustomize build failed');
   });
 
-  it('records nothing, and still rejects with the deploy error, when the task was cancelled (the wait for Flux stops with the abort)', async () => {
+  it('records nothing, and rejects with the abort error, when the task was cancelled', async () => {
     const { hub } = fakeRecordingHub();
     const { result } = await run({
       input: { record },

@@ -95,10 +95,13 @@ const failed = (opts: {
  */
 function hangingHub() {
   const signals: (AbortSignal | undefined)[] = [];
+  let called!: () => void;
+  const firstCall = new Promise<void>(r => (called = r));
   const fetchImpl = jest.fn(
     (_url: string, init?: any) =>
       new Promise<never>((_resolve, reject) => {
         signals.push(init?.signal);
+        called();
         const abort = () =>
           reject(Object.assign(new Error('aborted'), { name: 'AbortError' }));
         if (init?.signal?.aborted) {
@@ -111,6 +114,7 @@ function hangingHub() {
     hub: new CalmHubWriteClient('http://hub', fetchImpl as any),
     fetchImpl,
     signals,
+    firstCall,
   };
 }
 
@@ -240,14 +244,36 @@ describe('recordFailedDeployment', () => {
 
   it('warns, and does not throw, when the task is cancelled while recording', async () => {
     await workloads(['web-service']);
-    const { hub, fetchImpl } = hangingHub();
+    const { hub, fetchImpl, firstCall } = hangingHub();
     const log = logger();
     const task = new AbortController();
     const pending = failed({ hub, log, signal: task.signal });
-    await new Promise(r => setTimeout(r, 20));
+    await firstCall;
     expect(fetchImpl).toHaveBeenCalledTimes(1);
     task.abort();
     await expect(pending).resolves.toBeUndefined();
+    expect(log.warn).toHaveBeenCalledWith(
+      expect.stringMatching(/Could not record the failed deployment/),
+    );
+    expect(log.warn.mock.calls[0][0]).not.toContain('did not answer within');
+  });
+
+  it('warns, and does not throw, when the Hub client cannot take a signal', async () => {
+    await workloads(['web-service']);
+    const { hub } = fakeRecordingHub();
+    delete hub.withSignal;
+    const log = logger();
+    await expect(failed({ hub, log })).resolves.toBeUndefined();
+    expect(log.warn).toHaveBeenCalledWith(
+      expect.stringMatching(/Could not record the failed deployment/),
+    );
+  });
+
+  it('warns, and does not throw, when the timeout is invalid', async () => {
+    await workloads(['web-service']);
+    const { hub } = fakeRecordingHub();
+    const log = logger();
+    await expect(failed({ hub, log, timeoutMs: -1 })).resolves.toBeUndefined();
     expect(log.warn).toHaveBeenCalledWith(
       expect.stringMatching(/Could not record the failed deployment/),
     );

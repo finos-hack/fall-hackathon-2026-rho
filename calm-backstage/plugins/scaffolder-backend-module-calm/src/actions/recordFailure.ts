@@ -95,11 +95,12 @@ export async function recordFailedDeployment(opts: {
     return;
   }
   const timeoutMs = opts.timeoutMs ?? RECORD_FAILURE_TIMEOUT_MS;
-  const timeout = AbortSignal.timeout(timeoutMs);
-  const hub = opts.hub?.withSignal(
-    AbortSignal.any([...(signal ? [signal] : []), timeout]),
-  );
+  let timeout: AbortSignal | undefined;
   try {
+    timeout = AbortSignal.timeout(timeoutMs);
+    const hub = opts.hub?.withSignal(
+      AbortSignal.any([...(signal ? [signal] : []), timeout]),
+    );
     if (!hub) {
       throw new Error('the action has no CALM Hub client');
     }
@@ -152,7 +153,7 @@ export async function recordFailedDeployment(opts: {
     );
   } catch (e) {
     const why =
-      timeout.aborted && !signal?.aborted
+      timeout?.aborted && !signal?.aborted
         ? `CALM Hub did not answer within ${timeoutMs / 1000} s`
         : oneLine(e);
     logger.warn(`Could not record the failed deployment in CALM Hub: ${why}`);
