@@ -2,3 +2,4 @@ node_modules/
 .keys/
 .work/
 *.log
+docs/demo/*.mp4
