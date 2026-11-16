@@ -58,9 +58,13 @@ const SLOW = 3;
 const TYPE_DELAY = 18 * SLOW;
 const GAP = 700; // silence after each beat
 // Flux reconciles the service every minute (with up to 5% jitter) and puts a scaled workload back. Showing the drift
-// takes this long from the start of the scale beat; the take waits for Flux's next run when it is closer than that.
-const DRIFT_WINDOW_MS = 35000;
+// (the panel, then the tab) takes about 20 s from the start of the scale beat; this leaves a margin. Chapter 4 lingers
+// so that the scale beat starts soon after a Flux run, and the take checks again (and waits) just before it.
+const DRIFT_WINDOW_MS = 30000;
 const FLUX_SHORTEST_INTERVAL_MS = 57000;
+const FLUX_PERIOD_MS = 59500; // as observed in kustomize-controller's log
+// Chapter 4's actions take a little longer than its narration (navigation, the terminal).
+const CHAPTER_4_ACTIONS_MS = 4000;
 
 const CHAPTERS = [
   'CALM Hub today',
@@ -105,7 +109,27 @@ async function plan() {
   const choice = storage === 'PostgreSQL' ? 'SQLite on the broker’s volume' : 'PostgreSQL';
   const bump = v => v.replace(/(\d+)$/, n => String(Number(n) + 1));
   const valid = bump(status.latestVersion);
-  return { name: NAME, running: status.deployedVersion, storage: storage === 'PostgreSQL' ? 'PostgreSQL' : 'SQLite', choice, valid, invalid: bump(valid) };
+  return {
+    name: NAME,
+    running: status.deployedVersion,
+    storage: storage === 'PostgreSQL' ? 'PostgreSQL' : 'SQLite',
+    choice,
+    valid,
+    invalid: bump(valid),
+    card: await cardCounts(),
+  };
+}
+
+/** The home page card's counts (its first stats block), as the narration speaks them. */
+async function cardCounts() {
+  const reply = await getJson(`${EXT}/card`);
+  const stats = (reply.blocks ?? []).find(b => b.type === 'stats');
+  const value = label => {
+    const n = Number(stats?.items?.find(i => i.label === label)?.value);
+    if (!Number.isInteger(n)) throw new Error(`the card has no ${label} count: ${JSON.stringify(reply)}`);
+    return n;
+  };
+  return { services: value('Services'), inSync: value('In sync'), drifted: value('Drifted') };
 }
 
 /**
@@ -143,6 +167,21 @@ async function lastFluxRun() {
     })
     .filter(t => !Number.isNaN(t));
   return times.length ? Math.max(...times) : undefined;
+}
+
+/**
+ * How long chapter 4 should linger, in total, so that the scale beat (expected `aheadMs` from now) starts soon after
+ * one of Flux's runs, with DRIFT_WINDOW_MS before the next: 0 when it would anyway, or when Flux's log can't be read.
+ */
+async function fluxLinger(aheadMs) {
+  const last = await lastFluxRun().catch(() => undefined);
+  if (last === undefined) return 0;
+  const earliest = 3000;
+  const latest = FLUX_SHORTEST_INTERVAL_MS - DRIFT_WINDOW_MS;
+  const phase = (((Date.now() + aheadMs - last) % FLUX_PERIOD_MS) + FLUX_PERIOD_MS) % FLUX_PERIOD_MS;
+  if (phase >= earliest && phase <= latest) return 0;
+  const target = earliest + 3000;
+  return phase < earliest ? target - phase : FLUX_PERIOD_MS - phase + target;
 }
 
 const srtTime = s => {
@@ -488,6 +527,18 @@ const srtTime = s => {
       await sleep(1000);
     }
   };
+  /**
+   * A CALM Hub or Gitea step that only shows something: on failure it logs a WARNING and the take carries on. Used once
+   * the take has stored a version, where a throw would strand state (an open pull request, a job lost when the backend
+   * restarts); checks of real state (the record exists, the pull request, completed, refused) still throw.
+   */
+  const soft = (what, fn) => async () => {
+    try {
+      await fn();
+    } catch (e) {
+      log(`WARNING: ${what} (${String(e.message).split('\n')[0]}); carrying on`);
+    }
+  };
   /** Waits, when Flux's next run is too close to show the drift before Flux puts the workload back. */
   const waitForFluxWindow = async () => {
     const last = await lastFluxRun().catch(() => undefined);
@@ -497,8 +548,19 @@ const srtTime = s => {
     }
     if (last + FLUX_SHORTEST_INTERVAL_MS - Date.now() >= DRIFT_WINDOW_MS) return;
     log('Flux runs again soon: waiting for that run before scaling');
+    // No stale caption over the hold.
+    lastCaption = '';
+    await caption('');
     await poll(async () => (await lastFluxRun()) > last, 75000, 'Flux to run');
     await sleep(1500);
+  };
+  /** A pause after a beat, with the caption cleared (it would otherwise hang over the pause). */
+  const linger = async ms => {
+    if (ms < 300) return;
+    await voice;
+    lastCaption = '';
+    await caption('');
+    await sleep(ms);
   };
   const drifted = `${DRIFT_WORKLOAD} runs 0 replicas; Git asks for 1`;
 
@@ -586,8 +648,21 @@ const srtTime = s => {
   await page.reload();
   await page.getByText('Platform Connector').first().waitFor();
   await restoreOverlays();
+  // The narration speaks the counts read before the take: they must still be what the card shows.
+  const card = await cardCounts();
+  if (JSON.stringify(card) !== JSON.stringify(ctx.card)) {
+    throw new Error(`the card now says ${JSON.stringify(card)}, the narration says ${JSON.stringify(ctx.card)}: retake`);
+  }
+  // Flux puts a scaled workload back at its next run, so chapter 5's scale should start soon after one. Work out now
+  // how far off that is, and spread any wait over chapter 4's pauses instead of holding silently before chapter 5.
+  const chapter4 = ['home-card', 'blocks', 'ext-tab', 'tab-facts', 'node-panel', 'node-facts', 'log-calls'];
+  const ahead = chapter4.reduce((ms, id) => ms + byId.get(id).seconds * 1000 + GAP, CHAPTER_4_ACTIONS_MS);
+  const lingerEach = (await fluxLinger(ahead)) / chapter4.length;
+  if (lingerEach) log(`lingering ${(lingerEach / 1000).toFixed(1)} s after each beat of chapter 4, to start the scale just after a Flux run`);
   await beat('home-card', () => page.getByText('Platform Connector').first().hover());
+  await linger(lingerEach);
   await narrate('blocks');
+  await linger(lingerEach);
   await beat('ext-tab', async () => {
     await show(ctx.running, 'extensions');
     await mainTab('Extensions').waitFor();
@@ -595,16 +670,21 @@ const srtTime = s => {
     await page.getByRole('button', { name: 'Deploy this version' }).waitFor();
     await page.getByRole('button', { name: 'Deploy this version' }).hover();
   });
+  await linger(lingerEach);
   await beat('tab-facts', async () => {
     await extensionText(`This version (${ctx.running}) is the one running`).waitFor();
     await page.screenshot({ path: path.join(OUT, 'deployment-tab.png') });
   });
+  await linger(lingerEach);
   await beat('node-panel', async () => {
     await tab('Diagram');
     await selectNode(DRIFT_WORKLOAD, `In sync: ${DRIFT_WORKLOAD} runs as Git asks.`);
   });
+  await linger(lingerEach);
   await beat('node-facts', () => scrollAt(BW * ZOOM * 0.85, 300));
+  await linger(lingerEach);
   await beat('log-calls', clear, termBeat('log-calls', 'ext-log.sh 4'));
+  await linger(lingerEach);
 
   // ---- 5. Drift: what a record can't know (quickly: Flux puts the replicas back at its next run)
   await voice;
@@ -650,15 +730,17 @@ const srtTime = s => {
   // ---- 6. A decision changes, and the connector deploys it
   await chapter(5);
   await beat('new-version', clear, termBeat('new-version', `npx tsx scripts/new-version.ts hackathon ${NAME} --choose "broker-storage=${ctx.choice}"`));
-  await beat('diagram-new', async () => {
+  // From here the take has stored a version: steps that only show something are soft (see soft()), with a shorter wait.
+  page.setDefaultTimeout(15000);
+  await beat('diagram-new', soft('showing the new version', async () => {
     await closeDetails();
     await show(ctx.valid);
     await fit();
-  });
-  await beat('warning', async () => {
+  }));
+  await beat('warning', soft('the tab\'s warning', async () => {
     await tab('Extensions');
     await extensionText(`this page shows ${ctx.valid}`).waitFor();
-  });
+  }));
   await beat('click', async () => {
     await page.getByRole('button', { name: 'Deploy this version' }).click();
     await page.getByRole('button', { name: 'Run' }).waitFor();
@@ -667,33 +749,36 @@ const srtTime = s => {
   let watching;
   await beat('run', clear, termBeat('run', async () => {
     watching = await sh(`UNTIL=approval watch-deploy.sh ${NAME} ${ctx.valid}`, { wait: false });
-  }), refreshExtensions);
+  }), soft('the Extensions tab', refreshExtensions));
   // No record until the version has passed the controls gate.
   await poll(async () => typeof (await newest(ctx.valid))?.id === 'number', 180000, `the deployment record on ${ctx.valid}`);
-  await beat('record-pending', record);
-  await beat('steps', record);
+  await beat('record-pending', soft('the record', record));
+  await beat('steps', soft('the record', record));
   await watching();
-  await beat('waiting', record);
-  await beat('overlay-progress', closeDiagram, () => viewBadge('Deployments').click());
+  await beat('waiting', soft('the record', record));
+  await beat('overlay-progress', soft('the in-progress badge', async () => {
+    await closeDiagram();
+    await viewBadge('Deployments').click({ timeout: 5000 });
+  }));
 
   const pr = await latestPr('open');
   if (!pr || (prBefore && pr.number <= prBefore.number)) throw new Error('no new pull request is open');
   const prPage = `http://localhost:3300/calm-services/${NAME}/pulls/${pr.number}`;
   const [prCommit] = await getJson(`${GITEA}/${NAME}/pulls/${pr.number}/commits`);
-  await beat('pr', clear, () => visit(prPage), termBeat('pr', `curl -s "$GITEA/${NAME}/pulls?state=open" | jq -r '.[] | "#\\(.number)  \\(.title)\\n    \\(.head.ref) → \\(.base.ref)"'`));
-  await beat('files', () => visit(`${prPage}/files`), termBeat('files', `curl -s $GITEA/${NAME}/pulls/${pr.number}/files | jq -r '.[] | "\\(.filename)  +\\(.additions) -\\(.deletions)"' | column -t`), () => scroll(700));
-  await beat('commit', clear, () => visit(`http://localhost:3300/calm-services/${NAME}/commit/${prCommit.sha}`), termBeat('commit', `curl -s $GITEA/${NAME}/pulls/${pr.number}/commits | jq -r '.[0].commit.message'`));
-  await beat('approve', () => visit(prPage), termBeat('approve', `approve-pr.sh ${NAME} ${pr.number}`), () => visit(prPage));
+  await beat('pr', clear, soft('the pull request page', () => visit(prPage)), termBeat('pr', `curl -s "$GITEA/${NAME}/pulls?state=open" | jq -r '.[] | "#\\(.number)  \\(.title)\\n    \\(.head.ref) → \\(.base.ref)"'`));
+  await beat('files', soft('the files page', () => visit(`${prPage}/files`)), termBeat('files', `curl -s $GITEA/${NAME}/pulls/${pr.number}/files | jq -r '.[] | "\\(.filename)  +\\(.additions) -\\(.deletions)"' | column -t`), soft('scrolling the files', () => scroll(700)));
+  await beat('commit', clear, soft('the commit page', () => visit(`http://localhost:3300/calm-services/${NAME}/commit/${prCommit.sha}`)), termBeat('commit', `curl -s $GITEA/${NAME}/pulls/${pr.number}/commits | jq -r '.[0].commit.message'`));
+  await beat('approve', soft('the pull request page', () => visit(prPage)), termBeat('approve', `approve-pr.sh ${NAME} ${pr.number}`), soft('the merged pull request', () => visit(prPage)));
 
   watching = undefined;
   await beat('flux', clear, async () => {
     watching = await sh(`watch-deploy.sh ${NAME} ${ctx.valid}`, { wait: false });
-  }, () => backToHub(ctx.valid, 'Decorators'), record);
+  }, soft('back to CALM Hub', () => backToHub(ctx.valid, 'Decorators')), soft('the record', record));
   await watching();
   log('deployment finished');
-  await beat('completed', record);
-  await beat('overlay-after', closeDiagram);
-  await page.screenshot({ path: path.join(OUT, 'diagram-overlay.png') });
+  await beat('completed', soft('the record', record));
+  await beat('overlay-after', soft('the diagram', closeDiagram));
+  await soft('the diagram still', () => page.screenshot({ path: path.join(OUT, 'diagram-overlay.png') }))();
 
   const deployed = await newest(ctx.valid);
   if (deployed?.status !== 'completed') throw new Error(`the deployment of ${ctx.valid} did not complete: ${JSON.stringify(deployed)}`);
@@ -728,15 +813,17 @@ const srtTime = s => {
     'sub-standard',
     clear,
     termBeat('sub-standard', `curl -s $HUB/api/calm/namespaces/hackathon/standards | jq '.values[] | {id, name, description}'`),
-    () => route('#/namespace/hackathon?type=standards'),
+    soft('the Standards tab', () => route('#/namespace/hackathon?type=standards')),
   );
 
   // ---- 7. The controls gate, as a control evaluation
   await chapter(6);
   await beat('forbidden', clear, termBeat('forbidden', `npx tsx scripts/new-version.ts hackathon ${NAME} --connect web-client:stream-app`));
-  await show(ctx.invalid, 'extensions');
-  await collapseSidebar();
-  await extensionText(`this page shows ${ctx.invalid}`).waitFor();
+  await soft(`showing ${ctx.invalid}`, async () => {
+    await show(ctx.invalid, 'extensions');
+    await collapseSidebar();
+    await extensionText(`this page shows ${ctx.invalid}`).waitFor();
+  })();
   await beat('deploy-invalid', async () => {
     await page.getByRole('button', { name: 'Deploy this version' }).click();
     await page.getByRole('button', { name: 'Run' }).click();
@@ -746,7 +833,7 @@ const srtTime = s => {
   if (refusal?.status !== 'refused') throw new Error(`${ctx.invalid} was not refused at the controls gate: ${JSON.stringify(refusal)}`);
   // Not seen live before this take (no control evaluation existed): each step falls back and warns rather than
   // throwing, since the take has already stored its two versions.
-  await beat('evaluation', async () => {
+  await beat('evaluation', soft('the control evaluation overlay', async () => {
     await tab('Diagram');
     // The overlay re-reads decorators every 5 s.
     const evaluated = viewBadge('Control evaluations');
@@ -756,8 +843,8 @@ const srtTime = s => {
       await page.getByText(/^Control evaluations · Built-in/).first().click({ timeout: 5000 }).catch(() => {});
       if (!(await seen())) log('WARNING: no Control evaluations badge on the diagram');
     }
-  });
-  await beat('finding', async () => {
+  }));
+  await beat('finding', soft('the control evaluation details', async () => {
     if (await viewBadge('Control evaluations', 'stream-app').click({ timeout: 5000 }).then(() => true, () => false)) {
       await hold(1200);
       const all = page.getByText('View all Control evaluations', { exact: true });
@@ -768,7 +855,7 @@ const srtTime = s => {
       log('WARNING: the control evaluation (not-met) is not on the Decorators tab');
     }
     await highlight(['status', 'findings']);
-  });
+  }));
   await beat(
     'unchanged',
     clear,
@@ -789,11 +876,11 @@ const srtTime = s => {
       'mcp-status',
       `mcp.sh ext_platform-connector_status ${mcpArgs} | jq '{deployedVersion, inSync, drift, hubRecord: (.hubRecord | {version, status}), workloads: [.workloads[] | "\\(.name) \\(.ready)/\\(.desired)"]}'`,
     ),
-    async () => {
+    soft('the Platform panel', async () => {
       await show(ctx.valid);
       await tab('Diagram');
       await selectNode(DRIFT_WORKLOAD, `In sync: ${DRIFT_WORKLOAD} runs as Git asks.`);
-    },
+    }),
   );
   await beat(
     'mcp-history',
@@ -803,8 +890,11 @@ const srtTime = s => {
 
   // ---- 9. The pattern
   await chapter(8);
-  await beat('recap-1', closeDetails, () => route('#/'));
-  await beat('recap-2', () => page.getByText('Platform Connector').first().hover());
+  await beat('recap-1', soft('the home page', async () => {
+    await closeDetails();
+    await route('#/');
+  }));
+  await beat('recap-2', soft('the card', () => page.getByText('Platform Connector').first().hover()));
   await narrate('recap-3');
   await caption('');
   await hold(1000);
