@@ -70,7 +70,8 @@ export async function recordDeployment(
   id: number | 'dry-run';
   uniqueId: string;
   target: string;
-  url: string;
+  /** The decorator's Hub URL; none in a dry run, where nothing is stored. */
+  url?: string;
 }> {
   const { hubNamespace, architecture, version, name, cluster, namespace } =
     input;
@@ -167,9 +168,6 @@ export async function recordDeployment(
       id: 'dry-run',
       uniqueId,
       target,
-      url: `${hub.baseUrl}/api/calm/namespaces/${encodeURIComponent(
-        hubNamespace,
-      )}/decorators/dry-run`,
     };
   }
   const id = await hub.createDecorator(hubNamespace, decorator);
@@ -289,7 +287,10 @@ export function createCalmDecorateDeploymentAction(options: {
               'The decorator target: the path of the architecture version in the Hub',
             ),
         url: z =>
-          z.string().optional().describe("The decorator's Hub URL (JSON)"),
+          z
+            .string()
+            .optional()
+            .describe("The decorator's Hub URL (JSON); none in a dry run"),
       },
     },
     async handler(ctx) {
@@ -307,7 +308,9 @@ export function createCalmDecorateDeploymentAction(options: {
       ctx.output('uniqueId', result.uniqueId);
       ctx.output('target', result.target);
       ctx.output('id', result.id);
-      ctx.output('url', result.url);
+      if (result.url) {
+        ctx.output('url', result.url);
+      }
     },
   });
 }

@@ -1015,7 +1015,7 @@ describe('with a workspace', () => {
       expect(hub.posts()).toEqual([]);
     });
 
-    it('in a dry run posts nothing, logs the decorator and outputs the target, url and a placeholder id', async () => {
+    it('in a dry run posts nothing, logs the decorator and outputs the target and a placeholder id, but no url', async () => {
       const hub = fakeHub(base);
       const c = ctx(input, { isDryRun: true });
       await decorate(hub, c);
@@ -1026,8 +1026,8 @@ describe('with a workspace', () => {
         id: 'dry-run',
         uniqueId: 'billing-api-task-1',
         target,
-        url: `${base}/api/calm/namespaces/hackathon/decorators/dry-run`,
       });
+      expect(c.outputs).not.toHaveProperty('url');
       const logged = c.logger.info.mock.calls.map((x: any[]) => x[0]);
       expect(logged.every((l: string) => l.startsWith('Dry run: would '))).toBe(
         true,
