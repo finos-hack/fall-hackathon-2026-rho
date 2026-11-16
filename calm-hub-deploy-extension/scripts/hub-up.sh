@@ -3,6 +3,7 @@
 #
 #   scripts/hub-up.sh            # uses ../calm-backstage/hub/docker-compose.yml
 #   CALM_BACKSTAGE_DIR=/path/to/calm-backstage scripts/hub-up.sh
+#   scripts/hub-up.sh --without-extensions   # the same Hub with no extension loaded (the demo's "before")
 #
 # Creates a P-256 signing key pair in .keys/ on first run. The keys are for local development only: the private key
 # is made readable by the container user (185), which a real deployment must not do.
@@ -28,6 +29,11 @@ fi
 chmod 644 "$keys/hub-private.pem" "$keys/hub-public.pem"
 
 export EXT_DIR="$here/extension"
+if [[ "${1:-}" == "--without-extensions" ]]; then
+  EXT_DIR="$here/.work/no-extensions"
+  mkdir -p "$EXT_DIR"
+  shift
+fi
 export KEYS_DIR="$keys"
 
 compose=(docker compose -f "$backstage/hub/docker-compose.yml" -f "$here/hub/compose.override.yml")

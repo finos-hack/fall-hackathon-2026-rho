@@ -12,9 +12,10 @@ service card already reads the deployments this extension records.
 
 ![The Deployment tab in CALM Hub](docs/demo/deployment-tab.png)
 
-▶ [The demo](docs/demo/calm-hub-deploy-demo.mp4) (2:10): a terminal on the cluster and CALM Hub side by side, from
-a pattern decision changed in CALM Hub to the cluster following it, then a version the controls gate refuses, then
-the same extension over MCP. Chapters and how to record it again: [docs/demo](docs/demo/README.md).
+▶ The demo (12:58, narrated; video link to follow) has a terminal on the cluster and CALM Hub side by side. It
+starts with CALM Hub with no extensions and plugs this one in. Then it deploys a pattern decision from CALM Hub,
+through a pull request the firm approves and Flux, and shows the results written back to CALM Hub. It ends with
+the controls gate and MCP. Chapters and how to record it again: [docs/demo](docs/demo/README.md).
 
 ## What it adds to CALM Hub
 
@@ -56,7 +57,8 @@ npm start               # the extension on :8093
 `npm run hub:up` (`scripts/hub-up.sh`) layers `hub/compose.override.yml` over calm-backstage's
 `hub/docker-compose.yml`: the Hub image with the extension framework (`latest` and `0.7.7` predate it), the manifest
 folder, a P-256 signing key pair in `.keys/` (made on first run), and MCP turned on. Run calm-backstage's
-`yarn hub:up` to go back to its own Hub. To use a calm-backstage checkout elsewhere:
+`yarn hub:up` to go back to its own Hub. `scripts/hub-up.sh --without-extensions` runs the same Hub with no
+extension loaded. To use a calm-backstage checkout elsewhere:
 `CALM_BACKSTAGE_DIR=/path/to/calm-backstage npm run hub:up`.
 
 Settings (environment variables; defaults match calm-backstage's `app-config.yaml`):
