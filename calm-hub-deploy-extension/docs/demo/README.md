@@ -34,6 +34,16 @@ forbids.
 
 ![The diagram's Deployments overlay after the deployment](diagram-overlay.png)
 
+## Re-voice a take
+
+`revoice.cjs` speaks a finished take's lines again, with a different voice or provider. Each line goes back at the
+time the take spoke it, over the same footage. It needs no new take, so nothing changes in CALM Hub, Gitea or the
+cluster. A line longer than the gap before the next one is sped up to fit, and the script lists it.
+
+```sh
+DEMO_TTS=elevenlabs DEMO_VOICE=<voice id> node docs/demo/revoice.cjs <take-dir> [out-dir]
+```
+
 ## Record it again
 
 **Needs:**
@@ -58,9 +68,13 @@ node docs/demo/record-hub-demo.cjs <out-dir> --audio-only    # speak and time th
 - **Kubeconfig:** set `CALM_KUBECONFIG` when this folder isn't next to the calm-backstage checkout that made the
   cluster, for example in a git worktree.
 
-**Narration:** `narration.cjs` holds the voiceover as beats. Each beat is spoken with `say` (voice `DEMO_VOICE`,
-default Daniel, at `DEMO_RATE`, default 170 words a minute), cached under `.work/demo-audio/`, and shown as the
-caption while it plays. Each step is held until its beat has been spoken. Typing, holds and waits are 3× the first
+**Narration:** `narration.cjs` holds the voiceover as beats. `voice.cjs` speaks each beat, caches it under
+`.work/demo-audio/`, and the recorder shows it as the caption while it plays. Two voices are available:
+- macOS `say`, the default: `DEMO_VOICE` (default Daniel) at `DEMO_RATE` (default 170 words a minute);
+- ElevenLabs: `DEMO_TTS=elevenlabs` with `ELEVENLABS_API_KEY` and `DEMO_VOICE` set to a voice id, which can be a
+  clone of the presenter's voice.
+
+ Each step is held until its beat has been spoken. Typing, holds and waits are 3× the first
 take's pace. After the take, the beats are laid under the joined video at the times they were spoken, and the same
 times give the `.srt`.
 
@@ -68,6 +82,8 @@ times give the `.srt`.
 |---|---|
 | `record-hub-demo.cjs` | Drives a ttyd terminal and CALM Hub in two Playwright pages, joins both recordings with ffmpeg and adds the voiceover |
 | `narration.cjs` | The voiceover and the terminal's comments, one beat each |
+| `voice.cjs` | Speaks the beats with macOS `say` or ElevenLabs, cached |
+| `revoice.cjs` | Re-voices a finished take over the same footage |
 | `demo.rc` | bash rc for the terminal: `$HUB`, `$EXT`, `$GITEA`, `$NS`, `k`, and the prompt counter the recorder waits on |
 | `start-extension.sh` | (Re)starts the backend in the background with `auto` or `manual` approval |
 | `watch-deploy.sh` | Live view of one deployment: its record in CALM Hub, Flux, the Deployments and network policies (`UNTIL=approval` stops at the pull request) |
