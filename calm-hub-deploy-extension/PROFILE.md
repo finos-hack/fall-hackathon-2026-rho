@@ -8,7 +8,7 @@ it**. `gitops-deploy` in this folder is the reference implementation (Git, a pul
 ## 1. Commands
 
 An implementation declares these commands in its manifest, with these names and at least these inputs and outputs
-(`extension/gitops-deploy/extension.json` has the full JSON Schemas). CALM Hub turns each into
+(`extension/platform-connector/extension.json` has the full JSON Schemas). CALM Hub turns each into
 `calm hub ext <id> <command>` and the MCP tool `ext_<id>_<command>`.
 
 | Command | Scope | Input | Output |

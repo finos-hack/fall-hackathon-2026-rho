@@ -15,6 +15,7 @@ import type { HubClaims } from '../identity';
 import { silentLogger } from '../logger';
 import { RouteTable } from '../routes';
 import { Jobs, type Render, type Validate } from '../deploy/job';
+import { KUBERNETES_DEPLOYMENT_STANDARD } from '../record';
 import type { Kubectl } from '../deploy/kube';
 
 const HUB = 'http://hub.test';
@@ -43,10 +44,42 @@ export function architectureDoc(name: string, version: string, extras: string[])
   };
 }
 
+/**
+ * What CALM Hub would refuse in a decorator stamped with the Kubernetes deployment standard (a few of its rules: the
+ * required fields, and `data.kubernetes` holding exactly a cluster and a namespace), in its `errors` shape.
+ */
+export function standardErrors(d: any): { location: string; error: string }[] {
+  if (d?.$schema !== KUBERNETES_DEPLOYMENT_STANDARD) return [];
+  const errors: { location: string; error: string }[] = [];
+  if (d.type !== 'deployment') errors.push({ location: '/type', error: 'must be "deployment"' });
+  if (!Array.isArray(d['target-type']) || !d['target-type'].length) errors.push({ location: '/target-type', error: 'required' });
+  for (const k of ['start-time', 'status']) {
+    if (typeof d.data?.[k] !== 'string') errors.push({ location: `/data/${k}`, error: 'required property missing' });
+  }
+  const kube = d.data?.kubernetes;
+  if (typeof kube !== 'object' || kube === null) {
+    errors.push({ location: '/data', error: 'required property kubernetes missing' });
+  } else {
+    for (const k of ['cluster', 'namespace']) {
+      if (typeof kube[k] !== 'string' || !kube[k]) errors.push({ location: '/data/kubernetes', error: `required property ${k} missing` });
+    }
+    for (const k of Object.keys(kube)) {
+      if (k !== 'cluster' && k !== 'namespace') errors.push({ location: '/data/kubernetes', error: `property ${k} is not allowed` });
+    }
+  }
+  return errors;
+}
+
+const rejection = (errors: { location: string; error: string }[]) =>
+  reply(400, { error: 'Decorator does not match its $schema', errors });
+
 export class FakeHub {
   architectures = new Map<string, { numericId: number; versions: Map<string, any> }>();
   decorators = new Map<number, any>();
   puts: { id: number; status: string; notes: string }[] = [];
+  /** Makes CALM Hub refuse the n-th PUT (1-based) as not matching its $schema. */
+  rejectPut?: (n: number) => boolean;
+  private putCount = 0;
   private nextId = 100;
 
   addArchitecture(name: string, numericId: number, docs: Record<string, any>) {
@@ -104,6 +137,8 @@ export class FakeHub {
         return d ? reply(200, this.camel(Number(m[1]), d)) : reply(404);
       }
       if (method === 'POST') {
+        const errors = standardErrors(JSON.parse(init.body));
+        if (errors.length) return rejection(errors);
         const id = this.nextId++;
         this.decorators.set(id, JSON.parse(init.body));
         return reply(201, { id });
@@ -112,6 +147,9 @@ export class FakeHub {
         const id = Number(m[1]);
         if (!this.decorators.has(id)) return reply(404);
         const d = JSON.parse(init.body);
+        const errors = standardErrors(d);
+        if (this.rejectPut?.(++this.putCount)) errors.push({ location: '/data/kubernetes', error: 'refused by the test' });
+        if (errors.length) return rejection(errors);
         this.decorators.set(id, d);
         this.puts.push({ id, status: d.data.status, notes: d.data.notes });
         return reply(200);
@@ -298,7 +336,7 @@ export interface World {
  * version 1.0.1 (one extra fewer) in CALM Hub but not deployed.
  */
 export function world(opts: { approval?: 'auto' | 'manual'; validateErrors?: string[]; fluxReady?: boolean } = {}): World {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'gitops-deploy-test-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'platform-connector-test-'));
   const settings = readSettings(
     {
       GITEA_URL: `file://${root}`,

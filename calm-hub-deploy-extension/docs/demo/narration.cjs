@@ -39,12 +39,12 @@ module.exports = function narration(ctx) {
     {
       id: 'manifest-id',
       term: 'The manifest: one JSON file',
-      text: 'The manifest is one JSON file. It names the extension, gitops-deploy, and the version of CALM Hub’s extension API it was written for.',
+      text: 'The manifest is one JSON file. It names the extension, platform-connector, and the version of CALM Hub’s extension API it was written for.',
     },
     {
       id: 'routes-a',
       term: 'Routes: method, scope, path on the backend',
-      text: 'Routes come first. Each route is a method and a path on the backend, with the scope a caller needs. CALM Hub serves every route under its own API, at slash api, slash calm, slash extensions, slash gitops-deploy.',
+      text: 'Routes come first. Each route is a method and a path on the backend, with the scope a caller needs. CALM Hub serves every route under its own API, at slash api, slash calm, slash extensions, slash platform-connector.',
     },
     {
       id: 'routes-b',
@@ -83,8 +83,8 @@ module.exports = function narration(ctx) {
     },
     {
       id: 'registry-after',
-      term: 'Loaded: gitops-deploy',
-      text: 'CALM Hub now lists gitops-deploy, next to its built-in views.',
+      term: 'Loaded: platform-connector',
+      text: 'CALM Hub now lists platform-connector, next to its built-in views.',
     },
     {
       id: 'jwks',

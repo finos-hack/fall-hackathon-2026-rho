@@ -17,7 +17,7 @@ function token(claims: Record<string, unknown>, opts: { key?: KeyObject; header?
 const NOW = 1_800_000_000;
 const base = (over: Record<string, unknown> = {}) => ({
   iss: 'http://localhost:8090',
-  aud: 'gitops-deploy',
+  aud: 'platform-connector',
   sub: 'no-auth',
   iat: NOW,
   exp: NOW + 60,
@@ -31,7 +31,7 @@ function verifier() {
   let fetches = 0;
   const verify = createVerifier({
     issuer: 'http://localhost:8090',
-    audience: 'gitops-deploy',
+    audience: 'platform-connector',
     fetchJwks: async () => {
       fetches++;
       return { keys: [jwk as any] };

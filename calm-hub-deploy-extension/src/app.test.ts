@@ -115,15 +115,20 @@ describe('deploy', () => {
       '/api/calm/namespaces/hackathon/architectures/38/versions/1-0-1',
     ]);
     expect(d['applies-to']).toEqual(['web-service']);
+    expect(d.$schema).toBe('https://calm.finos.org/standards/deployment/1.0/kubernetes.decorator.standard.json');
     expect(d.data).toMatchObject({
       status: 'completed',
-      environment: 'local',
-      'architecture-version': '1.0.1',
-      'requested-by': 'alice',
-      'hub-audit-id': 'aaaa1111-2222',
-      'deployed-by': 'gitops-deploy',
-      'pull-request': 'http://gitea.test/calm-services/events-stream/pulls/1',
-      commit: w.gitea.head('events-stream'),
+      kubernetes: { cluster: 'calm-backstage', namespace: 'calm-events-stream' },
+      gitops: {
+        connector: 'platform-connector',
+        environment: 'local',
+        repository: 'http://gitea.test/calm-services/events-stream',
+        'architecture-version': '1.0.1',
+        'requested-by': 'alice',
+        'hub-audit-id': 'aaaa1111-2222',
+        'pull-request': 'http://gitea.test/calm-services/events-stream/pulls/1',
+        commit: w.gitea.head('events-stream'),
+      },
     });
     expect(w.hub.puts.map(p => p.status)).toEqual(['in-progress', 'in-progress', 'in-progress', 'in-progress', 'in-progress', 'completed']);
 
@@ -259,6 +264,43 @@ describe('deploy', () => {
     const r: any = await call(w, 'POST', '/deploy/hackathon/architectures/events-stream/1.0.1', {});
     expect(r.status).toBe(409);
     expect(r.body.error).toContain('runs the architecture other/events-stream');
+  });
+
+  it('fails the step with CALM Hub’s reason when it refuses the record, and records that reason', async () => {
+    const w = make();
+    // CALM Hub refuses the second update (the "Rendering" step): nothing is pushed and the failure is recorded.
+    w.hub.rejectPut = n => n === 2;
+    await call(w, 'POST', '/deploy/hackathon/architectures/events-stream/1.0.1', {});
+    await w.deps.jobs.idle();
+    const d = w.hub.latest().data;
+    expect(d.status).toBe('failed');
+    expect(d.notes).toContain('Decorator does not match its $schema: /data/kubernetes: refused by the test');
+    expect(w.gitea.pulls).toHaveLength(0);
+  });
+
+  it('logs, without throwing, when CALM Hub refuses even the record of the failure', async () => {
+    const { createLogger } = await import('./logger');
+    const lines: string[] = [];
+    const w = make();
+    w.deps.logger = createLogger('test', 'info', l => lines.push(l));
+    w.hub.rejectPut = () => true;
+    await call(w, 'POST', '/deploy/hackathon/architectures/events-stream/1.0.1', {});
+    await w.deps.jobs.idle();
+    expect(w.hub.latest().data.status).toBe('pending');
+    expect(lines).toContainEqual(expect.stringContaining('Could not record that events-stream-1.0.1-aaaa1111 failed: CALM Hub refused'));
+  });
+
+  it('answers with CALM Hub’s reason when it refuses the first record', async () => {
+    const w = make();
+    w.settings.kubernetes.context = '';
+    const r: any = await call(w, 'POST', '/deploy/hackathon/architectures/events-stream/1.0.1', {});
+    expect(r.status).toBe(502);
+    expect(r.body.error).toContain('Decorator does not match its $schema: /data/kubernetes: required property cluster missing');
+    expect(w.hub.decorators.size).toBe(0);
+    // The claim on the service was given back.
+    w.settings.kubernetes.context = 'calm-backstage';
+    expect((await call(w, 'POST', '/deploy/hackathon/architectures/events-stream/1.0.1', {})).status).toBe(202);
+    await w.deps.jobs.idle();
   });
 
   it('refuses unknown versions and services without a repository', async () => {

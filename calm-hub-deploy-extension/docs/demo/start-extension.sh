@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# start-extension.sh [auto|manual]: (re)starts the gitops-deploy backend in the background, logging to
+# start-extension.sh [auto|manual]: (re)starts the platform-connector backend in the background, logging to
 # .work/extension.log (started afresh), and waits until it listens. manual: each change waits for a person to merge
 # its pull request.
 set -euo pipefail

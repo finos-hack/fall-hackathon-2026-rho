@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # mcp.sh <tool> <arguments-json>: calls one tool on CALM Hub's MCP server (streamable HTTP) and prints its structured
-# result, as an agent would. e.g. mcp.sh ext_gitops-deploy_status '{"namespace":"hackathon","architecture":"x"}'
+# result, as an agent would. e.g. mcp.sh ext_platform-connector_status '{"namespace":"hackathon","architecture":"x"}'
 # mcp.sh --list [prefix]: the names and descriptions of the tools (starting with prefix).
 set -euo pipefail
 TOOL="${1:?usage: mcp.sh <tool> <arguments-json>}"

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Starts (or restarts) CALM Hub from calm-backstage/hub/docker-compose.yml with the gitops-deploy extension loaded.
+# Starts (or restarts) CALM Hub from calm-backstage/hub/docker-compose.yml with the platform-connector extension loaded.
 #
 #   scripts/hub-up.sh            # uses ../calm-backstage/hub/docker-compose.yml
 #   CALM_BACKSTAGE_DIR=/path/to/calm-backstage scripts/hub-up.sh

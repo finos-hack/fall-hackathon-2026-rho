@@ -35,8 +35,8 @@ On an architecture version, under **Extensions**:
 
   Every step updates the decorator, so the diagram's built-in *Deployments* overlay shows the progress live (CALM
   Hub re-reads decorators every 5 s). An action's own reply is not shown by CALM Hub.
-- Commands, for the CLI (`calm hub ext gitops-deploy <command>`, once a CLI with it is published) and as MCP tools
-  `ext_gitops-deploy_status`, `ext_gitops-deploy_history` and `ext_gitops-deploy_deploy`.
+- Commands, for the CLI (`calm hub ext platform-connector <command>`, once a CLI with it is published) and as MCP tools
+  `ext_platform-connector_status`, `ext_platform-connector_history` and `ext_platform-connector_deploy`.
 
 The routes need CALM Hub's `read` scope (tab, status, history) or `write` scope (deploy) on the namespace, and every
 call that deploys is in CALM Hub's audit log; its audit id is stored on the decorator and in the commit message.
@@ -98,8 +98,8 @@ is opened. The same through the API (what the CLI and MCP tools call):
 
 ```sh
 curl -X POST -H 'content-type: application/json' -d '{}' \
-  localhost:8090/api/calm/extensions/gitops-deploy/api/namespaces/hackathon/architectures/events-stream/versions/1.0.1/deployments
-curl localhost:8090/api/calm/extensions/gitops-deploy/api/namespaces/hackathon/architectures/events-stream/status
+  localhost:8090/api/calm/extensions/platform-connector/api/namespaces/hackathon/architectures/events-stream/versions/1.0.1/deployments
+curl localhost:8090/api/calm/extensions/platform-connector/api/namespaces/hackathon/architectures/events-stream/status
 ```
 
 Deploying the version that already runs is a no-op recorded as `completed` ("Already deployed").
@@ -108,7 +108,7 @@ Deploying the version that already runs is a no-op recorded as `completed` ("Alr
 
 | File | Role |
 |---|---|
-| `extension/gitops-deploy/extension.json` | The manifest CALM Hub loads: routes, scopes, commands (with the profile's schemas), the tab and the action. The backend builds its route table from it. |
+| `extension/platform-connector/extension.json` | The manifest CALM Hub loads: routes, scopes, commands (with the profile's schemas), the tab and the action. The backend builds its route table from it. |
 | `src/identity.ts` | Verifies CALM Hub's signed assertion (`X-Calm-Hub-Identity`) against the Hub's JWKS: signature, issuer, audience, method, path, body hash, expiry, replay. A port of upstream `identity.mjs`. |
 | `src/app.ts`, `src/server.ts`, `src/routes.ts` | Exact-path routing (no decoding), verification, the namespace CALM Hub checked must be the one acted on, handlers. |
 | `src/resolve.ts` | Context → architecture (by name, as the Hub UI sends it, or numeric id); reads the service's `catalog-info.yaml` and manifests from Gitea over HTTP; refuses a repository that names another namespace's architecture. |

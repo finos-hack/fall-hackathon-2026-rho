@@ -1,10 +1,10 @@
 {
-  "id": "gitops-deploy",
+  "id": "platform-connector",
   "version": "0.1.0",
   "hubApi": 0,
-  "name": "GitOps deployments",
-  "description": "Deploys an architecture version through Git and Flux, and records each deployment as a deployment decorator. The reference implementation of the CALM deployment extension profile.",
-  "provider": "CALM Backstage hackathon",
+  "name": "Platform Connector",
+  "description": "Connects the firm's delivery platform (here GitOps on Kubernetes) to CALM Hub: it deploys architecture versions, reads what really runs, and records each deployment as a standard deployment decorator.",
+  "provider": "GitOps on Kubernetes (reference)",
   "routes": [
     { "id": "tab", "method": "GET", "path": "/tab/{namespace}/{resourceType}/{resourceId}", "scope": "read", "readOnly": true },
     { "id": "status", "method": "GET", "path": "/namespaces/{namespace}/architectures/{architecture}/status", "scope": "read", "readOnly": true },
