@@ -9,12 +9,20 @@ import type { Settings } from './config';
 import type { Gitea } from './gitea';
 import type { HubClient } from './hub';
 import type { Logger } from './logger';
+import { evaluationEntry, isOwnEvaluation } from './evaluation';
 import { historyEntry, newestFirst, type HistoryEntry } from './record';
 import { readService, type ServiceInfo } from './resolve';
 import { oneLine, readKustomization, type Kubectl } from './deploy/kube';
 
 const HISTORY_LIMIT = 20;
-const KUBECTL_TIMEOUT_MS = 5_000;
+/** Statuses of an attempt that has not finished: `validating` is a job at the controls gate (from memory). */
+const RUNNING = new Set(['validating', 'pending', 'in-progress']);
+/** Each kubectl read on the read side gives up after this, to stay within CALM Hub's 10 s for a proxied call. */
+export const KUBECTL_TIMEOUT_MS = 5_000;
+const RECORD_TYPES = ['deployment', 'control-evaluation'];
+const MAX_HISTORY_PAGES = 5;
+/** History reads the records of the newest 10 versions only (and the running one), to stay within CALM Hub's 10 s. */
+export const HISTORY_VERSIONS = 10;
 
 export interface ReadDeps {
   settings: Settings;
@@ -46,36 +54,85 @@ export interface Status {
   running?: { version?: string; status: DeploymentStatus | string; notes?: string };
 }
 
-/** The deployments recorded on every version of an architecture, newest first (at most 20). */
+/** The newest `HISTORY_VERSIONS` of `versions`, plus `running` when it is an older one. */
+export function scannedVersions(versions: string[], running?: string): string[] {
+  const newest = [...versions].sort(compareVersions).slice(-HISTORY_VERSIONS);
+  return running && versions.includes(running) && !newest.includes(running) ? [running, ...newest] : newest;
+}
+
+/**
+ * The deployment attempts on an architecture's newest 10 versions (and `running`, the version that runs, when it is
+ * older), newest first (at most 20): its deployment decorators, this connector's refusals at the controls gate
+ * (control-evaluation decorators), and `unrecorded` (jobs from memory that CALM Hub holds no record of yet, or whose
+ * outcome it did not take: those replace the record with the same id). Entries read from deployment decorators carry
+ * `appliesTo`; the history route leaves it out.
+ */
 export async function readHistory(
   hub: HubClient,
   namespace: string,
   architecture: string,
   versions: string[],
+  unrecorded: HistoryEntry[] = [],
+  running?: string,
 ): Promise<HistoryEntry[]> {
-  const ids = new Map<number, string>();
-  for (const v of versions) {
-    const list = await hub.listDecorators(namespace, {
-      target: architectureVersionPath(namespace, architecture, v),
-      type: 'deployment',
-    });
-    for (const id of list) if (!ids.has(id)) ids.set(id, v);
-  }
-  const newest = [...ids.entries()].sort((a, b) => b[0] - a[0]).slice(0, HISTORY_LIMIT);
-  const read = await Promise.all(
-    newest.map(async ([id, v]) => historyEntry({ ...(await hub.getDecorator(namespace, id)), id }, v)),
+  // CALM Hub gives each proxied call 10 s: list every scanned version's decorators at once.
+  const pairs = scannedVersions(versions, running).flatMap(version => RECORD_TYPES.map(type => ({ version, type })));
+  const lists = await Promise.all(
+    pairs.map(p => hub.listDecorators(namespace, { target: architectureVersionPath(namespace, architecture, p.version), type: p.type })),
   );
-  return newestFirst(read);
+  const ids = new Map<number, { version: string; type: string }>();
+  lists.forEach((list, i) => {
+    for (const id of list) if (!ids.has(id)) ids.set(id, pairs[i]);
+  });
+  const newest = [...ids.entries()].sort((a, b) => b[0] - a[0]);
+  // Other connectors' evaluations are dropped only once read: read newest first, a page at a time, until 20 are kept
+  // (at most 5 pages, so many foreign evaluations cannot eat CALM Hub's 10 s).
+  const kept: HistoryEntry[] = [];
+  const end = Math.min(newest.length, HISTORY_LIMIT * MAX_HISTORY_PAGES);
+  for (let i = 0; i < end && kept.length < HISTORY_LIMIT; i += HISTORY_LIMIT) {
+    const read = await Promise.all(
+      newest.slice(i, i + HISTORY_LIMIT).map(async ([id, { version, type }]) => {
+        const d = { ...(await hub.getDecorator(namespace, id)), id };
+        if (type === 'deployment') return { ...historyEntry(d, version), ...(d.appliesTo?.length ? { appliesTo: d.appliesTo } : {}) };
+        return isOwnEvaluation(d) ? evaluationEntry(d, version) : undefined;
+      }),
+    );
+    kept.push(...read.filter((e): e is HistoryEntry => e !== undefined));
+  }
+  // A job whose outcome CALM Hub did not take carries its decorator's id: memory's outcome replaces the stale record.
+  const replaced = new Set(unrecorded.map(u => u.id).filter((id): id is number => id !== undefined));
+  const fromHub = kept.filter(e => e.id === undefined || !replaced.has(e.id)).slice(0, HISTORY_LIMIT);
+  return newestFirst([...unrecorded, ...fromHub]).slice(0, HISTORY_LIMIT);
 }
 
-/** The status of `<namespace>/<architecture>`; `service` is passed when the caller already read it. */
+/** A history entry as the history route gives it (without the nodes a deployment applies to). */
+export const publicEntry = ({ appliesTo: _appliesTo, ...e }: HistoryEntry): HistoryEntry => e;
+
+/** The first attempt in `history` that has not finished. */
+export function runningOf(history: HistoryEntry[]): Status['running'] {
+  const running = history.find(h => RUNNING.has(h.status));
+  if (!running) return undefined;
+  return {
+    status: running.status,
+    ...(running.version ? { version: running.version } : {}),
+    ...(running.notes ? { notes: running.notes } : {}),
+  };
+}
+
+/**
+ * The status of `<namespace>/<architecture>`. Pass what the caller already read: `service`, `versions`, and `history`
+ * (a promise is awaited last, so it can be read while Flux is).
+ */
 export async function readStatus(
   deps: ReadDeps,
   namespace: string,
   architecture: string,
-  opts: { service?: ServiceInfo | null; history?: HistoryEntry[] } = {},
+  opts: { service?: ServiceInfo | null; versions?: string[]; history?: HistoryEntry[] | Promise<HistoryEntry[]> } = {},
 ): Promise<Status> {
-  const versions = (await deps.hub.architectureVersions(namespace, architecture)).sort(compareVersions);
+  // Read while Flux is; never left unhandled when the status returns before awaiting it.
+  const historyRead = opts.history === undefined ? undefined : Promise.resolve(opts.history);
+  historyRead?.catch(() => undefined);
+  const versions = [...(opts.versions ?? (await deps.hub.architectureVersions(namespace, architecture)))].sort(compareVersions);
   const base: Status = {
     namespace,
     architecture,
@@ -120,14 +177,8 @@ export async function readStatus(
     deps.logger.warn(`Could not read Flux status of ${architecture}: ${oneLine(e)}`);
     Object.assign(status, { message: `Flux status unavailable: ${oneLine(e)}` });
   }
-  const history = opts.history ?? (await readHistory(deps.hub, namespace, architecture, versions));
-  const running = history.find(h => h.status === 'pending' || h.status === 'in-progress');
-  if (running) {
-    status.running = {
-      status: running.status,
-      ...(running.version ? { version: running.version } : {}),
-      ...(running.notes ? { notes: running.notes } : {}),
-    };
-  }
+  const history = (await historyRead) ?? (await readHistory(deps.hub, namespace, architecture, versions));
+  const running = runningOf(history);
+  if (running) status.running = running;
   return status;
 }

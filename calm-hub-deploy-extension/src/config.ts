@@ -24,6 +24,8 @@ export interface Settings {
   gitops: GitopsSettings;
   kubernetes: KubernetesDeploySettings;
   registry: { url: string; repositoryPrefix: string };
+  /** CALM Hub namespaces whose services this instance deploys (DEPLOY_NAMESPACES, comma-separated). */
+  deployNamespaces: string[];
   /** The manifest the route table is built from. */
   manifestPath: string;
 }
@@ -57,7 +59,7 @@ export function readSettings(
     port: int(env.PORT, 8093, 'PORT'),
     hubUrl,
     hubIssuer: env.CALM_HUB_ISSUER ?? hubUrl,
-    extensionId: env.EXTENSION_ID ?? 'gitops-deploy',
+    extensionId: env.EXTENSION_ID ?? 'platform-connector',
     environment: env.DEPLOY_ENVIRONMENT ?? 'local',
     approval,
     approvalTimeoutMs: int(env.APPROVAL_TIMEOUT_SECONDS, 1800, 'APPROVAL_TIMEOUT_SECONDS') * 1000,
@@ -82,6 +84,10 @@ export function readSettings(
       url: env.BUNDLE_REGISTRY_URL ?? 'http://localhost:5050',
       repositoryPrefix: env.BUNDLE_REPOSITORY_PREFIX ?? 'calm-bundles',
     },
-    manifestPath: resolve(env.MANIFEST ?? 'extension/gitops-deploy/extension.json'),
+    deployNamespaces: (env.DEPLOY_NAMESPACES ?? 'hackathon')
+      .split(',')
+      .map(n => n.trim())
+      .filter(Boolean),
+    manifestPath: resolve(env.MANIFEST ?? 'extension/platform-connector/extension.json'),
   };
 }

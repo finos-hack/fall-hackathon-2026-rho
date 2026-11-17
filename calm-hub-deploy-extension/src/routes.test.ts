@@ -2,7 +2,7 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { RouteTable } from './routes';
 
-const table = RouteTable.fromManifest(path.join(__dirname, '../extension/gitops-deploy/extension.json'));
+const table = RouteTable.fromManifest(path.join(__dirname, '../extension/platform-connector/extension.json'));
 
 describe('RouteTable (from the manifest)', () => {
   it('matches each route with its parameters', () => {
@@ -22,6 +22,19 @@ describe('RouteTable (from the manifest)', () => {
     expect(table.match('POST', '/namespaces/hackathon/architectures/orders/versions/1.0.1/deployments')).toMatchObject({
       route: { id: 'deploy' },
     });
+    expect(table.match('GET', '/node/hackathon/architectures/orders/stream-app')).toMatchObject({
+      route: { id: 'node', scope: 'read', readOnly: true },
+      params: { namespace: 'hackathon', resourceType: 'architectures', resourceId: 'orders', selectedElement: 'stream-app' },
+    });
+    expect(table.match('GET', '/card')).toMatchObject({ route: { id: 'card', scope: 'authenticated', readOnly: true }, params: {} });
+    expect(table.match('GET', '/screen')).toMatchObject({ route: { id: 'screen', scope: 'authenticated', readOnly: true } });
+  });
+
+  it('contributes the tab, the action, the detail panel, the landing card and the screen, each to a route it has', () => {
+    const manifest = JSON.parse(require('node:fs').readFileSync(path.join(__dirname, '../extension/platform-connector/extension.json'), 'utf-8'));
+    const ids = new Set(manifest.routes.map((r: any) => r.id));
+    expect(Object.keys(manifest.contributes).sort()).toEqual(['action', 'designer-tab', 'detail-panel', 'landing-card', 'screen']);
+    for (const list of Object.values<any[]>(manifest.contributes)) for (const c of list) expect(ids.has(c.route)).toBe(true);
   });
 
   it('answers 405 for a known path with another method, 404 otherwise', () => {

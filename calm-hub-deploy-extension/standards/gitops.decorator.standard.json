@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:calm-platform-connector:standards:gitops-deployment:1.0",
+  "title": "GitOps deployment decorator",
+  "description": "A Kubernetes deployment decorator made through GitOps: the standard deployment record plus, in data.gitops, how the Platform Connector made the change (repository, pull request, commit) and who asked for it through CALM Hub.",
+  "allOf": [
+    { "$ref": "https://calm.finos.org/standards/deployment/1.0/kubernetes.decorator.standard.json" },
+    {
+      "type": "object",
+      "required": ["data"],
+      "properties": {
+        "data": {
+          "type": "object",
+          "required": ["gitops"],
+          "properties": {
+            "gitops": {
+              "type": "object",
+              "description": "How the deployment was made through Git and Flux, and on whose request.",
+              "required": ["connector", "environment"],
+              "properties": {
+                "connector": {
+                  "type": "string",
+                  "description": "The CALM Hub extension that made the deployment and keeps this record, e.g. platform-connector."
+                },
+                "environment": {
+                  "type": "string",
+                  "description": "The environment deployed to, as the connector names it (e.g. local, staging, production)."
+                },
+                "repository": {
+                  "type": "string",
+                  "format": "uri",
+                  "description": "Web URL of the service repository Flux deploys from."
+                },
+                "pull-request": {
+                  "type": "string",
+                  "format": "uri",
+                  "description": "The pull request that carried the change: the change gate."
+                },
+                "commit": {
+                  "type": "string",
+                  "description": "The commit on the deployed branch that Flux applied."
+                },
+                "requested-by": {
+                  "type": "string",
+                  "description": "Who asked for the deployment: the subject CALM Hub vouched for."
+                },
+                "hub-audit-id": {
+                  "type": "string",
+                  "description": "The id (jti) of the CALM Hub call that asked for the deployment: its entry in CALM Hub's audit log."
+                },
+                "architecture-version": {
+                  "type": "string",
+                  "description": "The architecture version deployed."
+                }
+              },
+              "additionalProperties": true
+            }
+          }
+        }
+      }
+    }
+  ]
+}

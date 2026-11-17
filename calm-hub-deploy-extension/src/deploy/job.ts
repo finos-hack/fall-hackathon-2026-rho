@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 import YAML from 'yaml';
@@ -16,18 +17,46 @@ import {
   serviceRepository,
   validateArchitecture,
   type ValidateArchitectureResult,
+  type ValidationMessage,
 } from '@internal/backstage-plugin-calm-node';
 import { HttpError } from '../errors';
+import { firstError, recordRefusal, refusalNotes } from '../evaluation';
+import { DecoratorRejected } from '../hub';
 import type { HubClaims } from '../identity';
-import { decoratorOf, type DeploymentRecord } from '../record';
+import { CONNECTOR, decoratorOf, type DeploymentRecord, type HistoryEntry } from '../record';
 import { CATALOG_INFO_FILE, bindingProblem, findArchitecture, readService, type ServiceInfo } from '../resolve';
 import type { ReadDeps } from '../status';
 import { BASE_DIR, labelledNodes, oneLine, readOverlayImage, requestReconcile, waitForKustomization, waitForRollouts } from './kube';
+
+/** What memory knows of a service's latest job; the status and history routes show it until CALM Hub records it. */
+export interface JobState {
+  deploymentId: string;
+  version: string;
+  /** `validating` at the controls gate, then the deployment's status; `refused` when the gate refused it. */
+  status: string;
+  startTime: string;
+  endTime?: string;
+  notes: string;
+  requestedBy: string;
+  environment: string;
+  /** The deployment decorator, once the version passed the controls gate and CALM Hub recorded it. */
+  decoratorId?: number;
+  /** The control-evaluation decorator that records the refusal, when the controls gate refused the version. */
+  evaluationId?: number;
+  /** The pull request the job waits for a person to merge (manual approval), while it waits. */
+  pendingApproval?: { number: number; url: string };
+  /**
+   * CALM Hub did not take the job's final update (`completed` or `failed`): its decorator still shows an earlier
+   * status, so memory holds the outcome (`status`, `endTime`, `notes`) and history shows it in the decorator's place.
+   */
+  outcomeUnrecorded?: boolean;
+}
 
 /** One deployment job per service at a time; jobs live in memory (a restart marks unfinished ones failed). */
 export class Jobs {
   private readonly running = new Map<string, Promise<void>>();
   private readonly reserved = new Set<string>();
+  private readonly latest = new Map<string, JobState>();
 
   isRunning(key: string): boolean {
     return this.running.has(key) || this.reserved.has(key);
@@ -47,10 +76,42 @@ export class Jobs {
     this.reserved.delete(key);
   }
 
-  start(key: string, run: () => Promise<void>): void {
+  /** The state of the job running for `key`; undefined when none runs. */
+  current(key: string): JobState | undefined {
+    return this.running.has(key) ? this.latest.get(key) : undefined;
+  }
+
+  /** Runs the job for `key`; `state` is what the job reports as it goes. */
+  start(key: string, state: JobState, run: () => Promise<void>): void {
+    this.latest.set(key, state);
     const p = run().finally(() => this.running.delete(key));
     this.running.set(key, p);
     this.reserved.delete(key);
+  }
+
+  /**
+   * The latest job of `key` as a history entry while CALM Hub holds no record of it: at the controls gate, or ended
+   * before a record could be written. Once CALM Hub has its decorator or evaluation, history reads that instead,
+   * unless CALM Hub did not take the final update: then the entry carries the decorator's id and replaces it.
+   */
+  unrecorded(key: string): HistoryEntry[] {
+    const s = this.latest.get(key);
+    if (!s || s.evaluationId !== undefined) return [];
+    if (s.decoratorId !== undefined && !s.outcomeUnrecorded) return [];
+    return [
+      {
+        ...(s.outcomeUnrecorded ? { id: s.decoratorId } : {}),
+        deploymentId: s.deploymentId,
+        version: s.version,
+        status: s.status,
+        startTime: s.startTime,
+        ...(s.endTime ? { endTime: s.endTime } : {}),
+        environment: s.environment,
+        requestedBy: s.requestedBy,
+        notes: s.notes,
+        deployedBy: CONNECTOR,
+      },
+    ];
   }
 
   /** Resolves when every running job has finished (tests, shutdown). */
@@ -87,10 +148,10 @@ export interface DeployRequest {
   claims: Pick<HubClaims, 'sub' | 'jti' | 'ns'>;
 }
 
+/** The reply to a deploy request. No decorator exists yet: the job writes one only once the version passes the gate. */
 export interface DeployAccepted {
   hubApi: 0;
   deploymentId: string;
-  decoratorId: number;
   status: 'pending';
 }
 
@@ -104,6 +165,21 @@ export function registryRender(deps: ReadDeps): Render {
     const r = await renderBundle({ architecturePath, bundleDir: pulled.dir, dir, outputDir: RENDERED, logger: deps.logger });
     return r.files;
   };
+}
+
+/**
+ * The version of the `calm` CLI that `cliValidate` runs (`@finos/calm-cli`, a dependency of calm-node); undefined when
+ * it cannot be found.
+ */
+export function calmCliVersion(): string | undefined {
+  try {
+    const here = createRequire(path.join(__dirname, 'job.ts'));
+    const calmNode = createRequire(here.resolve('@internal/backstage-plugin-calm-node/package.json'));
+    const version = calmNode('@finos/calm-cli/package.json')?.version;
+    return typeof version === 'string' && version ? version : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /** The default controls gate: `calm validate` against the architecture's pattern and the Hub's controls. */
@@ -120,8 +196,8 @@ export function cliValidate(deps: ReadDeps): Validate {
 }
 
 /**
- * Accepts a deployment: checks it can run, records it in CALM Hub as `pending` and starts the job. Answers within
- * CALM Hub's 10 s limit; the job reports its progress by updating the decorator.
+ * Accepts a deployment: checks it can run and starts the job. Answers within CALM Hub's 10 s limit; the job validates
+ * first and records the deployment in CALM Hub only when the version passes the controls gate.
  */
 export async function requestDeployment(deps: DeployDeps, req: DeployRequest): Promise<DeployAccepted> {
   const { settings, hub, gitea, jobs } = deps;
@@ -160,7 +236,7 @@ async function accept(
   doc: any,
   service: ServiceInfo,
 ): Promise<DeployAccepted> {
-  const { settings, hub, jobs } = deps;
+  const { settings, jobs } = deps;
   const now = deps.now ?? Date.now;
   const archNodes: string[] = (Array.isArray(doc?.nodes) ? doc.nodes : []).map((n: any) => n?.['unique-id']).filter(Boolean);
   const record: DeploymentRecord = {
@@ -173,15 +249,25 @@ async function accept(
     status: 'pending',
     startTime: new Date(now()).toISOString(),
     notes: `Requested by ${req.claims.sub} through CALM Hub; ${settings.environment} runs ${service.deployedVersion ?? 'an unknown version'}`,
+    kubernetes: { cluster: settings.kubernetes.context, namespace: service.kubernetesNamespace },
     environment: settings.environment,
+    repository: service.webUrl,
     requestedBy: req.claims.sub,
     hubAuditId: req.claims.jti,
     details: service.webUrl,
   };
-  const decoratorId = await hub.createDecorator(req.namespace, decoratorOf(record));
-  deps.logger.info(`Deployment ${record.uniqueId} accepted (decorator ${decoratorId})`);
-  jobs.start(arch.name, () => runDeployment(deps, { record, decoratorId, service, doc }));
-  return { hubApi: 0, deploymentId: record.uniqueId, decoratorId, status: 'pending' };
+  const state: JobState = {
+    deploymentId: record.uniqueId,
+    version: record.version,
+    status: 'pending',
+    startTime: record.startTime,
+    notes: record.notes,
+    requestedBy: record.requestedBy,
+    environment: record.environment,
+  };
+  deps.logger.info(`Deployment ${record.uniqueId} accepted`);
+  jobs.start(arch.name, state, () => runDeployment(deps, { record, state, service, doc }));
+  return { hubApi: 0, deploymentId: record.uniqueId, status: 'pending' };
 }
 
 async function copyInto(fromDir: string, files: string[], toDir: string): Promise<void> {
@@ -261,21 +347,79 @@ async function waitForMerge(deps: DeployDeps, owner: string, repo: string, numbe
   }
 }
 
-/** The job: validate, render, pull request, approval, Flux, rollouts. Never throws; failures are recorded. */
+/** Records a version refused at the controls gate as one control evaluation in CALM Hub; the job ends `refused`. */
+async function refuse(
+  deps: DeployDeps,
+  ctx: { record: DeploymentRecord; state: JobState; service: ServiceInfo; doc: unknown },
+  errors: ValidationMessage[],
+  evaluatedAt: string,
+): Promise<void> {
+  const { record, state, service } = ctx;
+  const notes = refusalNotes(firstError(errors));
+  const engineVersion = deps.validate ? undefined : calmCliVersion();
+  let evaluationId: number | undefined;
+  try {
+    evaluationId = await recordRefusal(deps, {
+      namespace: record.namespace,
+      architecture: record.architecture,
+      version: record.version,
+      ...(record.numericId !== undefined ? { numericId: record.numericId } : {}),
+      shortId: record.uniqueId.split('-').pop()!,
+      refused: ctx.doc,
+      ...(service.deployedVersion ? { deployedVersion: service.deployedVersion } : {}),
+      errors,
+      requestedBy: record.requestedBy,
+      hubAuditId: record.hubAuditId,
+      evaluatedAt,
+      // The CLI's version when the default gate ran it; an injected gate says nothing about its engine.
+      ...(engineVersion ? { engineVersion } : {}),
+    });
+  } catch (e) {
+    deps.logger.error(`Could not record that ${record.uniqueId} was refused at the controls gate: ${oneLine(e)}`);
+  }
+  Object.assign(state, { status: 'refused', endTime: evaluatedAt, notes, ...(evaluationId !== undefined ? { evaluationId } : {}) });
+  deps.logger.warn(`${record.uniqueId}: refused: ${notes}${evaluationId !== undefined ? ` (control evaluation ${evaluationId})` : ''}`);
+}
+
+/**
+ * The job: the controls gate, then (only for a version that passes) the deployment record, render, pull request,
+ * approval, Flux, rollouts. A refused version gets a control evaluation instead, and nothing reaches Git. Never
+ * throws; failures are recorded (in memory when CALM Hub holds no record of the job yet).
+ */
 export async function runDeployment(
   deps: DeployDeps,
-  ctx: { record: DeploymentRecord; decoratorId: number; service: ServiceInfo; doc: unknown },
+  ctx: { record: DeploymentRecord; state: JobState; service: ServiceInfo; doc: unknown },
 ): Promise<void> {
   const { settings, hub, gitea, kubectl, logger } = deps;
-  const { record, decoratorId, service } = ctx;
+  const { record, state, service } = ctx;
   const now = deps.now ?? Date.now;
   const iso = () => new Date(now()).toISOString();
+  /** Where the job is, before CALM Hub holds a record of it. */
+  const report = (patch: Partial<JobState>) => {
+    Object.assign(state, patch);
+    logger.info(`${record.uniqueId}: ${state.status}: ${state.notes}`);
+  };
+  let decoratorId: number | undefined;
+  /** Moves the deployment decorator on (from then on CALM Hub holds the job's record, not memory). */
   const update = async (patch: Partial<DeploymentRecord>) => {
     Object.assign(record, patch);
     logger.info(`${record.uniqueId}: ${record.status}: ${record.notes}`);
+    if (decoratorId === undefined) return;
     try {
       await hub.updateDecorator(record.namespace, decoratorId, decoratorOf(record));
+      delete state.outcomeUnrecorded;
     } catch (e) {
+      if (record.status === 'completed' || record.status === 'failed') {
+        // The outcome would be invisible (the decorator still says in progress): memory holds it.
+        Object.assign(state, {
+          status: record.status,
+          endTime: record.endTime,
+          notes: `${record.notes} (CALM Hub did not record this: ${oneLine(e)})`,
+          outcomeUnrecorded: true,
+        });
+      }
+      // CALM Hub refused the record itself: the step fails (with its reason) rather than going on unrecorded.
+      if (e instanceof DecoratorRejected) throw e;
       logger.warn(`Could not update decorator ${decoratorId}: ${oneLine(e)}`);
     }
   };
@@ -283,28 +427,31 @@ export async function runDeployment(
   const owner = service.owner;
   const name = record.architecture;
   const gitOpts = { logger };
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'gitops-deploy-'));
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'platform-connector-'));
   try {
     const architecturePath = path.join(tmp, 'architecture.json');
     await fs.writeFile(architecturePath, `${JSON.stringify(ctx.doc, null, 2)}\n`);
 
-    // The controls gate: nothing reaches Git unless the version passes its pattern and controls.
+    // The controls gate, before any deployment record: nothing reaches Git, nor a deployment decorator, unless the
+    // version passes its pattern and controls. A refusal is recorded as a control evaluation.
     const schema = (ctx.doc as any)?.$schema;
+    let gate: string;
     if (typeof schema === 'string' && parsePatternUrl(schema)) {
-      await update({ status: 'in-progress', notes: `Validating ${record.version} against its pattern and controls` });
+      report({ status: 'validating', notes: `Validating ${record.version} against its pattern and controls` });
       const result = await (deps.validate ?? cliValidate(deps))({ patternUrl: schema, architecturePath, dir: tmp });
       if (result.hasErrors) {
-        const first = result.errors
-          .slice(0, 3)
-          .map(e => (e.path ? `${e.path}: ${e.message}` : e.message))
-          .join('; ');
-        throw new Error(`calm validate found ${result.errors.length} error(s): ${first}`);
+        await refuse(deps, ctx, result.errors, iso());
+        return;
       }
+      gate = `${record.version} passed its pattern and controls`;
     } else {
-      await update({ status: 'in-progress', notes: `${record.version} names no pattern in CALM Hub: validation skipped` });
+      gate = `${record.version} names no pattern in CALM Hub: validation skipped`;
     }
 
-    await update({ notes: `Rendering ${bundle.name}@${bundle.version} against ${record.version}` });
+    record.notes = `${gate}. ${record.notes}`;
+    decoratorId = await hub.createDecorator(record.namespace, decoratorOf(record));
+    report({ status: record.status, notes: record.notes, decoratorId });
+    await update({ status: 'in-progress', notes: `Rendering ${bundle.name}@${bundle.version} against ${record.version}` });
     const dir = await prepareWorkingCopy(deps, name);
     const image = await readOverlayImage(dir);
     if (!image) throw new Error(`${owner}/${name} has no deploy/k8s-overlay image: deploy it once from Backstage first`);
@@ -344,14 +491,19 @@ export async function runDeployment(
       head: branch,
       base: settings.gitops.branch,
       title,
-      body: `${message}\n\nOpened by the CALM Hub extension gitops-deploy for ${settings.environment}.`,
+      body: `${message}\n\nOpened by the CALM Hub extension platform-connector for ${settings.environment}.`,
     });
     if (settings.approval === 'auto') {
       await update({ pullRequest: pr.url, details: pr.url, notes: `Merging pull request #${pr.number}` });
       await mergeWithRetry(deps, owner, name, pr.number, title);
     } else {
       await update({ pullRequest: pr.url, details: pr.url, notes: `Waiting for approval: merge pull request #${pr.number} in Gitea` });
-      await waitForMerge(deps, owner, name, pr.number);
+      state.pendingApproval = { number: pr.number, url: pr.url };
+      try {
+        await waitForMerge(deps, owner, name, pr.number);
+      } finally {
+        delete state.pendingApproval;
+      }
     }
 
     await git(dir, ['fetch', '-q', repo.pushUrl, settings.gitops.branch], { ...gitOpts, auth: settings.gitops.auth });
@@ -378,7 +530,14 @@ export async function runDeployment(
     });
   } catch (e) {
     logger.error(`${record.uniqueId} failed: ${oneLine(e)}`);
-    await update({ status: 'failed', endTime: iso(), notes: `Deployment failed: ${oneLine(e)}` });
+    if (decoratorId === undefined) {
+      // CALM Hub holds no record of the job (the gate could not run, or CALM Hub refused the record): memory does.
+      report({ status: 'failed', endTime: iso(), notes: `Deployment failed: ${oneLine(e)}` });
+      return;
+    }
+    await update({ status: 'failed', endTime: iso(), notes: `Deployment failed: ${oneLine(e)}` }).catch(e2 =>
+      logger.error(`Could not record that ${record.uniqueId} failed: ${oneLine(e2)}`),
+    );
   } finally {
     await fs.rm(tmp, { recursive: true, force: true });
   }

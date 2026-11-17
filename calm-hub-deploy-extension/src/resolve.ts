@@ -4,7 +4,7 @@ import type { Settings } from './config';
 import { HttpError } from './errors';
 import type { Gitea } from './gitea';
 import type { HubClient } from './hub';
-import { BASE_DIR, nodesInManifests } from './deploy/kube';
+import { BASE_DIR, deploymentsInManifests, nodesInManifests, type GitDeployment } from './deploy/kube';
 
 export const CATALOG_INFO_FILE = 'catalog-info.yaml';
 
@@ -62,6 +62,8 @@ export interface ServiceInfo {
   kubernetesNamespace: string;
   /** The architecture nodes the rendered workloads run (their calm.finos.org/node labels). */
   nodes: string[];
+  /** The Deployments `main` asks for (rendered manifests in deploy/k8s). */
+  deployments: GitDeployment[];
 }
 
 /**
@@ -79,7 +81,9 @@ export async function readService(gitea: Gitea, settings: Settings, name: string
   const annotations: Record<string, string> = entity?.metadata?.annotations ?? {};
   if (!annotations[ANN.gitops]) return undefined;
   const files = (await gitea.listFiles(owner, name, ref, BASE_DIR)).filter(f => /\.ya?ml$/.test(f));
-  const texts = await Promise.all(files.map(f => gitea.rawFile(owner, name, ref, `${BASE_DIR}/${f}`)));
+  const texts = (await Promise.all(files.map(f => gitea.rawFile(owner, name, ref, `${BASE_DIR}/${f}`)))).filter(
+    (t): t is string => t !== undefined,
+  );
   const deployBundle =
     annotations[ANN.deployBundle] && annotations[ANN.deployBundleVersion]
       ? { name: annotations[ANN.deployBundle], version: annotations[ANN.deployBundleVersion] }
@@ -95,7 +99,8 @@ export async function readService(gitea: Gitea, settings: Settings, name: string
     ...(deployBundle ? { deployBundle } : {}),
     kubernetesNamespace:
       annotations['backstage.io/kubernetes-namespace'] ?? deployNamespace(settings.kubernetes.namespacePrefix, name),
-    nodes: nodesInManifests(texts.filter((t): t is string => t !== undefined)),
+    nodes: nodesInManifests(texts),
+    deployments: deploymentsInManifests(texts),
   };
 }
 

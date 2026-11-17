@@ -1,49 +1,81 @@
-// Records the deployment extension demo: a terminal (left) on the local cluster and CALM Hub (right), side by side,
-// live, in one take. An architect changes a pattern decision in CALM Hub, deploys the new version from CALM Hub, and
-// the terminal watches Git, Flux and the cluster follow; then a version the pattern forbids stops at the controls
-// gate; then an agent asks the same extension over MCP.
+// Records the Platform Connector demo, narrated: a terminal (left) on the local cluster and CALM Hub (right), side by
+// side, live, in one take. It walks through CALM Hub as it ships (namespaces, a pattern and its decisions, a control,
+// an architecture and the built-in deployment records, which are write-only), plugs the Platform Connector in, and
+// shows it woven into CALM Hub's screens: the home page card, the Extensions tab and the node sidebar's Platform
+// panel. Then drift (a workload scaled behind Git's back), a pattern decision deployed from CALM Hub (the standard
+// record, the firm's approval of the pull request, Flux, and CALM Hub validating the record), a version refused at
+// the controls gate (a control evaluation), and an agent calling the same connector over MCP.
+//
+// The voiceover is narration.cjs, spoken by voice.cjs (macOS `say`, or ElevenLabs with DEMO_TTS=elevenlabs); each beat
+// is also the caption. Every step is held until its beat has been spoken, and the pacing is 3x the first take's
+// (typing, holds and waits).
 //
 // Patterned on calm-backstage's docs/demo/record-cluster-demo.cjs (ttyd + two Playwright pages + ffmpeg).
 //
 // Needs: calm-backstage's stack (yarn hub:up && yarn hub:seed, yarn k8s:up) with the service events-stream deployed
-// through Flux, this extension's Hub (npm run hub:up) and backend (npm start), ttyd, ffmpeg and jq on the PATH, and
-// calm-backstage's node_modules (for Playwright). Writes <out>/calm-hub-deploy-demo.mp4, <out>/chapters.json and two
-// stills (deployment-tab.png, diagram-overlay.png).
+// through Flux and in sync, this extension's Hub (npm run hub:up) and backend (npm start), the GitOps sub-standard in
+// CALM Hub (npx tsx scripts/publish-standard.ts), ttyd, ffmpeg and jq on the PATH, macOS `say`, and calm-backstage's
+// node_modules (for Playwright). Writes <out>/calm-hub-deploy-demo.mp4 (with the voiceover),
+// <out>/calm-hub-deploy-demo.srt, <out>/chapters.json and stills.
 //
-//   node docs/demo/record-hub-demo.cjs [out-dir]
+//   node docs/demo/record-hub-demo.cjs [out-dir]               # the take
+//   node docs/demo/record-hub-demo.cjs [out-dir] --audio-only  # only speak the beats (cached) and time them
 //
 // Each take stores two new architecture versions (CALM Hub versions cannot be deleted): one that flips the broker's
-// storage between PostgreSQL and SQLite, and one with a connection the pattern forbids.
+// storage between PostgreSQL and SQLite, and one with a connection the pattern forbids. It restarts CALM Hub twice
+// (without, then with, the extension) and the backend (manual approval during the take, auto afterwards). It scales
+// stream-app to 0 and asks Flux to put it back. It posts one deliberately broken decorator, which CALM Hub refuses.
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { spawn, execFileSync } = require('child_process');
+const { spawn, execFile, execFileSync } = require('child_process');
 const { createRequire } = require('module');
+const narration = require('./narration.cjs');
+const { speak } = require('./voice.cjs');
 
 const DIR = path.resolve(__dirname, '../..');
 const BACKSTAGE = process.env.CALM_BACKSTAGE_DIR || path.resolve(DIR, '../calm-backstage');
 const { chromium } = createRequire(path.join(BACKSTAGE, 'package.json'))('playwright');
-const OUT = process.argv[2] || fs.mkdtempSync(path.join(os.tmpdir(), 'calm-hub-demo-'));
+const args = process.argv.slice(2);
+const AUDIO_ONLY = args.includes('--audio-only');
+const OUT = args.find(a => !a.startsWith('--')) || fs.mkdtempSync(path.join(os.tmpdir(), 'calm-hub-demo-'));
 const KUBECONFIG = process.env.CALM_KUBECONFIG || path.join(BACKSTAGE, '.kube/config');
 const HUB = 'http://localhost:8090';
-const EXT = `${HUB}/api/calm/extensions/gitops-deploy/api`;
+const EXT = `${HUB}/api/calm/extensions/platform-connector/api`;
+const GITEA = 'http://localhost:3300/api/v1/repos/calm-services';
 const NAME = 'events-stream';
+const DRIFT_WORKLOAD = 'stream-app';
 const TTYD_PORT = 7682;
+const AUDIO_DIR = path.join(DIR, '.work/demo-audio');
 // Terminal on the left, CALM Hub on the right: 1920×1080 together. CALM Hub renders at 1.15× the size it is
 // recorded at, with its sidebar collapsed, so the diagram and the tab have room.
 const TW = 860,
   BW = 1060,
   H = 1080,
   ZOOM = 1.15;
+// Pacing: 3× the first take (see ~/.claude CLAUDE.md "Demo videos"): typing, holds and waits.
+const SLOW = 3;
+const TYPE_DELAY = 18 * SLOW;
+const GAP = 700; // silence after each beat
+// Flux reconciles the service every minute (with up to 5% jitter) and puts a scaled workload back. Showing the drift
+// (the panel, then the tab) takes about 20 s from the start of the scale beat; this leaves a margin. Chapter 4 lingers
+// so that the scale beat starts soon after a Flux run, and the take checks again (and waits) just before it.
+const DRIFT_WINDOW_MS = 30000;
+const FLUX_SHORTEST_INTERVAL_MS = 57000;
+const FLUX_PERIOD_MS = 59500; // as observed in kustomize-controller's log
+// Chapter 4's actions take a little longer than its narration (navigation, the terminal).
+const CHAPTER_4_ACTIONS_MS = 4000;
 
 const CHAPTERS = [
-  'CALM Hub with a deployment extension',
-  'Where the service runs',
-  'An architect changes a pattern decision',
-  'Deploy this version, from CALM Hub',
-  'Deployed: Git, Flux and the record in CALM Hub',
-  'The controls gate',
-  'The same extension, for an agent (MCP)',
+  'CALM Hub today',
+  'Deployment records are write-only',
+  'A Platform Connector',
+  'Woven in',
+  'Drift: what a record can’t know',
+  'A decision changes, and the connector deploys it',
+  'The controls gate, as a control evaluation',
+  'The same connector, for an agent',
+  'The pattern',
 ];
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -52,21 +84,148 @@ const getJson = async url => {
   if (!r.ok) throw new Error(`${url} -> ${r.status}`);
   return r.json();
 };
+/**
+ * A value read from live data that the take types into the terminal (or puts in a URL): it must have the expected
+ * shape, so nothing unexpected is ever typed. Throws early otherwise.
+ */
+const SHAPES = {
+  version: v => typeof v === 'string' && /^\d+\.\d+\.\d+$/.test(v),
+  jti: v => typeof v === 'string' && /^[0-9a-f-]{8,64}$/i.test(v),
+  integer: v => Number.isSafeInteger(v) && v >= 0,
+  sha: v => typeof v === 'string' && /^[0-9a-f]{7,40}$/.test(v),
+};
+const checked = (shape, value, what) => {
+  if (!SHAPES[shape](value)) throw new Error(`${what} is not a ${shape}: ${JSON.stringify(value)}`);
+  return value;
+};
+const run = (cmd, argv, opts = {}) => execFileSync(cmd, argv, { stdio: 'inherit', cwd: DIR, ...opts });
+/** Runs a command without blocking the event loop (the narration and Playwright keep going); resolves with stdout. */
+const capture = (cmd, argv) =>
+  new Promise((resolve, reject) =>
+    execFile(cmd, argv, { cwd: DIR, maxBuffer: 32 * 1024 * 1024 }, (e, stdout) => (e ? reject(e) : resolve(stdout))),
+  );
+const kubectl = argv => capture('kubectl', ['--kubeconfig', KUBECONFIG, '--context', 'calm-backstage', ...argv]);
 let onFailure = async () => {};
 
-(async () => {
-  fs.mkdirSync(OUT, { recursive: true });
-
-  // ---- What this take deploys: the other storage choice than the one running, as the next version.
+/** What this take deploys: the other storage choice than the one running, as the next version. */
+async function plan() {
   const status = await getJson(`${EXT}/namespaces/hackathon/architectures/${NAME}/status`);
   if (!status.managed || !status.ready) throw new Error(`${NAME} is not deployed and ready: ${JSON.stringify(status)}`);
-  const running = await getJson(`${HUB}/calm/namespaces/hackathon/architectures/${NAME}/versions/${status.deployedVersion}`);
+  if (!status.inSync) throw new Error(`${NAME} is not in sync (the drift chapter needs a clean start): ${JSON.stringify(status.drift ?? status.problems)}`);
+  const workload = (status.workloads ?? []).find(w => w.name === DRIFT_WORKLOAD);
+  if (!workload || workload.desired !== 1) throw new Error(`Git should ask for 1 replica of ${DRIFT_WORKLOAD}: ${JSON.stringify(workload)}`);
+  const standards = await getJson(`${HUB}/api/calm/namespaces/hackathon/standards`);
+  if (!standards.values.some(s => s.name === 'gitops-deployment')) {
+    throw new Error('The GitOps sub-standard is not in CALM Hub: run npx tsx scripts/publish-standard.ts first');
+  }
+  const runningVersion = checked('version', status.deployedVersion, 'the running version');
+  const running = await getJson(`${HUB}/calm/namespaces/hackathon/architectures/${NAME}/versions/${runningVersion}`);
   const storage = running.relationships.find(r => r['unique-id'] === 'broker-storage')['relationship-type'].options[0].description;
   const choice = storage === 'PostgreSQL' ? 'SQLite on the broker’s volume' : 'PostgreSQL';
   const bump = v => v.replace(/(\d+)$/, n => String(Number(n) + 1));
-  const valid = bump(status.latestVersion);
-  const invalid = bump(valid);
-  console.log(`running ${status.deployedVersion} (${storage}); will store ${valid} (${choice}) and ${invalid} (forbidden)`);
+  const valid = checked('version', bump(checked('version', status.latestVersion, 'the latest version')), 'the next version');
+  return {
+    name: NAME,
+    running: runningVersion,
+    storage: storage === 'PostgreSQL' ? 'PostgreSQL' : 'SQLite',
+    choice,
+    valid,
+    invalid: checked('version', bump(valid), 'the version after it'),
+    card: await cardCounts(),
+  };
+}
+
+/** The home page card's counts (its first stats block), as the narration speaks them. */
+async function cardCounts() {
+  const reply = await getJson(`${EXT}/card`);
+  const stats = (reply.blocks ?? []).find(b => b.type === 'stats');
+  const value = label => {
+    const n = Number(stats?.items?.find(i => i.label === label)?.value);
+    if (!Number.isInteger(n)) throw new Error(`the card has no ${label} count: ${JSON.stringify(reply)}`);
+    return n;
+  };
+  return { services: value('Services'), inSync: value('In sync'), drifted: value('Drifted') };
+}
+
+/**
+ * Every beat this recorder speaks is in narration.cjs and every beat there is spoken: fails fast, before anything is
+ * touched. Reads the beat ids from this file's own beat(), narrate() and termBeat() calls, so ids stay literals.
+ * Also builds the narration for the other storage choice, so both branches of its text are exercised.
+ */
+function checkBeats(ctx) {
+  const other = ctx.choice.startsWith('SQLite')
+    ? { ...ctx, storage: 'SQLite', choice: 'PostgreSQL' }
+    : { ...ctx, storage: 'PostgreSQL', choice: 'SQLite on the broker’s volume' };
+  narration(other);
+  const ids = new Set(narration(ctx).map(b => b.id));
+  const source = fs.readFileSync(__filename, 'utf-8');
+  const used = new Set([...source.matchAll(/\b(?:beat|narrate|termBeat)\(\s*'([a-z0-9-]+)'/g)].map(m => m[1]));
+  const missing = [...used].filter(id => !ids.has(id));
+  const unused = [...ids].filter(id => !used.has(id));
+  if (missing.length || unused.length) {
+    throw new Error(`narration.cjs and the recorder disagree: no beat for ${missing.join(', ') || '-'}; never spoken: ${unused.join(', ') || '-'}`);
+  }
+}
+
+/** When Flux last reconciled calm-<name> (kustomize-controller's log, last 3 minutes), in ms since the epoch. */
+async function lastFluxRun() {
+  const out = await kubectl(['-n', 'flux-system', 'logs', 'deploy/kustomize-controller', '--since=3m']);
+  const times = out
+    .split('\n')
+    .filter(l => l.includes(`"name":"calm-${NAME}"`) && l.includes('Reconciliation finished'))
+    .map(l => {
+      try {
+        return Date.parse(JSON.parse(l).ts);
+      } catch {
+        return NaN;
+      }
+    })
+    .filter(t => !Number.isNaN(t));
+  return times.length ? Math.max(...times) : undefined;
+}
+
+/**
+ * How long chapter 4 should linger, in total, so that the scale beat (expected `aheadMs` from now) starts soon after
+ * one of Flux's runs, with DRIFT_WINDOW_MS before the next: 0 when it would anyway, or when Flux's log can't be read.
+ */
+async function fluxLinger(aheadMs) {
+  const last = await lastFluxRun().catch(() => undefined);
+  if (last === undefined) return 0;
+  const earliest = 3000;
+  const latest = FLUX_SHORTEST_INTERVAL_MS - DRIFT_WINDOW_MS;
+  const phase = (((Date.now() + aheadMs - last) % FLUX_PERIOD_MS) + FLUX_PERIOD_MS) % FLUX_PERIOD_MS;
+  if (phase >= earliest && phase <= latest) return 0;
+  const target = earliest + 3000;
+  return phase < earliest ? target - phase : FLUX_PERIOD_MS - phase + target;
+}
+
+const srtTime = s => {
+  const ms = Math.round(s * 1000);
+  const p = (n, w = 2) => String(n).padStart(w, '0');
+  return `${p(Math.floor(ms / 3600000))}:${p(Math.floor(ms / 60000) % 60)}:${p(Math.floor(ms / 1000) % 60)},${p(ms % 1000, 3)}`;
+};
+
+(async () => {
+  fs.mkdirSync(OUT, { recursive: true });
+  const ctx = await plan();
+  checkBeats(ctx);
+  const beats = await speak(narration(ctx), AUDIO_DIR);
+  const byId = new Map(beats.map(b => [b.id, b]));
+  const spoken = beats.reduce((s, b) => s + b.seconds + GAP / 1000, 0);
+  console.log(`running ${ctx.running} (${ctx.storage}); will store ${ctx.valid} (${ctx.choice}) and ${ctx.invalid} (forbidden)`);
+  console.log(`${beats.length} beats, ${Math.round(spoken)} s of narration (${(spoken / 60).toFixed(1)} min), ${beats.describe}`);
+  if (AUDIO_ONLY) {
+    for (const b of beats) console.log(`${b.seconds.toFixed(1).padStart(5)} s  ${b.id}`);
+    return;
+  }
+
+  // ---- Off camera: CALM Hub as it ships. Stop the backend, restart CALM Hub without the extension.
+  try {
+    run('pkill', ['-f', `${DIR}/node_modules/.bin/tsx src/main.ts`], { stdio: 'ignore' });
+  } catch {
+    // not running
+  }
+  run('scripts/hub-up.sh', ['--without-extensions'], { stdio: 'ignore' });
 
   const prompts = path.join(OUT, 'prompts');
   fs.writeFileSync(prompts, '');
@@ -114,22 +273,33 @@ let onFailure = async () => {};
   const B = await recorded(BW, 'hub', ZOOM);
   const term = T.page;
   const page = B.page;
+  const restoreBackend = () => {
+    try {
+      run(path.join(__dirname, 'start-extension.sh'), ['auto'], { stdio: 'ignore' });
+    } catch (e) {
+      console.error('could not restart the backend with auto approval:', e.message);
+    }
+  };
   onFailure = async () => {
     await term.screenshot({ path: path.join(OUT, 'failed-terminal.png') }).catch(() => {});
     await page.screenshot({ path: path.join(OUT, 'failed-hub.png') }).catch(() => {});
     await T.context.close();
     await B.context.close();
     await browser.close();
+    // Leave the stack as it was: CALM Hub with the extension, the backend on auto approval.
+    try {
+      run('scripts/hub-up.sh', [], { stdio: 'ignore' });
+    } catch {}
+    restoreBackend();
   };
   page.setDefaultTimeout(60000);
   const pause = ms => page.waitForTimeout(ms);
+  const hold = ms => pause(ms * SLOW);
   let t0 = Date.now();
+  const now = () => (Date.now() - t0) / 1000;
   const marks = [];
-  const log = m => console.log(`${((Date.now() - t0) / 1000).toFixed(0).padStart(4)}s ${m}`);
-  const chapter = i => {
-    marks.push({ chapter: i + 1, title: CHAPTERS[i], start: Math.round((Date.now() - t0) / 1000) });
-    log(`chapter ${i + 1}: ${CHAPTERS[i]}`);
-  };
+  const said = [];
+  const log = m => console.log(`${now().toFixed(0).padStart(4)}s ${m}`);
 
   // ---- Terminal: type a command, wait for the prompt to come back (the rc counts prompts in a file).
   async function until(check, timeout, what) {
@@ -139,10 +309,10 @@ let onFailure = async () => {};
       await sleep(250);
     }
   }
-  async function sh(cmd, { wait = true, timeout = 180000, after = 1200 } = {}) {
+  async function sh(cmd, { wait = true, timeout = 300000, after = 1200 * SLOW } = {}) {
     const before = promptCount();
-    await term.keyboard.type(cmd, { delay: 18 });
-    await sleep(250);
+    await term.keyboard.type(cmd, { delay: TYPE_DELAY });
+    await sleep(250 * SLOW);
     await term.keyboard.press('Enter');
     const done = () => until(() => promptCount() > before, timeout, cmd);
     if (!wait) return done;
@@ -150,42 +320,122 @@ let onFailure = async () => {};
     await sleep(after);
     return undefined;
   }
-  const say = (text, after = 1200) => sh(`# ${text}`, { after });
+  const comment = text => sh(`# ${text}`, { after: 400 * SLOW });
+  const clear = () => sh('clear', { after: 300 });
 
   // ---- CALM Hub helpers.
-  async function caption(text) {
-    await page.evaluate(t => {
-      let el = document.getElementById('__demo_caption');
-      if (!el) {
-        el = document.createElement('div');
-        el.id = '__demo_caption';
-        Object.assign(el.style, {
-          position: 'fixed',
-          left: '50%',
-          bottom: '28px',
-          transform: 'translateX(-50%)',
-          zIndex: 99999,
-          background: 'rgba(20,24,33,0.92)',
-          color: '#fff',
-          font: '600 19px/1.35 system-ui, sans-serif',
-          padding: '12px 22px',
-          borderRadius: '10px',
-          maxWidth: '86%',
-          textAlign: 'center',
-          boxShadow: '0 6px 24px rgba(0,0,0,0.3)',
-          border: '1px solid rgba(122,162,255,0.4)',
-          pointerEvents: 'none',
-        });
-        document.body.appendChild(el);
+  async function overlay(id, text, style) {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await drawOverlay(id, text, style);
+      } catch (e) {
+        // The page navigated under us: wait for it and draw again.
+        if (attempt >= 3) throw e;
+        await page.waitForLoadState('domcontentloaded').catch(() => {});
+        await sleep(500);
       }
-      el.textContent = t;
-    }, text);
+    }
   }
-  /** Shows an architecture version (hash route: no reload, so no blank frame). */
-  const show = async (version, tab) => {
-    await page.evaluate(h => (window.location.hash = h), `#/hackathon/architectures/${NAME}/${version}${tab ? `?tab=${tab}` : ''}`);
-    await pause(1200);
+  async function drawOverlay(id, text, style) {
+    await page.evaluate(
+      ({ id, text, style }) => {
+        let el = document.getElementById(id);
+        if (!el) {
+          el = document.createElement('div');
+          el.id = id;
+          Object.assign(el.style, style);
+          document.body.appendChild(el);
+        }
+        el.textContent = text;
+        el.style.display = text ? 'block' : 'none';
+      },
+      { id, text, style },
+    );
+  }
+  const caption = text =>
+    overlay('__demo_caption', text, {
+      position: 'fixed',
+      left: '50%',
+      bottom: '26px',
+      transform: 'translateX(-50%)',
+      zIndex: 99999,
+      background: 'rgba(14,18,28,0.94)',
+      color: '#fff',
+      font: '500 20px/1.4 system-ui, sans-serif',
+      padding: '14px 24px',
+      borderRadius: '10px',
+      width: '88%',
+      textAlign: 'left',
+      boxShadow: '0 6px 24px rgba(0,0,0,0.35)',
+      border: '1px solid rgba(122,162,255,0.45)',
+      pointerEvents: 'none',
+    });
+  const badge = text =>
+    overlay('__demo_badge', text, {
+      position: 'fixed',
+      right: '18px',
+      top: '14px',
+      zIndex: 99999,
+      background: 'rgba(122,162,255,0.95)',
+      color: '#0b1020',
+      font: '700 17px/1.2 system-ui, sans-serif',
+      padding: '8px 14px',
+      borderRadius: '8px',
+      pointerEvents: 'none',
+    });
+  /** The overlays are lost when the page reloads: put them back. */
+  let lastCaption = '';
+  let lastBadge = '';
+  const restoreOverlays = async () => {
+    await badge(lastBadge);
+    await caption(lastCaption);
   };
+
+  // ---- Narration: one beat at a time, in order; the caption shows the words being spoken.
+  let voice = Promise.resolve();
+  const narrate = id =>
+    (voice = voice.then(async () => {
+      const b = byId.get(id);
+      if (!b) throw new Error(`no beat ${id}`);
+      lastCaption = b.text;
+      await caption(b.text);
+      said.push({ id, start: now(), seconds: b.seconds, text: b.text, file: b.file });
+      log(`  "${id}" (${b.seconds.toFixed(1)} s)`);
+      await sleep(b.seconds * 1000 + GAP);
+    }));
+  /** A beat, and its actions one after another while it is spoken; resolves when both are done (no beat is cut off). */
+  const beat = (id, ...actions) =>
+    Promise.all([
+      narrate(id),
+      (async () => {
+        for (const a of actions) await a();
+      })(),
+    ]);
+  /** A beat whose terminal part starts with its short comment. */
+  const termBeat = (id, ...cmds) => async () => {
+    const b = byId.get(id);
+    if (b.term) await comment(b.term);
+    for (const c of cmds) await (typeof c === 'string' ? sh(c) : c());
+  };
+  const chapter = async i => {
+    marks.push({ chapter: i + 1, title: CHAPTERS[i], start: Math.round(now()) });
+    log(`chapter ${i + 1}: ${CHAPTERS[i]}`);
+    lastBadge = `${i + 1} · ${CHAPTERS[i]}`;
+    await badge(lastBadge);
+  };
+
+  /** Goes to a CALM Hub route (hash change: no reload, so no blank frame and the overlays stay). */
+  const route = async hash => {
+    await page.evaluate(h => (window.location.hash = h), hash);
+    await hold(600);
+  };
+  /** Shows an architecture version, optionally on a tab. */
+  const show = async (version, tabName) => {
+    await route(`#/hackathon/architectures/${NAME}/${version}${tabName ? `?tab=${tabName}` : ''}`);
+    await hold(600);
+  };
+  /** An architecture's own tabs (the node sidebar has a JSON tab of its own, outside the tablist). */
+  const mainTab = name => page.getByRole('tablist').getByRole('tab', { name, exact: true });
   /** Fits the diagram to its pane (it opens at the zoom it had, which can cut nodes off). */
   const fit = async () => {
     const button = page.getByRole('button', { name: 'Fit View' });
@@ -193,8 +443,8 @@ let onFailure = async () => {};
     await pause(600);
   };
   const tab = async name => {
-    await page.getByRole('tab', { name }).click();
-    await pause(1000);
+    await mainTab(name).click();
+    await hold(800);
     if (name === 'Diagram') await fit();
   };
   /** Re-reads the Extensions tab (it loads once when shown). */
@@ -205,202 +455,486 @@ let onFailure = async () => {};
     await pause(800);
   };
   const extensionText = text => page.locator('main, body').getByText(text).first();
-  const scrollDown = async px => {
-    await page.mouse.move(BW * ZOOM * 0.6, H * ZOOM * 0.5);
+  const scrollAt = async (x, px) => {
+    await page.mouse.move(x, H * ZOOM * 0.45);
     await page.mouse.wheel(0, px);
-    await pause(700);
+    await hold(600);
   };
+  const scroll = px => scrollAt(BW * ZOOM * 0.6, px);
+  const latestPr = async state => (await getJson(`${GITEA}/${NAME}/pulls?state=${state}&limit=1`))[0];
+  const collapseSidebar = async () => {
+    const collapse = page.getByRole('button', { name: 'Collapse sidebar' });
+    if (await collapse.isVisible().catch(() => false)) await collapse.click();
+  };
+  const hubUrl = (version, tabName) => `${HUB}/#/hackathon/architectures/${NAME}/${version}${tabName ? `?tab=${tabName}` : ''}`;
+  /** Leaves CALM Hub for another page (Gitea), keeping the chapter badge and caption on it. */
+  const visit = async url => {
+    await page.goto(url);
+    await page.waitForLoadState('domcontentloaded');
+    await restoreOverlays();
+    await hold(400);
+  };
+  /** Back to CALM Hub on a version and tab, as it was left (dark, sidebar collapsed). */
+  const backToHub = async (version, tabName) => {
+    await page.goto(hubUrl(version));
+    await mainTab(tabName).waitFor();
+    await collapseSidebar();
+    await restoreOverlays();
+    await tab(tabName);
+  };
+  /** Picks out rows of the Decorators tab by their field names. */
+  const highlight = async keys => {
+    await page.evaluate(keys => {
+      for (const el of document.querySelectorAll('body *')) {
+        if (el.children.length === 0 && keys.includes(el.textContent.trim())) {
+          const row = el.parentElement;
+          row.style.background = 'rgba(122,162,255,0.18)';
+          row.style.outline = '1px solid rgba(122,162,255,0.6)';
+          row.style.borderRadius = '6px';
+        }
+      }
+    }, keys);
+  };
+  /** The deployment record on the Decorators tab, read again, with its status and notes picked out. */
+  const record = async () => {
+    await tab('JSON');
+    await tab('Decorators');
+    await page.getByText('notes', { exact: true }).first().waitFor();
+    await highlight(['status', 'notes']);
+    await hold(300);
+  };
+  /** The diagram, close enough to read each node's badge. */
+  const closeDiagram = async () => {
+    await tab('Diagram');
+    await page.getByRole('button', { name: 'Zoom In' }).click();
+    await hold(300);
+  };
+  const closeDetails = async () => {
+    const close = page.getByRole('button', { name: 'Close details' });
+    if (await close.isVisible().catch(() => false)) {
+      await close.click();
+      await pause(500);
+    }
+  };
+  const node = id => page.locator(`.react-flow__node[data-id="${id}"]`);
+  /**
+   * Selects a node so the sidebar opens (and the connector's Platform panel is fetched again: re-clicking a selected
+   * node does not fetch it), and waits for `expect` in it.
+   */
+  const selectNode = async (id, expect, timeout = 30000) => {
+    await closeDetails();
+    await node(id).click();
+    await page.getByText(expect).first().waitFor({ timeout });
+    await hold(300);
+  };
+  /** A built-in view's badge on a node (its aria-label is "<view> · Built-in: <label>"). */
+  const viewBadge = (view, id) =>
+    (id ? node(id) : page).getByRole('button', { name: new RegExp(`^${view} · Built-in:`) }).first();
+  const newest = async version =>
+    (await getJson(`${EXT}/history/namespaces/hackathon/architectures/${NAME}/deployments`)).deployments.find(d => d.version === version);
+  /** Polls `check` (async) until it gives something truthy. */
+  const poll = async (check, timeout, what) => {
+    const end = Date.now() + timeout;
+    for (;;) {
+      const v = await check().catch(() => undefined);
+      if (v) return v;
+      if (Date.now() > end) throw new Error(`timed out waiting for ${what}`);
+      await sleep(1000);
+    }
+  };
+  /**
+   * A CALM Hub or Gitea step that only shows something: on failure it logs a WARNING and the take carries on. Used once
+   * the take has stored a version, where a throw would strand state (an open pull request, a job lost when the backend
+   * restarts); checks of real state (the record exists, the pull request, completed, refused) still throw.
+   */
+  const soft = (what, fn) => async () => {
+    try {
+      await fn();
+    } catch (e) {
+      log(`WARNING: ${what} (${String(e.message).split('\n')[0]}); carrying on`);
+    }
+  };
+  /** Waits, when Flux's next run is too close to show the drift before Flux puts the workload back. */
+  const waitForFluxWindow = async () => {
+    const last = await lastFluxRun().catch(() => undefined);
+    if (last === undefined) {
+      log('could not read when Flux last ran: scaling without waiting');
+      return;
+    }
+    if (last + FLUX_SHORTEST_INTERVAL_MS - Date.now() >= DRIFT_WINDOW_MS) return;
+    log('Flux runs again soon: waiting for that run before scaling');
+    // No stale caption over the hold.
+    lastCaption = '';
+    await caption('');
+    await poll(async () => (await lastFluxRun()) > last, 75000, 'Flux to run');
+    await sleep(1500);
+  };
+  /** A pause after a beat, with the caption cleared (it would otherwise hang over the pause). */
+  const linger = async ms => {
+    if (ms < 300) return;
+    await voice;
+    lastCaption = '';
+    await caption('');
+    await sleep(ms);
+  };
+  const drifted = `${DRIFT_WORKLOAD} runs 0 replicas; Git asks for 1`;
 
-  // ---- Off camera (trimmed): the terminal prompt, CALM Hub on the running version.
+  // ---- Off camera (trimmed): the terminal prompt, CALM Hub's home page, without extensions.
   await term.goto(`http://127.0.0.1:${TTYD_PORT}/`);
   await until(() => promptCount() > 0, 30000, 'the terminal prompt');
-  await page.goto(`${HUB}/#/hackathon/architectures/${NAME}/${status.deployedVersion}`);
-  await page.getByRole('tab', { name: 'Extensions' }).waitFor();
+  await page.goto(`${HUB}/#/`);
+  await page.locator('a[href="#/namespace/hackathon"]').waitFor();
   const dark = page.getByRole('button', { name: 'Switch to dark theme' });
   if (await dark.isVisible().catch(() => false)) await dark.click();
-  const collapse = page.getByRole('button', { name: 'Collapse sidebar' });
-  if (await collapse.isVisible().catch(() => false)) await collapse.click();
-  await pause(1000);
-  await fit();
   await pause(1500);
+  if (await page.getByText('Platform Connector').count()) throw new Error('CALM Hub still shows the Platform Connector');
+  const prBefore = await latestPr('all');
   t0 = Date.now();
-  const both = (...parts) => Promise.all(parts.map(f => f()));
 
-  // ---- 1. CALM Hub with a deployment extension
-  chapter(0);
-  await both(
-    async () => {
-      await say('CALM Hub has loaded the gitops-deploy extension: its routes and commands');
-      await sh(
-        `curl -s $HUB/api/calm/extensions | jq '.values[] | select(.id=="gitops-deploy") | {id, routes: [.routes[] | "\\(.method) \\(.path) [\\(.scope)]"], commands: (.commands | keys)}'`,
-        { after: 2500 },
-      );
-    },
-    async () => {
-      await caption('CALM Hub (right) and a terminal on the local Kubernetes cluster (left)');
-      await pause(4500);
-      await caption('events-stream: a Nisshi event-streaming service, made from a CALM pattern and deployed by Flux');
-      await pause(4500);
-      await caption('The Deployments overlay: each deployed node shows the deployment recorded on this version');
-      await pause(4000);
-    },
+  // ---- 1. CALM Hub today
+  await chapter(0);
+  await beat('hub-home', () => page.locator('a[href="#/namespace/hackathon"]').hover());
+  await beat('namespace', async () => {
+    await page.locator('a[href="#/namespace/hackathon"]').click();
+    await page.getByRole('tab', { name: /^Patterns/ }).waitFor();
+    await hold(800);
+  });
+  await beat('pattern', async () => {
+    await page.getByRole('tab', { name: /^Patterns/ }).click();
+    await hold(600);
+    await page.getByRole('button', { name: 'Event Streaming (Nisshi)' }).click();
+    await page.getByRole('button', { name: 'Show decisions' }).waitFor();
+    await fit();
+  });
+  await beat('decisions', () => page.getByRole('button', { name: 'Show decisions' }).click());
+  await beat('control', async () => {
+    await page.locator('a[href="#/domain/hackathon-security"]').click();
+    await page.getByRole('link', { name: 'Permitted Connection' }).click();
+    await page.getByText('Every connection between components must name its protocol').first().waitFor();
+  });
+  await beat('architecture', async () => {
+    await show(ctx.running);
+    await mainTab('Diagram').waitFor();
+    await collapseSidebar();
+    await fit();
+    if (await mainTab('Extensions').isVisible()) throw new Error('CALM Hub still shows an Extensions tab');
+    await page.screenshot({ path: path.join(OUT, 'hub-before.png') });
+  });
+  await beat('connection-control', async () => {
+    await page.locator('.react-flow__edge[aria-label="Edge from api-gateway to stream-app"]').click({ force: true });
+    await page.getByText('Connections must be permitted and encrypted in transit').first().waitFor();
+  });
+  await beat(
+    'registry-before',
+    termBeat('registry-before', `curl -s $HUB/api/calm/extensions | jq -c '.values[] | {id, routes: (.routes | length), contributes: (.contributes | keys)}'`),
   );
-  await page.screenshot({ path: path.join(OUT, 'diagram-overlay.png') });
 
-  // ---- 2. Where the service runs
-  chapter(1);
-  await both(
-    async () => {
-      await sh('clear', { after: 300 });
-      await say(`The cluster runs version ${status.deployedVersion}: broker storage ${storage}`);
-      await sh('k -n $NS get deploy', { after: 1500 });
-      await say('The extension reads Git and Flux; the status command, through the CALM Hub proxy');
-      await sh(
-        `curl -s $EXT/namespaces/hackathon/architectures/${NAME}/status | jq '{deployedVersion, latestVersion, deploymentRules, ready, commit}'`,
-        { after: 2500 },
-      );
-    },
-    async () => {
-      await tab('Extensions');
-      await page.getByText('Deployment', { exact: true }).first().waitFor();
-      await caption('The extension adds a Deployment tab and a "Deploy this version" action to every architecture');
-      await pause(5000);
-      await caption('Where this version runs: the environment, the deployment rules, Flux and the commit it applied');
-      await pause(5000);
-    },
+  // ---- 2. Deployment records are write-only
+  await chapter(1);
+  await beat('overlay', closeDetails, closeDiagram);
+  await beat('badge', () => viewBadge('Deployments', 'stream-app').click());
+  await beat('view-all', async () => {
+    await page.getByText('View all Deployments', { exact: true }).click();
+    await page.waitForURL(/tab=decorators/);
+    await page.getByText('notes', { exact: true }).first().waitFor();
+    await highlight(['status', 'start-time', 'end-time', 'notes']);
+  });
+  await narrate('any-tool');
+  await beat('write-only', () => scroll(300));
+
+  // ---- 3. A Platform Connector
+  await chapter(2);
+  await beat('connector', clear);
+  await beat('manifest', termBeat('manifest', `jq '{id, name, provider, hubApi}' extension/platform-connector/extension.json`));
+  await beat('routes', termBeat('routes', `jq -r '.routes[] | "\\(.method)\\t\\(.scope)\\t\\(.path)"' extension/platform-connector/extension.json | column -t`));
+  await beat('contributes', clear, termBeat('contributes', `jq -c '.contributes | to_entries[] | {(.key): [.value[].title]}' extension/platform-connector/extension.json`));
+  await beat('commands', termBeat('commands', `jq -r '.commands | to_entries[] | "\\(.key)  → route \\(.value.route), input: \\(.value.input.required | join(", "))"' extension/platform-connector/extension.json`));
+  await beat('start-backend', clear, termBeat('start-backend', 'start-extension.sh manual'));
+  await beat('restart', termBeat('restart', `scripts/hub-up.sh 2>&1 | grep -E 'Recreated|Started|Waiting'`));
+  await narrate('signed');
+  await beat('registry-after', clear, termBeat('registry-after', `curl -s $HUB/api/calm/extensions | jq -r '.values[].id'`));
+  await beat('mcp-tools', termBeat('mcp-tools', 'mcp.sh --list ext_'));
+
+  // ---- 4. Woven in
+  await chapter(3);
+  await voice;
+  // A reload, so CALM Hub's UI reads its extension registry again (a hash-only goto would not reload).
+  await page.goto(`${HUB}/#/`);
+  await page.reload();
+  await page.getByText('Platform Connector').first().waitFor();
+  await restoreOverlays();
+  // The narration speaks the counts read before the take: they must still be what the card shows.
+  const card = await cardCounts();
+  if (JSON.stringify(card) !== JSON.stringify(ctx.card)) {
+    throw new Error(`the card now says ${JSON.stringify(card)}, the narration says ${JSON.stringify(ctx.card)}: retake`);
+  }
+  // Flux puts a scaled workload back at its next run, so chapter 5's scale should start soon after one. Work out now
+  // how far off that is, and spread any wait over chapter 4's pauses instead of holding silently before chapter 5.
+  const chapter4 = ['home-card', 'blocks', 'ext-tab', 'tab-facts', 'node-panel', 'node-facts', 'log-calls'];
+  const ahead = chapter4.reduce((ms, id) => ms + byId.get(id).seconds * 1000 + GAP, CHAPTER_4_ACTIONS_MS);
+  const lingerEach = (await fluxLinger(ahead)) / chapter4.length;
+  if (lingerEach) log(`lingering ${(lingerEach / 1000).toFixed(1)} s after each beat of chapter 4, to start the scale just after a Flux run`);
+  await beat('home-card', () => page.getByText('Platform Connector').first().hover());
+  await linger(lingerEach);
+  await narrate('blocks');
+  await linger(lingerEach);
+  await beat('ext-tab', async () => {
+    await show(ctx.running, 'extensions');
+    await mainTab('Extensions').waitFor();
+    await collapseSidebar();
+    await page.getByRole('button', { name: 'Deploy this version' }).waitFor();
+    await page.getByRole('button', { name: 'Deploy this version' }).hover();
+  });
+  await linger(lingerEach);
+  await beat('tab-facts', async () => {
+    await extensionText(`This version (${ctx.running}) is the one running`).waitFor();
+    await page.screenshot({ path: path.join(OUT, 'deployment-tab.png') });
+  });
+  await linger(lingerEach);
+  await beat('node-panel', async () => {
+    await tab('Diagram');
+    await selectNode(DRIFT_WORKLOAD, `In sync: ${DRIFT_WORKLOAD} runs as Git asks.`);
+  });
+  await linger(lingerEach);
+  await beat('node-facts', () => scrollAt(BW * ZOOM * 0.85, 300));
+  await linger(lingerEach);
+  await beat('log-calls', clear, termBeat('log-calls', 'ext-log.sh 4'));
+  await linger(lingerEach);
+
+  // ---- 5. Drift: what a record can't know (quickly: Flux puts the replicas back at its next run)
+  await voice;
+  await waitForFluxWindow();
+  await chapter(4);
+  await beat('scale', clear, termBeat('scale', () => sh(`k -n $NS scale deploy ${DRIFT_WORKLOAD} --replicas=0`, { after: 500 })));
+  await beat('drift-panel', async () => {
+    try {
+      await selectNode(DRIFT_WORKLOAD, drifted, 15000);
+    } catch (e) {
+      throw new Error(`Flux healed ${DRIFT_WORKLOAD} before the drift was shown (retake; nothing else changed): ${e.message}`);
+    }
+  });
+  await beat('drift-tab', async () => {
+    await refreshExtensions();
+    try {
+      await extensionText(drifted).waitFor({ timeout: 15000 });
+    } catch (e) {
+      throw new Error(`Flux healed ${DRIFT_WORKLOAD} before the drift was shown (retake; nothing else changed): ${e.message}`);
+    }
+  });
+  await beat('badge-stale', async () => {
+    await tab('Diagram');
+    await page.getByRole('button', { name: 'Zoom In' }).click();
+    await viewBadge('Deployments', DRIFT_WORKLOAD).click();
+  });
+  await beat(
+    'reconcile',
+    clear,
+    termBeat('reconcile', `reconcile.sh ${NAME} && k -n $NS rollout status deploy/${DRIFT_WORKLOAD} --timeout=120s`, `k -n $NS get deploy ${DRIFT_WORKLOAD}`),
   );
-  await page.screenshot({ path: path.join(OUT, 'deployment-tab.png') });
-
-  // ---- 3. An architect changes a pattern decision
-  chapter(2);
-  await both(
+  await poll(
     async () => {
-      await sh('clear', { after: 300 });
-      await say(`An architect changes the pattern's storage decision to ${choice}`);
-      await sh(`npx tsx scripts/new-version.ts hackathon ${NAME} --choose "broker-storage=${choice}"`, { after: 2500 });
+      const s = await getJson(`${EXT}/namespaces/hackathon/architectures/${NAME}/status`);
+      const w = (s.workloads ?? []).find(x => x.name === DRIFT_WORKLOAD);
+      return s.inSync && w && w.ready === 1 && w.replicas === 1;
     },
-    async () => {
-      await caption('A pattern allows only its decisions to change: here, where the broker keeps its topics');
-      await pause(3000);
-    },
+    120000,
+    `${DRIFT_WORKLOAD} to be back to 1/1 and in sync`,
   );
-  await show(valid);
-  await fit();
-  await caption(`Version ${valid} in CALM Hub: the broker now keeps its topics in ${choice.startsWith('SQLite') ? 'SQLite' : 'PostgreSQL'}`);
-  await pause(4500);
-  await tab('Extensions');
-  await extensionText(`this page shows ${valid}`).waitFor();
-  await caption(`The tab warns: the cluster still runs ${status.deployedVersion}`);
-  await pause(4500);
+  await beat('in-sync', () => selectNode(DRIFT_WORKLOAD, `In sync: ${DRIFT_WORKLOAD} runs as Git asks.`));
 
-  // ---- 4. Deploy this version
-  chapter(3);
-  await page.getByRole('button', { name: 'Deploy this version' }).click();
-  await page.getByRole('button', { name: 'Run' }).waitFor();
-  await caption('CALM Hub asks first, checks the caller can write to the namespace, and audits the call');
-  await pause(4500);
+  // ---- 6. A decision changes, and the connector deploys it
+  await chapter(5);
+  await beat('new-version', clear, termBeat('new-version', `npx tsx scripts/new-version.ts hackathon ${NAME} --choose "broker-storage=${ctx.choice}"`));
+  // From here the take has stored a version: steps that only show something are soft (see soft()), with a shorter wait.
+  page.setDefaultTimeout(15000);
+  await beat('diagram-new', soft('showing the new version', async () => {
+    await closeDetails();
+    await show(ctx.valid);
+    await fit();
+  }));
+  // Hard: the page must show the version about to be deployed before Deploy/Run is clicked (no job exists yet).
+  await beat('warning', async () => {
+    await tab('Extensions');
+    await extensionText(`this page shows ${ctx.valid}`).waitFor();
+  });
+  await beat('click', async () => {
+    await page.getByRole('button', { name: 'Deploy this version' }).click();
+    await page.getByRole('button', { name: 'Run' }).waitFor();
+  });
   await page.getByRole('button', { name: 'Run' }).click();
-  const watching = await sh(`watch-deploy.sh ${NAME} ${valid}`, { wait: false });
-  await caption('The extension validates the version, re-renders the deployment rules and opens a pull request');
-  await pause(3000);
-  await tab('Diagram');
-  await caption('Every step updates the deployment decorator: the overlay follows it live');
+  let watching;
+  await beat('run', clear, termBeat('run', async () => {
+    watching = await sh(`UNTIL=approval watch-deploy.sh ${NAME} ${ctx.valid}`, { wait: false });
+  }), soft('the Extensions tab', refreshExtensions));
+  // No record until the version has passed the controls gate.
+  await poll(async () => typeof (await newest(ctx.valid))?.id === 'number', 180000, `the deployment record on ${ctx.valid}`);
+  await beat('record-pending', soft('the record', record));
+  await beat('steps', soft('the record', record));
+  await watching();
+  await beat('waiting', soft('the record', record));
+  await beat('overlay-progress', soft('the in-progress badge', async () => {
+    await closeDiagram();
+    await viewBadge('Deployments').click({ timeout: 5000 });
+  }));
+
+  const pr = await latestPr('open');
+  if (!pr || (prBefore && pr.number <= prBefore.number)) throw new Error('no new pull request is open');
+  checked('integer', pr.number, 'the pull request number');
+  const prPage = `http://localhost:3300/calm-services/${NAME}/pulls/${pr.number}`;
+  const [prCommit] = await getJson(`${GITEA}/${NAME}/pulls/${pr.number}/commits`);
+  checked('sha', prCommit?.sha, 'the pull request commit');
+  await beat('pr', clear, soft('the pull request page', () => visit(prPage)), termBeat('pr', `curl -s "$GITEA/${NAME}/pulls?state=open" | jq -r '.[] | "#\\(.number)  \\(.title)\\n    \\(.head.ref) → \\(.base.ref)"'`));
+  await beat('files', soft('the files page', () => visit(`${prPage}/files`)), termBeat('files', `curl -s $GITEA/${NAME}/pulls/${pr.number}/files | jq -r '.[] | "\\(.filename)  +\\(.additions) -\\(.deletions)"' | column -t`), soft('scrolling the files', () => scroll(700)));
+  await beat('commit', clear, soft('the commit page', () => visit(`http://localhost:3300/calm-services/${NAME}/commit/${prCommit.sha}`)), termBeat('commit', `curl -s $GITEA/${NAME}/pulls/${pr.number}/commits | jq -r '.[0].commit.message'`));
+  await beat('approve', soft('the pull request page', () => visit(prPage)), termBeat('approve', `approve-pr.sh ${NAME} ${pr.number}`), soft('the merged pull request', () => visit(prPage)));
+
+  watching = undefined;
+  await beat('flux', clear, async () => {
+    watching = await sh(`watch-deploy.sh ${NAME} ${ctx.valid}`, { wait: false });
+  }, soft('back to CALM Hub', () => backToHub(ctx.valid, 'Decorators')), soft('the record', record));
   await watching();
   log('deployment finished');
-  await pause(3500);
+  await beat('completed', soft('the record', record));
+  await beat('overlay-after', soft('the diagram', closeDiagram));
+  await soft('the diagram still', () => page.screenshot({ path: path.join(OUT, 'diagram-overlay.png') }))();
 
-  // ---- 5. Deployed
-  chapter(4);
-  await both(
-    async () => {
-      await sh('clear', { after: 300 });
-      await say('A pull request in Gitea, merged; Flux applied the merge commit');
-      await sh(
-        `curl -s "http://localhost:3300/api/v1/repos/calm-services/${NAME}/pulls?state=closed&limit=3" | jq -r '.[] | "#\\(.number)  \\(.title)  merged: \\(.merged)"'`,
-        { after: 1500 },
-      );
-      await sh('k -n $NS get deploy,networkpolicy', { after: 3000 });
-    },
-    async () => {
-      await tab('Decorators');
-      await caption('The record: status, pull request, commit, who asked, and the call\'s id in CALM Hub\'s audit log');
-      await pause(6500);
-      await refreshExtensions();
-      await caption(`The tab now says ${valid} is the version deployed`);
-      await pause(3500);
-      await scrollDown(500);
-      await caption('And lists every deployment of this architecture, from Backstage or from CALM Hub');
-      await pause(4000);
-    },
+  const deployed = await newest(ctx.valid);
+  if (deployed?.status !== 'completed') throw new Error(`the deployment of ${ctx.valid} did not complete: ${JSON.stringify(deployed)}`);
+  checked('integer', deployed.id, 'the deployment decorator id');
+  const decorator = await getJson(`${HUB}/api/calm/namespaces/hackathon/decorators/${deployed.id}`);
+  const jti = decorator.data?.gitops?.['hub-audit-id'] ?? decorator.data?.['hub-audit-id'];
+  if (!jti) throw new Error(`decorator ${deployed.id} has no hub-audit-id`);
+  checked('jti', jti, `the hub-audit-id of decorator ${deployed.id}`);
+  await beat(
+    'standard-record',
+    clear,
+    termBeat(
+      'standard-record',
+      `curl -s $HUB/api/calm/namespaces/hackathon/decorators/${deployed.id} | jq '{"$schema": (.["$schema"] // .schema), data: {status: .data.status, kubernetes: .data.kubernetes, gitops: .data.gitops}}'`,
+    ),
+  );
+  await beat(
+    'audit',
+    clear,
+    termBeat(
+      'audit',
+      `curl -s $HUB/api/calm/namespaces/hackathon/decorators/${deployed.id} | jq -r '.data.gitops["hub-audit-id"] // .data["hub-audit-id"]'`,
+      `hub-audit.sh ${jti}`,
+    ),
+  );
+  const deploymentRecords = async () => (await getJson(`${HUB}/api/calm/namespaces/hackathon/decorators?type=deployment`)).values.length;
+  const recordsBefore = await deploymentRecords();
+  await beat('validated', clear, termBeat('validated', `broken-copy.sh ${deployed.id}`));
+  // broken-copy.sh's exit status does not reach the recorder: count the records instead.
+  if ((await deploymentRecords()) !== recordsBefore) {
+    log(`WARNING: CALM Hub stored the broken copy of decorator ${deployed.id}: the take shows it accepted; check and retake`);
+  }
+  await beat(
+    'sub-standard',
+    clear,
+    termBeat('sub-standard', `curl -s $HUB/api/calm/namespaces/hackathon/standards | jq '.values[] | {id, name, description}'`),
+    soft('the Standards tab', () => route('#/namespace/hackathon?type=standards')),
   );
 
-  // ---- 6. The controls gate
-  chapter(5);
-  await both(
-    async () => {
-      await sh('clear', { after: 300 });
-      await say('Now a version the pattern does not allow: the browser talks to the service directly');
-      await sh(`npx tsx scripts/new-version.ts hackathon ${NAME} --connect web-client:stream-app`, { after: 2500 });
-    },
-    async () => {
-      await caption('CALM Hub stores any valid CALM document; the pattern is checked when it is deployed');
-      await pause(3000);
-    },
-  );
-  await show(invalid, 'extensions');
-  await extensionText(`this page shows ${invalid}`).waitFor();
-  await caption(`Deploy ${invalid}…`);
-  await pause(2500);
-  await page.getByRole('button', { name: 'Deploy this version' }).click();
-  await page.getByRole('button', { name: 'Run' }).click();
-  await sh(`watch-deploy.sh ${NAME} ${invalid}`, { after: 2500 });
-  await refreshExtensions();
-  await scrollDown(500);
-  await caption('Stopped at the controls gate: calm validate failed, so nothing reached Git or the cluster');
-  await both(
-    async () => {
-      await sh('clear', { after: 300 });
-      await say('No new pull request, and the cluster still runs the last good version');
-      await sh(
-        `curl -s "http://localhost:3300/api/v1/repos/calm-services/${NAME}/pulls?state=all&limit=1" | jq -r '.[] | "latest: #\\(.number)  \\(.title)"'`,
-        { after: 1200 },
-      );
-      await sh(`curl -s $EXT/namespaces/hackathon/architectures/${NAME}/status | jq '{deployedVersion, latestVersion}'`, {
-        after: 2500,
-      });
-    },
-    async () => pause(6000),
+  // ---- 7. The controls gate, as a control evaluation
+  await chapter(6);
+  await beat('forbidden', clear, termBeat('forbidden', `npx tsx scripts/new-version.ts hackathon ${NAME} --connect web-client:stream-app`));
+  await soft(`showing ${ctx.invalid}`, async () => {
+    await show(ctx.invalid, 'extensions');
+    await collapseSidebar();
+  })();
+  // Hard: the page must show the version about to be deployed before Deploy/Run is clicked (no job exists yet).
+  await extensionText(`this page shows ${ctx.invalid}`).waitFor();
+  await beat('deploy-invalid', async () => {
+    await page.getByRole('button', { name: 'Deploy this version' }).click();
+    await page.getByRole('button', { name: 'Run' }).click();
+  });
+  await beat('refused', clear, termBeat('refused', () => sh(`watch-deploy.sh ${NAME} ${ctx.invalid}`)));
+  const refusal = await newest(ctx.invalid);
+  if (refusal?.status !== 'refused') throw new Error(`${ctx.invalid} was not refused at the controls gate: ${JSON.stringify(refusal)}`);
+  // Not seen live before this take (no control evaluation existed): each step falls back and warns rather than
+  // throwing, since the take has already stored its two versions.
+  await beat('evaluation', soft('the control evaluation overlay', async () => {
+    await tab('Diagram');
+    // The overlay re-reads decorators every 5 s.
+    const evaluated = viewBadge('Control evaluations');
+    const seen = () => evaluated.waitFor({ timeout: 15000 }).then(() => true, () => false);
+    if (!(await seen())) {
+      // Its legend entry may start switched off.
+      await page.getByText(/^Control evaluations · Built-in/).first().click({ timeout: 5000 }).catch(() => {});
+      if (!(await seen())) log('WARNING: no Control evaluations badge on the diagram');
+    }
+  }));
+  await beat('finding', soft('the control evaluation details', async () => {
+    if (await viewBadge('Control evaluations', 'stream-app').click({ timeout: 5000 }).then(() => true, () => false)) {
+      await hold(1200);
+      const all = page.getByText('View all Control evaluations', { exact: true });
+      if (await all.isVisible().catch(() => false)) await all.click().catch(() => {});
+    }
+    if (!/type=control-evaluation/.test(page.url())) await show(ctx.invalid, 'decorators&type=control-evaluation');
+    if (!(await page.getByText('not-met').first().waitFor({ timeout: 15000 }).then(() => true, () => false))) {
+      log('WARNING: the control evaluation (not-met) is not on the Decorators tab');
+    }
+    await highlight(['status', 'findings']);
+  }));
+  await beat(
+    'unchanged',
+    clear,
+    termBeat(
+      'unchanged',
+      `curl -s "$GITEA/${NAME}/pulls?state=all&limit=1" | jq -r '.[] | "newest pull request: #\\(.number)  \\(.title)"'`,
+      `curl -s $EXT/namespaces/hackathon/architectures/${NAME}/status | jq '{deployedVersion, latestVersion, inSync, drift}'`,
+    ),
   );
 
-  // ---- 7. MCP
-  chapter(6);
-  await both(
-    async () => {
-      await sh('clear', { after: 300 });
-      await say('Each command is also an MCP tool on CALM Hub: what an agent would call');
-      await sh(
-        `mcp.sh ext_gitops-deploy_history '{"namespace":"hackathon","architecture":"${NAME}"}' | jq -c '.deployments[:3][] | {version, status, requestedBy, notes}'`,
-        { after: 4000 },
-      );
-    },
-    async () => {
-      await caption('ext_gitops-deploy_status, _history and _deploy: the same scopes, checks and audit as the UI');
-      await pause(6000);
-      await caption('A firm plugs its own deployment platform into CALM Hub the same way (PROFILE.md)');
-      await pause(5000);
-    },
+  // ---- 8. The same connector, for an agent
+  await chapter(7);
+  const mcpArgs = `'{"namespace":"hackathon","architecture":"${NAME}"}'`;
+  await beat(
+    'mcp-status',
+    clear,
+    termBeat(
+      'mcp-status',
+      `mcp.sh ext_platform-connector_status ${mcpArgs} | jq '{deployedVersion, inSync, drift, hubRecord: (.hubRecord | {version, status}), workloads: [.workloads[] | "\\(.name) \\(.ready)/\\(.desired)"]}'`,
+    ),
+    soft('the Platform panel', async () => {
+      await show(ctx.valid);
+      await tab('Diagram');
+      await selectNode(DRIFT_WORKLOAD, `In sync: ${DRIFT_WORKLOAD} runs as Git asks.`);
+    }),
   );
-  const duration = (Date.now() - t0) / 1000;
+  await beat(
+    'mcp-history',
+    termBeat('mcp-history', `mcp.sh ext_platform-connector_history ${mcpArgs} | jq -r '.deployments[:4][] | "\\(.version)  \\(.status)"'`),
+  );
+  await narrate('mcp-same');
 
-  // ---- Save the two videos and join them side by side.
+  // ---- 9. The pattern
+  await chapter(8);
+  await beat('recap-1', soft('the home page', async () => {
+    await closeDetails();
+    await route('#/');
+  }));
+  await beat('recap-2', soft('the card', () => page.getByText('Platform Connector').first().hover()));
+  await narrate('recap-3');
+  await caption('');
+  await hold(1000);
+  const duration = now();
+
+  // ---- Save the two videos, join them side by side, and lay the voiceover under them.
   const tPath = await term.video().path();
   const bPath = await page.video().path();
   await T.context.close();
   await B.context.close();
   await browser.close();
   ttyd.kill();
+  restoreBackend();
+
   const out = path.join(OUT, 'calm-hub-deploy-demo.mp4');
   const at = created => ((t0 - created) / 1000).toFixed(2);
+  const inputs = said.flatMap(s => ['-i', s.file]);
+  const delays = said.map((s, i) => `[${i + 2}:a]aresample=48000,adelay=delays=${Math.round(s.start * 1000)}:all=1[a${i}]`);
+  const mix = `${said.map((_, i) => `[a${i}]`).join('')}amix=inputs=${said.length}:normalize=0:duration=longest,apad[aout]`;
   execFileSync(
     'ffmpeg',
     [
@@ -415,25 +949,42 @@ let onFailure = async () => {};
       at(B.created),
       '-i',
       bPath,
+      ...inputs,
       '-filter_complex',
-      '[0:v]setpts=PTS-STARTPTS,fps=25[t];[1:v]setpts=PTS-STARTPTS,fps=25[b];[t][b]hstack=inputs=2,format=yuv420p[v]',
+      [
+        '[0:v]setpts=PTS-STARTPTS,fps=25[t]',
+        '[1:v]setpts=PTS-STARTPTS,fps=25[b]',
+        '[t][b]hstack=inputs=2,format=yuv420p[v]',
+        ...delays,
+        mix,
+      ].join(';'),
       '-map',
       '[v]',
+      '-map',
+      '[aout]',
       '-t',
       duration.toFixed(2),
       '-c:v',
       'libx264',
       '-crf',
       '20',
+      '-c:a',
+      'aac',
+      '-b:a',
+      '128k',
       '-movflags',
       '+faststart',
       out,
     ],
     { stdio: 'inherit' },
   );
+  const srt = said
+    .map((s, i) => `${i + 1}\n${srtTime(s.start)} --> ${srtTime(s.start + s.seconds + 0.3)}\n${s.text}\n`)
+    .join('\n');
+  fs.writeFileSync(path.join(OUT, 'calm-hub-deploy-demo.srt'), srt);
   fs.writeFileSync(path.join(OUT, 'chapters.json'), `${JSON.stringify(marks, null, 2)}\n`);
   console.log('video:', out);
-  console.log('chapters:', JSON.stringify(marks));
+  console.log('chapters:', marks.map(m => `${Math.floor(m.start / 60)}:${String(m.start % 60).padStart(2, '0')} ${m.title}`).join('\n'));
 })().catch(async e => {
   console.error(e);
   await onFailure().catch(() => {});

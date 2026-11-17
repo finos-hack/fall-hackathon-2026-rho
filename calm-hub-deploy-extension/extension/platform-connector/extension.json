@@ -1,0 +1,166 @@
+{
+  "id": "platform-connector",
+  "version": "0.1.0",
+  "hubApi": 0,
+  "name": "Platform Connector",
+  "description": "Connects the firm's delivery platform (here GitOps on Kubernetes) to CALM Hub: it deploys architecture versions, reads what really runs, and records each deployment as a standard deployment decorator.",
+  "provider": "GitOps on Kubernetes (reference)",
+  "routes": [
+    { "id": "tab", "method": "GET", "path": "/tab/{namespace}/{resourceType}/{resourceId}", "scope": "read", "readOnly": true },
+    { "id": "status", "method": "GET", "path": "/namespaces/{namespace}/architectures/{architecture}/status", "scope": "read", "readOnly": true },
+    { "id": "history", "method": "GET", "path": "/history/namespaces/{namespace}/architectures/{architecture}/deployments", "scope": "read", "readOnly": true },
+    { "id": "deploy-here", "method": "POST", "path": "/deploy/{namespace}/{resourceType}/{resourceId}/{version}", "scope": "write" },
+    { "id": "deploy", "method": "POST", "path": "/namespaces/{namespace}/architectures/{architecture}/versions/{version}/deployments", "scope": "write" },
+    { "id": "node", "method": "GET", "path": "/node/{namespace}/{resourceType}/{resourceId}/{selectedElement}", "scope": "read", "readOnly": true },
+    { "id": "card", "method": "GET", "path": "/card", "scope": "authenticated", "readOnly": true },
+    { "id": "screen", "method": "GET", "path": "/screen", "scope": "authenticated", "readOnly": true }
+  ],
+  "commands": {
+    "status": {
+      "route": "status",
+      "description": "Where an architecture's service runs and what really runs: its repository, deployment rules, Flux status, the commit applied, the architecture version on main, the workloads in the cluster, CALM Hub's newest deployment record, and drift (why the platform does not match Git or that record; empty when in sync).",
+      "input": {
+        "type": "object",
+        "properties": {
+          "namespace": { "type": "string", "description": "CALM Hub namespace" },
+          "architecture": { "type": "string", "description": "Architecture name (its id in the name-based API)" }
+        },
+        "required": ["namespace", "architecture"],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "namespace": { "type": "string" },
+          "architecture": { "type": "string" },
+          "managed": { "type": "boolean", "description": "The service is deployed by this extension" },
+          "repository": { "type": "string" },
+          "deploymentRules": { "type": "string" },
+          "environment": { "type": "string" },
+          "deployedVersion": { "type": "string" },
+          "latestVersion": { "type": "string" },
+          "ready": { "type": "boolean" },
+          "message": { "type": "string" },
+          "commit": { "type": "string" },
+          "commitUrl": { "type": "string" },
+          "mainCommit": { "type": "string", "description": "The commit main points at" },
+          "fluxAtMain": { "type": "boolean", "description": "Flux applied main's head commit" },
+          "inSync": { "type": "boolean", "description": "Nothing deploying, nothing unreadable, no drift" },
+          "drift": { "type": "array", "items": { "type": "string" }, "description": "Why the platform does not match Git or CALM Hub's newest completed record; empty when in sync" },
+          "deploying": {
+            "type": "object",
+            "description": "A connector job running for the service (drift is not reported meanwhile)",
+            "properties": { "version": { "type": "string" }, "status": { "type": "string" }, "notes": { "type": "string" } }
+          },
+          "problems": { "type": "array", "items": { "type": "string" }, "description": "Reads that failed: the state is unknown" },
+          "pendingApproval": { "type": "string", "description": "The pull request a connector job waits for a person to merge" },
+          "workloads": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": { "type": "string" },
+                "node": { "type": "string", "description": "The architecture node (label calm.finos.org/node)" },
+                "desired": { "type": "number", "description": "Replicas Git asks for" },
+                "replicas": { "type": "number", "description": "spec.replicas in the cluster" },
+                "ready": { "type": "number", "description": "Ready replicas in the cluster" },
+                "images": { "type": "array", "items": { "type": "string" } }
+              },
+              "required": ["name", "replicas", "ready", "images"]
+            }
+          },
+          "hubRecord": {
+            "type": "object",
+            "description": "CALM Hub's newest deployment record for the architecture (any version, any writer)",
+            "properties": {
+              "version": { "type": "string" },
+              "status": { "type": "string" },
+              "startTime": { "type": "string" },
+              "endTime": { "type": "string" },
+              "appliesTo": { "type": "array", "items": { "type": "string" } }
+            },
+            "required": ["status"]
+          }
+        },
+        "required": ["namespace", "architecture", "managed"]
+      },
+      "destructive": false,
+      "idempotent": true
+    },
+    "history": {
+      "route": "history",
+      "description": "The deployment attempts on an architecture's newest 10 versions, newest first: deployments, versions refused at the controls gate (status refused, with the control evaluation's id) and a job still at the gate (status validating, no id yet).",
+      "input": {
+        "type": "object",
+        "properties": {
+          "namespace": { "type": "string" },
+          "architecture": { "type": "string" }
+        },
+        "required": ["namespace", "architecture"],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "deployments": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": { "type": "number", "description": "The CALM Hub decorator; absent while CALM Hub holds no record of the job" },
+                "deploymentId": { "type": "string", "description": "The id the deploy command answered with, for a job not yet recorded in CALM Hub" },
+                "evaluationId": { "type": "number", "description": "The control-evaluation decorator recording a refusal at the controls gate" },
+                "version": { "type": "string" },
+                "status": { "type": "string" },
+                "startTime": { "type": "string" },
+                "endTime": { "type": "string" },
+                "environment": { "type": "string" },
+                "requestedBy": { "type": "string" },
+                "pullRequest": { "type": "string" },
+                "details": { "type": "string" },
+                "notes": { "type": "string" }
+              },
+              "required": ["status"]
+            }
+          },
+          "problems": { "type": "array", "items": { "type": "string" }, "description": "Reads that timed out: the list is what memory holds" }
+        },
+        "required": ["deployments"]
+      },
+      "destructive": false,
+      "idempotent": true
+    },
+    "deploy": {
+      "route": "deploy",
+      "description": "Deploy an architecture version: validate it, re-render the service's deployment rules against it, merge the change and wait for Flux. Answers at once; the deployment decorator is written only once the version passes the controls gate (a refused version gets a control-evaluation decorator instead). Follow the deployment with history.",
+      "input": {
+        "type": "object",
+        "properties": {
+          "namespace": { "type": "string" },
+          "architecture": { "type": "string" },
+          "version": { "type": "string", "description": "Architecture version, e.g. 1.0.1" }
+        },
+        "required": ["namespace", "architecture", "version"],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "hubApi": { "type": "number" },
+          "deploymentId": { "type": "string" },
+          "status": { "type": "string" }
+        },
+        "required": ["deploymentId", "status"]
+      },
+      "destructive": false,
+      "idempotent": true
+    }
+  },
+  "contributes": {
+    "designer-tab": [{ "id": "deployment", "title": "Deployment", "route": "tab" }],
+    "action": [{ "id": "deploy-version", "title": "Deploy this version", "route": "deploy-here" }],
+    "detail-panel": [{ "id": "platform", "title": "Platform", "route": "node" }],
+    "landing-card": [{ "id": "services", "title": "Platform Connector", "route": "card" }],
+    "screen": [{ "id": "services", "title": "Services", "route": "screen" }]
+  }
+}
