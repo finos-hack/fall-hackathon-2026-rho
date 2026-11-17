@@ -267,6 +267,18 @@ export async function listAndWaitForRollouts(
   return deployed;
 }
 
+/** Whether a kustomization resource entry names something remote (a URL, a git repo or a `//` / `?ref=` repo path). */
+function isRemoteResource(entry: string): boolean {
+  return (
+    entry.includes('://') ||
+    entry.startsWith('git@') ||
+    entry.startsWith('git::') ||
+    /^(github\.com|gitlab\.com|bitbucket\.org)\//.test(entry) ||
+    entry.includes('?ref=') ||
+    entry.includes('//')
+  );
+}
+
 /**
  * What a deploy of the bundle in `dir` would apply, read offline from its `deploy/k8s` base: the same summary a real
  * deploy gets from the cluster, and a `Kind/name` list of the objects.
@@ -274,7 +286,8 @@ export async function listAndWaitForRollouts(
  * The objects are the ones the base's `kustomization.yaml` lists under `resources:`, in that order. A file entry
  * contributes the documents with a `kind`; a directory entry contributes what its own `kustomization.yaml` lists.
  * Only `kustomization.yaml` is read, as `requireBase` does (not `kustomization.yml` or `Kustomization`). Every entry
- * must stay inside `dir`. A remote entry, a missing file or directory, and a directory listed more than once
+ * must stay inside `dir`. A `kustomization.yaml` that is not a mapping, an entry that is not a string, a remote entry
+ * (a URL, `git@`, `git::`, `github.com/` and the like, `?ref=` or a `//` repo path), a missing file or directory, and a directory listed more than once
  * (a cycle) throw. Nothing else of kustomize is applied: `patches`, `components`, `generators`, `namePrefix` and the
  * like are ignored, so the list is what the files hold, not what `kubectl kustomize` would render.
  */
@@ -309,13 +322,24 @@ export async function planFromBase(
     const text = await fs.readFile(file, 'utf-8').catch(() => {
       throw new Error(`${kustomizationDir} has no kustomization.yaml`);
     });
-    const resources: unknown = YAML.parse(text)?.resources;
+    const parsed: unknown = YAML.parse(text);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      throw new Error(`${file} is not a kustomization (expected a mapping)`);
+    }
+    const resources: unknown = (parsed as { resources?: unknown }).resources;
     if (resources !== undefined && !Array.isArray(resources)) {
       throw new Error(`resources in ${file} is not a list`);
     }
     for (const entry of resources ?? []) {
-      const name = String(entry);
-      if (name.includes('://')) {
+      if (typeof entry !== 'string') {
+        throw new Error(
+          `resources in ${file} has an entry that is not a path: ${JSON.stringify(
+            entry,
+          )}`,
+        );
+      }
+      const name = entry;
+      if (isRemoteResource(name)) {
         throw new Error(
           `The kustomization resource ${name} is remote, and a dry run cannot read remote resources`,
         );
@@ -474,6 +498,8 @@ export function createCalmDeployK8sAction(options: {
       await requireBase(dir);
 
       if (ctx.isDryRun) {
+        // Plan first: a base that cannot be read fails before anything is logged or written.
+        const { deployed, objects } = await planFromBase(dir);
         // Only the dry-run folder of the workspace is written; a folder in localDir is left as it is.
         const writes = isDryRunFolder(dir, ctx.workspacePath);
         let overlayDir = path.join(dir, OVERLAY_DIR);
@@ -498,7 +524,6 @@ export function createCalmDeployK8sAction(options: {
             )}`,
           );
         }
-        const { deployed, objects } = await planFromBase(dir);
         ctx.logger.info(
           `Dry run: would apply ${
             objects.length

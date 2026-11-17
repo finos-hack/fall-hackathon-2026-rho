@@ -909,6 +909,40 @@ describe('calm:deploy:k8s: a dry run', () => {
       }).handler(context({ dir: path.join(root, 'elsewhere') })),
     ).rejects.toThrow(/outside/i);
   });
+
+  it('fails before logging or writing any overlay when the base cannot be planned (localDir)', async () => {
+    const published = path.join(localDir(), 'orders');
+    await fs.cp(dir, published, { recursive: true });
+    await fs.rm(path.join(published, 'deploy', 'k8s', 'workloads.yaml'));
+    const c = context({ dir: published });
+    await expect(
+      createCalmDeployK8sAction({
+        settings: settings(),
+        localDir: localDir(),
+        kubectl: () => jest.fn(async () => ''),
+      }).handler(c),
+    ).rejects.toThrow(/workloads\.yaml/);
+    const logged = c.logger.info.mock.calls.map((x: any[]) => x[0]).join('\n');
+    expect(logged).not.toMatch(/would write the overlay/);
+    expect(logged).not.toMatch(/the overlay would be/);
+  });
+
+  it('fails before writing the overlay when the base cannot be planned (dry-run folder)', async () => {
+    await fs.rm(path.join(dir, 'deploy', 'k8s', 'workloads.yaml'));
+    const c = context();
+    await expect(
+      createCalmDeployK8sAction({
+        settings: settings(),
+        localDir: localDir(),
+        kubectl: () => jest.fn(async () => ''),
+      }).handler(c),
+    ).rejects.toThrow(/workloads\.yaml/);
+    const logged = c.logger.info.mock.calls.map((x: any[]) => x[0]).join('\n');
+    expect(logged).not.toMatch(/Wrote the overlay/);
+    await expect(
+      fs.stat(path.join(dir, 'deploy', 'k8s-overlay')),
+    ).rejects.toThrow();
+  });
 });
 
 describe('planFromBase', () => {
@@ -1063,5 +1097,63 @@ describe('planFromBase', () => {
       'deploy/k8s/sub/kustomization.yaml': kustomization('..'),
     });
     await expect(planFromBase(dir)).rejects.toThrow(/more than once/);
+  });
+
+  it.each([
+    'github.com/org/repo//path?ref=v1',
+    'git@github.com:org/repo.git',
+    'git::https://x/y',
+    'https://x/y.yaml',
+    'gitlab.com/org/repo',
+    'bitbucket.org/org/repo',
+    'sub//deeper',
+    'sub?ref=v1',
+  ])('throws the remote message for %s', async entry => {
+    await put({ 'deploy/k8s/kustomization.yaml': kustomization(entry) });
+    await expect(planFromBase(dir)).rejects.toThrow(
+      /is remote, and a dry run cannot read remote resources/,
+    );
+  });
+
+  it('still reads local entries such as ./sub and ../k8s', async () => {
+    await put({
+      'deploy/k8s/kustomization.yaml': kustomization(
+        './sub',
+        '../k8s/workloads.yaml',
+      ),
+      'deploy/k8s/sub/kustomization.yaml': kustomization('a.yaml'),
+      'deploy/k8s/sub/a.yaml': cm('a'),
+      'deploy/k8s/workloads.yaml': cm('w'),
+    });
+    expect((await planFromBase(dir)).objects).toEqual([
+      'ConfigMap/a',
+      'ConfigMap/w',
+    ]);
+  });
+
+  it.each([
+    ['42', '42'],
+    ['{a: 1}', '{"a":1}'],
+  ])('throws naming an entry that is not a path: %s', async (entry, json) => {
+    await put({
+      'deploy/k8s/kustomization.yaml': `resources:\n  - ${entry}\n`,
+    });
+    await expect(planFromBase(dir)).rejects.toThrow(
+      `resources in ${path.join(
+        dir,
+        'deploy/k8s/kustomization.yaml',
+      )} has an entry that is not a path: ${json}`,
+    );
+  });
+
+  it.each([
+    ['a scalar', 'hello\n'],
+    ['a list', '- a\n- b\n'],
+    ['empty', ''],
+  ])('throws for a kustomization that is %s', async (_n, text) => {
+    await put({ 'deploy/k8s/kustomization.yaml': text });
+    await expect(planFromBase(dir)).rejects.toThrow(
+      /kustomization\.yaml is not a kustomization \(expected a mapping\)/,
+    );
   });
 });
