@@ -865,6 +865,26 @@ describe('calm:deploy:gitops: a dry run', () => {
     );
   });
 
+  it('fails before logging or writing any overlay when the base cannot be planned', async () => {
+    const dir = await dryService();
+    await fs.rm(path.join(dir, 'deploy', 'k8s', 'workloads.yaml'));
+    const c = dryCtx(dir);
+    await expect(
+      createCalmDeployGitopsAction({
+        settings: settings(),
+        gitops: gitops(),
+        localDir,
+        kubectl: () => jest.fn(async () => ''),
+      }).handler(c),
+    ).rejects.toThrow(/workloads\.yaml/);
+    const logged = c.logger.info.mock.calls.map((x: any[]) => x[0]).join('\n');
+    expect(logged).not.toMatch(/would write the overlay/);
+    expect(logged).not.toMatch(/Wrote the overlay/);
+    await expect(
+      fs.stat(path.join(dir, 'deploy', 'k8s-overlay')),
+    ).rejects.toThrow();
+  });
+
   describe('and the service lock', () => {
     const run = (c: any) =>
       createCalmDeployGitopsAction({
