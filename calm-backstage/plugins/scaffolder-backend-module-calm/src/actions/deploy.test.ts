@@ -1106,13 +1106,25 @@ describe('planFromBase', () => {
     'https://x/y.yaml',
     'gitlab.com/org/repo',
     'bitbucket.org/org/repo',
-    'sub//deeper',
+    'example.com/org/repo//path',
     'sub?ref=v1',
   ])('throws the remote message for %s', async entry => {
     await put({ 'deploy/k8s/kustomization.yaml': kustomization(entry) });
     await expect(planFromBase(dir)).rejects.toThrow(
       /is remote, and a dry run cannot read remote resources/,
     );
+  });
+
+  it('treats ./a//b.yaml and sub//x.yaml as local, not remote', async () => {
+    await put({
+      'deploy/k8s/kustomization.yaml': kustomization('./a//b.yaml'),
+      'deploy/k8s/a/b.yaml': cm('b'),
+    });
+    expect((await planFromBase(dir)).objects).toEqual(['ConfigMap/b']);
+    await put({
+      'deploy/k8s/kustomization.yaml': kustomization('sub//x.yaml'),
+    });
+    await expect(planFromBase(dir)).rejects.toThrow(/does not exist/);
   });
 
   it('still reads local entries such as ./sub and ../k8s', async () => {

@@ -267,15 +267,23 @@ export async function listAndWaitForRollouts(
   return deployed;
 }
 
-/** Whether a kustomization resource entry names something remote (a URL, a git repo or a `//` / `?ref=` repo path). */
+/**
+ * Whether a kustomization resource entry names something remote: a URL, a git repo, a `?ref=`, or a host followed by
+ * kustomize's `//` repo/sub-path separator (`example.com/org/repo//path`; `./a//b.yaml` and `sub//x.yaml` are local).
+ */
 function isRemoteResource(entry: string): boolean {
+  const host = entry.split('/')[0];
+  const hostThenSeparator =
+    host.includes('.') &&
+    !host.startsWith('.') &&
+    entry.indexOf('//', host.length) !== -1;
   return (
     entry.includes('://') ||
     entry.startsWith('git@') ||
     entry.startsWith('git::') ||
     /^(github\.com|gitlab\.com|bitbucket\.org)\//.test(entry) ||
     entry.includes('?ref=') ||
-    entry.includes('//')
+    hostThenSeparator
   );
 }
 
@@ -286,10 +294,11 @@ function isRemoteResource(entry: string): boolean {
  * The objects are the ones the base's `kustomization.yaml` lists under `resources:`, in that order. A file entry
  * contributes the documents with a `kind`; a directory entry contributes what its own `kustomization.yaml` lists.
  * Only `kustomization.yaml` is read, as `requireBase` does (not `kustomization.yml` or `Kustomization`). Every entry
- * must stay inside `dir`. A `kustomization.yaml` that is not a mapping, an entry that is not a string, a remote entry
- * (a URL, `git@`, `git::`, `github.com/` and the like, `?ref=` or a `//` repo path), a missing file or directory, and a directory listed more than once
- * (a cycle) throw. Nothing else of kustomize is applied: `patches`, `components`, `generators`, `namePrefix` and the
- * like are ignored, so the list is what the files hold, not what `kubectl kustomize` would render.
+ * must stay inside `dir`. A `kustomization.yaml` that is not a mapping, an entry that is not a string, a remote
+ * entry (a URL, `git@`, `git::`, `github.com/` and the like, `?ref=` or a host followed by a `//` repo path), a
+ * missing file or directory, and a directory listed more than once (a cycle) throw. Nothing else of kustomize is
+ * applied: `patches`, `components`, `generators`, `namePrefix` and the like are ignored, so the list is what the files
+ * hold, not what `kubectl kustomize` would render.
  */
 export async function planFromBase(
   dir: string,

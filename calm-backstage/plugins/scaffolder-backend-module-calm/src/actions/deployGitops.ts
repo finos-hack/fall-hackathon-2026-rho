@@ -208,6 +208,8 @@ export function createCalmDeployGitopsAction(options: {
           );
           await requireBase(dir);
           if (ctx.isDryRun) {
+            // Plan first: a base that cannot be read fails before anything is logged or written.
+            const { deployed, objects } = await planFromBase(dir);
             const catalogInfo = path.join(dir, CATALOG_INFO_FILE);
             const info = await fs
               .readFile(catalogInfo, 'utf-8')
@@ -240,7 +242,6 @@ export function createCalmDeployGitopsAction(options: {
                 );
               }
             }
-            const { deployed, objects } = await planFromBase(dir);
             const repo = serviceRepository(gitops, name);
             const fluxName = fluxObjectName(name);
             ctx.logger.info(
