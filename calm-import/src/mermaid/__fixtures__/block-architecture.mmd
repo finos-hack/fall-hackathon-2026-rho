@@ -1,0 +1,29 @@
+%% Written by hand in the output format of finos/architecture-as-code, calm-widgets block-architecture widget with
+%% render-node-type-shapes on, at commit b6d71d52: typed-node.hbs (shapes, classes, emoji), container.hbs (subgraph,
+%% direction, class boundary), block-architecture.hbs (edges, dotted interface attachments). The widget's index.spec.ts
+%% only mocks its view model, so there is no generated output upstream to copy.
+flowchart TB
+classDef actor fill:#fff,stroke:#333
+classDef boundary fill:#eee,stroke:#999
+
+    subgraph trading_core["Trading Core"]
+    direction TB
+        order_service[/"⚙️ Order Service"/]:::service
+        order_service_iface["orders-api"]:::iface
+        trades_db[(🗄️ Trades DB)]:::database
+        trade_events@{shape: h-cyl, label: "📨 Trade Events"}
+class trade_events messagebus
+    end
+    class trading_core boundary
+    trader([👤 Trader]):::actor
+    trading_ui[[💻 Trading UI]]:::webclient
+    risk_engine[🏢 Risk Engine]:::system
+    legacy_box["Legacy Box"]:::node
+
+    trader -->|uses| trading_ui
+    trading_ui -->|HTTPS| order_service
+    order_service -->|JDBC| trades_db
+    order_service -->|Kafka| trade_events
+    trade_events --> risk_engine
+    order_service -.- order_service_iface
+    class risk_engine highlight

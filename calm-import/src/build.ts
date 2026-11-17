@@ -16,9 +16,16 @@ export function build(diagram: Diagram, decisions: Decision[]): BuildResult {
     decisions.find(d => d.kind === kind && d.targetId === targetId)?.value;
   const notes: Note[] = [];
   const used = new Set<string>();
+  // The next suffix to try for each base, so that many ids with one base do not each count up from 2 again.
+  const nextSuffix = new Map<string, number>();
   const unique = (base: string, subject: string) => {
     let id = base;
-    for (let n = 2; used.has(id); n++) id = `${base}-${n}`;
+    if (used.has(id)) {
+      let n = nextSuffix.get(base) ?? 2;
+      while (used.has(`${base}-${n}`)) n++;
+      id = `${base}-${n}`;
+      nextSuffix.set(base, n + 1);
+    }
     if (id !== base)
       notes.push({
         subject,
@@ -92,6 +99,11 @@ export function build(diagram: Diagram, decisions: Decision[]): BuildResult {
   }
 
   const byId = new Map(diagram.boxes.map(box => [box.id, box]));
+  // Readers of text formats (Mermaid, C4) have no positions: they give every box a zero geometry and no layout.
+  const positioned = diagram.boxes.some(
+    ({ geometry: g }) =>
+      g.x !== 0 || g.y !== 0 || g.width !== 0 || g.height !== 0,
+  );
   const layout = Object.fromEntries(
     diagram.boxes.map(box => [
       ids.get(box.id)!,
@@ -104,7 +116,7 @@ export function build(diagram: Diagram, decisions: Decision[]): BuildResult {
       $schema: CALM_SCHEMA,
       nodes,
       relationships,
-      metadata: { _layout: layout },
+      ...(positioned ? { metadata: { _layout: layout } } : {}),
     },
     notes,
     nodeCount: nodes.length,

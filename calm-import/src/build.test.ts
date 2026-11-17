@@ -302,4 +302,39 @@ describe('build', () => {
       svc: { x: 50, y: 81, w: 120, h: 60 },
     });
   });
+
+  it('leaves out metadata when no box has a geometry', () => {
+    const zero = { x: 0, y: 0, width: 0, height: 0 };
+    const { calm } = run(diagram([box('a', 'A', zero), box('b', 'B', zero)]), [
+      nodeType('a', 'service'),
+      nodeType('b', 'service'),
+    ]);
+    expect(calm).not.toHaveProperty('metadata');
+  });
+
+  it('keeps metadata when at least one box has a geometry', () => {
+    const zero = { x: 0, y: 0, width: 0, height: 0 };
+    const { calm } = run(diagram([box('a', 'A', zero), box('b', 'B')]), [
+      nodeType('a', 'service'),
+      nodeType('b', 'service'),
+    ]);
+    expect(calm.metadata._layout).toHaveProperty('b');
+  });
+
+  it('counts clashing ids up without reusing one that is taken', () => {
+    const boxes = ['API', 'API', 'API', 'API 2', 'API'].map((label, n) =>
+      box(`b${n}`, label),
+    );
+    const { calm } = run(
+      diagram(boxes),
+      boxes.map(b => nodeType(b.id, 'service')),
+    );
+    expect(calm.nodes.map(n => n['unique-id'])).toEqual([
+      'api',
+      'api-2',
+      'api-3',
+      'api-2-2',
+      'api-4',
+    ]);
+  });
 });

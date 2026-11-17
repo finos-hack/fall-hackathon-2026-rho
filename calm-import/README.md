@@ -26,6 +26,42 @@ every place where draw.io and CALM don't match one to one and the converter used
 
 `examples/trading.drawio` is a sample: 7 boxes and 7 arrows.
 
+## Mermaid flowcharts
+
+```ts
+import { convertMermaid } from '@internal/calm-import';
+
+const result = await convertMermaid(mermaidText); // same result shape as convertDrawio
+```
+
+Input: a `flowchart` or `graph` (any direction), as a whole `.mmd` file or as the first flowchart block of a Markdown
+file (other blocks are listed as skipped). Other Mermaid diagram types are refused (`got sequenceDiagram`); a C4,
+PlantUML or draw.io file is refused with the format to choose, and a file with no flowchart says so.
+The reader is a small hand-written parser (no `mermaid` package) that fills the same internal diagram the draw.io reader
+does, so the draw.io rules apply unchanged: shapes and labels decide node types, a subgraph becomes `deployed-in` or
+`composed-of`, edge labels decide the protocol, and every unsure choice is a listed guess.
+
+- Nodes: `[ ]`, `( )`, `([ ])`, `[[ ]]`, `[( )]` (database), `(( ))`, `{ }`, `{{ }}`, `[/ /]`, `[\ \]`, `> ]` and the
+  `id@{ shape: …, label: … }` form (`cyl`, `h-cyl` = queue, `doc`, `cloud`, …). Quoted labels, `<br/>`, HTML tags and
+  `#35;`-style entity codes are cleaned.
+- Edges: `-->`, `---`, `-.->`, `-.-`, `==>`, `<-->`, `--o`, `--x`, `~~~` (drawn as nothing), labels as `-->|text|` or
+  `-- text -->`, chains (`A --> B --> C`) and groups (`A & B --> C`). An id with no definition is a node named by its id.
+- `subgraph id [Title] … end`, nested up to 50 levels, and edges to a subgraph.
+- Ignored: comments, front matter, `classDef`, `style`, `linkStyle`, `click`, `direction`.
+- No positions, so there is no `metadata._layout`. Node ids come from the names, as in the draw.io import.
+- At most 5,000 nodes and 10,000 edges.
+
+A flowchart drawn by a CALM tool gets its node types back with certainty (not as guesses):
+- this repo's entity card (`calm-common/src/mermaid.ts`) writes the type as an italic last line, `Name<br/><i>service</i>`;
+- upstream's `block-architecture` widget writes a `:::database`-style class (any CALM node type) and an emoji prefix
+  (removed from the name). Its `:::iface` nodes and the `-.-` edges to them are interfaces: skipped and listed.
+- the entity card's dotted edges: `-.-o|"composed of"|` / `-.-o|"deployed in"|` (drawn when containers nest or a node
+  has two) are `composed-of` / `deployed-in` containment, and a dotted edge from an `actor` is `interacts` (its label
+  the description). A solid edge stays `connects`.
+
+`examples/trading.mmd` is a sample: the trading platform of `examples/trading.drawio`, 7 nodes and 7 relationships;
+the trader's dotted edge is an `interacts`, as in `trading.c4.md`.
+
 ## C4
 
 ```ts
