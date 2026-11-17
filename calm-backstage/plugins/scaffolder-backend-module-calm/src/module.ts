@@ -25,6 +25,7 @@ import {
 } from './actions/upgradeRender';
 import { createCalmUpgradeMergeAction } from './actions/upgradeMerge';
 import { createCalmCatalogRefreshAction } from './actions/catalogRefresh';
+import { createCalmImportDrawioAction } from './actions/importDrawio';
 import fs from 'node:fs/promises';
 import {
   BundleMeta,
@@ -174,6 +175,12 @@ export const scaffolderModuleCalm = createBackendModule({
             appBaseUrl: config.getString('app.baseUrl'),
           }),
           createCalmRegisterLocalAction({ catalog, auth, localDir }),
+          createCalmImportDrawioAction({
+            hub,
+            namespace: hubNamespace,
+            catalog,
+            auth,
+          }),
         );
       },
     });

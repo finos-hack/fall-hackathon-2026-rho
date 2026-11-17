@@ -5648,6 +5648,7 @@ __metadata:
     "@backstage/plugin-scaffolder-node": "npm:^0.13.8"
     "@internal/backstage-plugin-calm-common": "workspace:^"
     "@internal/backstage-plugin-calm-node": "workspace:^"
+    "@internal/calm-import": "link:../../../calm-import"
     yaml: "npm:^2.2.1"
   languageName: unknown
   linkType: soft
@@ -5655,6 +5656,12 @@ __metadata:
 "@internal/calm-import@link:../../../calm-import::locator=%40internal%2Fbackstage-plugin-calm-node%40workspace%3Aplugins%2Fcalm-node":
   version: 0.0.0-use.local
   resolution: "@internal/calm-import@link:../../../calm-import::locator=%40internal%2Fbackstage-plugin-calm-node%40workspace%3Aplugins%2Fcalm-node"
+  languageName: node
+  linkType: soft
+
+"@internal/calm-import@link:../../../calm-import::locator=%40internal%2Fbackstage-plugin-scaffolder-backend-module-calm%40workspace%3Aplugins%2Fscaffolder-backend-module-calm":
+  version: 0.0.0-use.local
+  resolution: "@internal/calm-import@link:../../../calm-import::locator=%40internal%2Fbackstage-plugin-scaffolder-backend-module-calm%40workspace%3Aplugins%2Fscaffolder-backend-module-calm"
   languageName: node
   linkType: soft
 

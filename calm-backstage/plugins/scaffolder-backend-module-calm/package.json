@@ -33,6 +33,7 @@
     "@backstage/plugin-scaffolder-node": "^0.13.8",
     "@internal/backstage-plugin-calm-common": "workspace:^",
     "@internal/backstage-plugin-calm-node": "workspace:^",
+    "@internal/calm-import": "link:../../../calm-import",
     "yaml": "^2.2.1"
   },
   "devDependencies": {
