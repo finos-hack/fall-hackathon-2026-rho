@@ -435,6 +435,9 @@ describe('calm:upgrade:render with files the developer changed', () => {
     expect(error?.message).toContain('orders');
     expect(error?.message).toContain('node-service 1.1.0');
     expect(error?.message).toContain('node-service 1.0.0');
+    expect(error?.message).toContain(
+      'Undo or move those changes, or upgrade only the deployment rules, then upgrade again; merging them is not supported yet.',
+    );
     expect(await git(dir, ['branch', '--list'])).toBe('* main');
     expect(await git(dir, ['rev-parse', 'HEAD'])).toBe(head);
     expect(await git(dir, ['status', '--porcelain'])).toBe('');
@@ -499,6 +502,37 @@ describe('calm:upgrade:render with files the developer changed', () => {
     expect(await fs.readFile(path.join(dir, 'src/new.js'), 'utf-8')).toBe(
       'new\n',
     );
+  });
+
+  it('refuses a directory where the new version renders a file, and leaves main clean', async () => {
+    const { dir, remote } = await service();
+    await developerChange(dir, remote, async () => {
+      await fs.mkdir(path.join(dir, 'src/new.js'));
+      await write(dir, 'src/new.js/index.js', 'mine\n');
+    });
+    await expect(
+      renderAction(codeBundles, { renderInto: withNewFile }).handler(
+        ctx(codeInput),
+      ),
+    ).rejects.toThrow(/src\/new\.js/);
+    expect(await git(dir, ['branch', '--list'])).toBe('* main');
+    expect(await git(dir, ['status', '--porcelain'])).toBe('');
+  });
+
+  it('returns the working copy to main when a rendered path is a symlink out of the folder', async () => {
+    const { dir, remote } = await service();
+    const outside = path.join(root, 'outside.js');
+    await fs.writeFile(outside, 'elsewhere\n');
+    await developerChange(dir, remote, async () => {
+      await fs.rm(path.join(dir, 'src/server.js'));
+      await fs.symlink(outside, path.join(dir, 'src/server.js'));
+    });
+    await expect(
+      renderAction(codeBundles).handler(ctx(codeInput)),
+    ).rejects.toThrow();
+    expect(await git(dir, ['branch', '--list'])).toBe('* main');
+    expect(await git(dir, ['status', '--porcelain'])).toBe('');
+    expect(await fs.readFile(outside, 'utf-8')).toBe('elsewhere\n');
   });
 
   it('names every changed file, sorted', async () => {
