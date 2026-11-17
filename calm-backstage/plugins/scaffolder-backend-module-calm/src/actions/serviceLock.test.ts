@@ -74,6 +74,19 @@ describe('withServiceLock', () => {
     ).rejects.toThrow(/in use by the task task-a/);
   });
 
+  it('runs the body as it is with enabled: false: no task id needed, another task keeps its lock', async () => {
+    const locks = new ServiceLocks();
+    locks.acquire(DIR, 'task-b');
+    const body = jest.fn(async () => {});
+    await withServiceLock(
+      context(undefined, {}),
+      { dir: DIR, locks, enabled: false },
+      body,
+    );
+    expect(body).toHaveBeenCalledTimes(1);
+    expect(locks.holder(DIR)).toBe('task-b');
+  });
+
   it('releases when nothing changed', async () => {
     const locks = new ServiceLocks();
     await withServiceLock(

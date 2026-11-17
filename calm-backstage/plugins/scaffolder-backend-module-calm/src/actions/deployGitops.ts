@@ -190,6 +190,8 @@ export function createCalmDeployGitopsAction(options: {
               ? { dryRunWorkspace: outer.workspacePath }
               : undefined,
           ),
+          // A dry run takes no lock: its folder is unique to the dry run's workspace, or a localDir folder that is only read.
+          enabled: !outer.isDryRun,
         },
         async ctx => {
           const settings = await requireKubernetesDeploy(options.settings);

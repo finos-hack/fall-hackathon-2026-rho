@@ -13,6 +13,7 @@ import {
   waitForKustomization,
 } from './deployGitops';
 import { GITOPS_OVERLAY_HEADER, writeOverlay } from './deployK8s';
+import { serviceLocks } from './serviceLock';
 import {
   createCalmGitPublishAction,
   withGitAnnotations,
@@ -86,7 +87,7 @@ async function service(name: string) {
   await fs.mkdir(path.join(dir, 'deploy', 'k8s'), { recursive: true });
   await fs.writeFile(
     path.join(dir, 'deploy', 'k8s', 'kustomization.yaml'),
-    'resources: []\n',
+    'resources:\n  - workloads.yaml\n',
   );
   await fs.writeFile(
     path.join(dir, 'catalog-info.yaml'),
@@ -753,7 +754,7 @@ describe('calm:deploy:gitops: a dry run', () => {
     await fs.mkdir(path.join(dir, 'deploy', 'k8s'), { recursive: true });
     await fs.writeFile(
       path.join(dir, 'deploy', 'k8s', 'kustomization.yaml'),
-      'resources: []\n',
+      'resources:\n  - workloads.yaml\n',
     );
     await fs.writeFile(
       path.join(dir, 'deploy', 'k8s', 'workloads.yaml'),
@@ -862,6 +863,47 @@ describe('calm:deploy:gitops: a dry run', () => {
     expect(logged.every((l: string) => l.startsWith('Dry run: would '))).toBe(
       true,
     );
+  });
+
+  describe('and the service lock', () => {
+    const run = (c: any) =>
+      createCalmDeployGitopsAction({
+        settings: settings(),
+        gitops: gitops(),
+        localDir,
+        kubectl: () => jest.fn(async () => ''),
+      }).handler(c);
+
+    it('succeeds on a localDir folder another task holds, and leaves that task holding it', async () => {
+      const dir = path.join(localDir, 'orders');
+      await fs.cp(await dryService(), dir, { recursive: true });
+      serviceLocks.acquire(dir, 'task-other');
+      try {
+        await run(dryCtx(dir));
+        expect(serviceLocks.holder(dir)).toBe('task-other');
+      } finally {
+        serviceLocks.release(dir, 'task-other');
+      }
+    });
+
+    it('takes no lock on a dry-run folder', async () => {
+      const dir = await dryService();
+      const acquire = jest.spyOn(serviceLocks, 'acquire');
+      try {
+        await run(dryCtx(dir));
+        expect(acquire).not.toHaveBeenCalled();
+        expect(serviceLocks.holder(dir)).toBeUndefined();
+      } finally {
+        acquire.mockRestore();
+      }
+    });
+
+    it('does not need a task in the context', async () => {
+      const dir = await dryService();
+      const c = dryCtx(dir);
+      delete c.task;
+      await expect(run(c)).resolves.toBeUndefined();
+    });
   });
 
   it('still fails without the gitops config, with a missing base, and outside both folders', async () => {

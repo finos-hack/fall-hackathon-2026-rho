@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { resolveSafeChildPath } from '@backstage/backend-plugin-api';
 import { createTemplateAction } from '@backstage/plugin-scaffolder-node';
 import { isDryRunFolder, publishedFolder } from './publishedFolder';
 import {
@@ -98,6 +99,9 @@ export function checkExistingNamespace(
 export function applyArgs(overlayDir: string): string[] {
   return ['apply', '-k', overlayDir];
 }
+
+/** The first line of the overlay `calm:deploy:k8s` writes. */
+const K8S_OVERLAY_HEADER = `# Written by calm:deploy:k8s. Apply by hand: kubectl apply -k ${OVERLAY_DIR}`;
 
 /** The first line of an overlay Flux applies: the same for every action that writes it, so rewriting it is no change. */
 export const GITOPS_OVERLAY_HEADER = `# Written by Backstage (calm:deploy:gitops, calm:upgrade:merge). Flux applies this folder (${OVERLAY_DIR}) from Git.`;
@@ -264,25 +268,76 @@ export async function listAndWaitForRollouts(
 }
 
 /**
- * What a deploy of the bundle in `dir` would apply, read offline from the YAML files of its `deploy/k8s` base:
- * the same summary a real deploy gets from the cluster, and a `Kind/name` list of the objects.
+ * What a deploy of the bundle in `dir` would apply, read offline from its `deploy/k8s` base: the same summary a real
+ * deploy gets from the cluster, and a `Kind/name` list of the objects.
+ *
+ * The objects are the ones the base's `kustomization.yaml` lists under `resources:`, in that order. A file entry
+ * contributes the documents with a `kind`; a directory entry contributes what its own `kustomization.yaml` lists.
+ * Only `kustomization.yaml` is read, as `requireBase` does (not `kustomization.yml` or `Kustomization`). Every entry
+ * must stay inside `dir`. A remote entry, a missing file or directory, and a directory listed more than once
+ * (a cycle) throw. Nothing else of kustomize is applied: `patches`, `components`, `generators`, `namePrefix` and the
+ * like are ignored, so the list is what the files hold, not what `kubectl kustomize` would render.
  */
 export async function planFromBase(
   dir: string,
 ): Promise<{ deployed: Deployed; objects: string[] }> {
-  const baseDir = path.join(dir, BASE_DIR);
-  const files = (await fs.readdir(baseDir))
-    .filter(f => /\.ya?ml$/.test(f) && f !== 'kustomization.yaml')
-    .sort();
   const items: any[] = [];
-  for (const f of files) {
-    const text = await fs.readFile(path.join(baseDir, f), 'utf-8');
-    items.push(
-      ...YAML.parseAllDocuments(text)
-        .map(d => d.toJS())
-        .filter(d => d?.kind),
-    );
-  }
+  const visited = new Set<string>();
+  const inside = (from: string, entry: string) => {
+    try {
+      return resolveSafeChildPath(
+        dir,
+        path.relative(dir, path.resolve(from, entry)),
+      );
+    } catch {
+      throw new Error(
+        `The kustomization resource ${entry} is outside the published folder ${dir}`,
+      );
+    }
+  };
+  const readDir = async (kustomizationDir: string) => {
+    const real = await fs
+      .realpath(kustomizationDir)
+      .catch(() => kustomizationDir);
+    if (visited.has(real)) {
+      throw new Error(
+        `${kustomizationDir} is listed more than once in the kustomization resources (a cycle)`,
+      );
+    }
+    visited.add(real);
+    const file = path.join(kustomizationDir, 'kustomization.yaml');
+    const text = await fs.readFile(file, 'utf-8').catch(() => {
+      throw new Error(`${kustomizationDir} has no kustomization.yaml`);
+    });
+    const resources: unknown = YAML.parse(text)?.resources;
+    if (resources !== undefined && !Array.isArray(resources)) {
+      throw new Error(`resources in ${file} is not a list`);
+    }
+    for (const entry of resources ?? []) {
+      const name = String(entry);
+      if (name.includes('://')) {
+        throw new Error(
+          `The kustomization resource ${name} is remote, and a dry run cannot read remote resources`,
+        );
+      }
+      const target = inside(kustomizationDir, name);
+      const stat = await fs.stat(target).catch(() => {
+        throw new Error(
+          `The kustomization resource ${name} does not exist in ${kustomizationDir}`,
+        );
+      });
+      if (stat.isDirectory()) {
+        await readDir(target);
+      } else {
+        items.push(
+          ...YAML.parseAllDocuments(await fs.readFile(target, 'utf-8'))
+            .map(d => d.toJS())
+            .filter(d => d?.kind),
+        );
+      }
+    }
+  };
+  await readDir(inside(dir, BASE_DIR));
   return {
     deployed: summariseObjects(items),
     objects: items.map(i => `${i.kind}/${i.metadata?.name ?? '?'}`),
@@ -347,7 +402,7 @@ export function createCalmDeployK8sAction(options: {
     id: 'calm:deploy:k8s',
     supportsDryRun: true,
     description:
-      "Deploys a published service folder to the local cluster (calm.deploy.kubernetes): writes the overlay deploy/k8s-overlay over the bundle's kustomize base deploy/k8s, runs kubectl apply -k into the namespace <namespacePrefix><name> and waits for the rollouts. Needs the cluster from `yarn k8s:up`. In a dry run it writes the overlay only in the dry-run folder (a folder in localDir is left as it is) and logs the objects and the kubectl command, without calling the cluster; the outputs come from the rendered manifests.",
+      "Deploys a published service folder to the local cluster (calm.deploy.kubernetes): writes the overlay deploy/k8s-overlay over the bundle's kustomize base deploy/k8s, runs kubectl apply -k into the namespace <namespacePrefix><name> and waits for the rollouts. Needs the cluster from `yarn k8s:up`. In a dry run it writes the overlay only in the dry-run folder (a folder in localDir is left as it is; the overlay it would write is logged) and logs the objects and the kubectl command, without calling the cluster; the outputs come from the rendered manifests.",
     schema: {
       input: {
         dir: z =>
@@ -420,16 +475,28 @@ export function createCalmDeployK8sAction(options: {
 
       if (ctx.isDryRun) {
         // Only the dry-run folder of the workspace is written; a folder in localDir is left as it is.
+        const writes = isDryRunFolder(dir, ctx.workspacePath);
         let overlayDir = path.join(dir, OVERLAY_DIR);
-        if (isDryRunFolder(dir, ctx.workspacePath)) {
+        if (writes) {
           overlayDir = await writeOverlay(
             dir,
             { name, namespace, image },
-            `# Written by calm:deploy:k8s. Apply by hand: kubectl apply -k ${OVERLAY_DIR}`,
+            K8S_OVERLAY_HEADER,
           );
           ctx.logger.info(`Wrote the overlay ${overlayDir}`);
         } else {
-          ctx.logger.info(`Dry run: would write the overlay ${overlayDir}`);
+          // What is in the folder now may be missing or stale, so the plan names the overlay it would write.
+          ctx.logger.info(
+            `Dry run: would write the overlay ${overlayDir} for ${image} in ${namespace}, then run ${kubectlCommand(
+              settings,
+              applyArgs(overlayDir),
+            )}`,
+          );
+          ctx.logger.info(
+            `Dry run: the overlay would be:\n${K8S_OVERLAY_HEADER}\n${YAML.stringify(
+              overlayKustomization({ name, namespace, image }),
+            )}`,
+          );
         }
         const { deployed, objects } = await planFromBase(dir);
         ctx.logger.info(
@@ -437,12 +504,14 @@ export function createCalmDeployK8sAction(options: {
             objects.length
           } objects into ${namespace}: ${objects.join(', ')}`,
         );
-        ctx.logger.info(
-          `Dry run: would run ${kubectlCommand(
-            settings,
-            applyArgs(overlayDir),
-          )}`,
-        );
+        if (writes) {
+          ctx.logger.info(
+            `Dry run: would run ${kubectlCommand(
+              settings,
+              applyArgs(overlayDir),
+            )}`,
+          );
+        }
         const now = new Date().toISOString();
         ctx.output('namespace', namespace);
         ctx.output('deployments', deployed.deployments);
@@ -459,7 +528,7 @@ export function createCalmDeployK8sAction(options: {
       const overlayDir = await writeOverlay(
         dir,
         { name, namespace, image },
-        `# Written by calm:deploy:k8s. Apply by hand: kubectl apply -k ${OVERLAY_DIR}`,
+        K8S_OVERLAY_HEADER,
       );
       ctx.logger.info(`Wrote the overlay ${overlayDir}`);
 

@@ -454,7 +454,7 @@ describe('calm:deploy:k8s: a failed deployment', () => {
     await fs.mkdir(path.join(dir, 'deploy', 'k8s'), { recursive: true });
     await fs.writeFile(
       path.join(dir, 'deploy', 'k8s', 'kustomization.yaml'),
-      'resources: []\n',
+      'resources:\n  - workloads.yaml\n',
     );
     await fs.writeFile(
       path.join(dir, 'deploy', 'k8s', 'workloads.yaml'),
@@ -726,7 +726,7 @@ describe('calm:deploy:k8s: a dry run', () => {
     await fs.mkdir(path.join(dir, 'deploy', 'k8s'), { recursive: true });
     await fs.writeFile(
       path.join(dir, 'deploy', 'k8s', 'kustomization.yaml'),
-      'resources: []\n',
+      'resources:\n  - workloads.yaml\n',
     );
     await fs.writeFile(
       path.join(dir, 'deploy', 'k8s', 'workloads.yaml'),
@@ -833,16 +833,62 @@ describe('calm:deploy:k8s: a dry run', () => {
       kubectl: expect.stringContaining('-n calm-orders'),
     });
     const logged = c.logger.info.mock.calls.map((x: any[]) => x[0]);
-    expect(logged).toContain(
-      `Dry run: would write the overlay ${path.join(
-        published,
-        'deploy',
-        'k8s-overlay',
-      )}`,
+    expect(
+      logged.every((l: string) =>
+        /^Dry run: (would |the overlay would be:\n)/.test(l),
+      ),
+    ).toBe(true);
+  });
+
+  it('in a localDir folder logs one line tying the kubectl command to the overlay it would write, and the overlay, not the stale one there', async () => {
+    const published = path.join(localDir(), 'orders');
+    await fs.cp(dir, published, { recursive: true });
+    const staleFile = path.join(
+      published,
+      'deploy',
+      'k8s-overlay',
+      'kustomization.yaml',
     );
-    expect(logged.every((l: string) => l.startsWith('Dry run: would '))).toBe(
-      true,
+    await fs.mkdir(path.dirname(staleFile), { recursive: true });
+    await fs.writeFile(
+      staleFile,
+      'namespace: calm-old\nimages:\n  - name: placeholder\n    newName: old-image\n    newTag: v0\n',
     );
+    const before = await snapshot(published);
+    const c = context({ dir: published });
+    await createCalmDeployK8sAction({
+      settings: settings(),
+      localDir: localDir(),
+      kubectl: () => jest.fn(async () => ''),
+    }).handler(c);
+    expect(await snapshot(published)).toEqual(before);
+    const logged: string[] = c.logger.info.mock.calls.map((x: any[]) => x[0]);
+    const overlayDir = path.join(published, 'deploy', 'k8s-overlay');
+    const combined = logged.filter(l =>
+      l.startsWith('Dry run: would write the overlay'),
+    );
+    expect(combined).toHaveLength(1);
+    expect(combined[0]).toContain(overlayDir);
+    expect(combined[0]).toContain('orders:dry-run');
+    expect(combined[0]).toContain('calm-orders');
+    expect(combined[0]).toMatch(/then run .*kubectl.* apply -k /);
+    expect(combined[0]).toContain(`apply -k ${overlayDir}`);
+    // No line runs kubectl on its own, without saying the overlay is written first.
+    expect(
+      logged.filter(l => /would run/.test(l) && !/would write/.test(l)),
+    ).toEqual([]);
+    const shown = logged.find(l =>
+      l.startsWith('Dry run: the overlay would be:'),
+    );
+    expect(shown).toBeDefined();
+    expect(shown).toContain('\n# Written by calm:deploy:k8s. Apply by hand');
+    const yaml = YAML.parse(shown!.slice(shown!.indexOf('\n') + 1));
+    expect(yaml.namespace).toBe('calm-orders');
+    expect(yaml.images).toEqual([
+      expect.objectContaining({ newName: 'orders', newTag: 'dry-run' }),
+    ]);
+    expect(shown).not.toContain('old-image');
+    expect(shown).not.toContain('calm-old');
   });
 
   it('still fails without the cluster settings, with a missing base, and outside both folders', async () => {
@@ -866,17 +912,156 @@ describe('calm:deploy:k8s: a dry run', () => {
 });
 
 describe('planFromBase', () => {
-  it('names an object without a metadata.name as Kind/?', async () => {
-    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'calm-plan-'));
-    try {
-      await fs.mkdir(path.join(dir, 'deploy', 'k8s'), { recursive: true });
-      await fs.writeFile(
-        path.join(dir, 'deploy', 'k8s', 'objects.yaml'),
-        'apiVersion: v1\nkind: ConfigMap\n',
-      );
-      expect((await planFromBase(dir)).objects).toEqual(['ConfigMap/?']);
-    } finally {
-      await fs.rm(dir, { recursive: true, force: true });
+  let dir: string;
+  beforeEach(async () => {
+    dir = await fs.mkdtemp(path.join(os.tmpdir(), 'calm-plan-'));
+  });
+  afterEach(async () => {
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+  /** Writes files under `dir` by relative path; `kustomization.yaml` of the base lists `resources`. */
+  const put = async (files: Record<string, string>) => {
+    for (const [rel, text] of Object.entries(files)) {
+      await fs.mkdir(path.dirname(path.join(dir, rel)), { recursive: true });
+      await fs.writeFile(path.join(dir, rel), text);
     }
+  };
+  const kustomization = (...resources: string[]) =>
+    `resources:\n${resources.map(r => `  - ${r}\n`).join('')}`;
+  const cm = (name: string) =>
+    `apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: ${name}\n`;
+
+  it('names an object without a metadata.name as Kind/?', async () => {
+    await put({
+      'deploy/k8s/kustomization.yaml': kustomization('objects.yaml'),
+      'deploy/k8s/objects.yaml': 'apiVersion: v1\nkind: ConfigMap\n',
+    });
+    expect((await planFromBase(dir)).objects).toEqual(['ConfigMap/?']);
+  });
+
+  it('follows the resources in the order they are listed, not the file names', async () => {
+    await put({
+      'deploy/k8s/kustomization.yaml': kustomization('b.yaml', 'a.yaml'),
+      'deploy/k8s/a.yaml': cm('a'),
+      'deploy/k8s/b.yaml': `${cm('b1')}---\n${cm('b2')}`,
+    });
+    expect((await planFromBase(dir)).objects).toEqual([
+      'ConfigMap/b1',
+      'ConfigMap/b2',
+      'ConfigMap/a',
+    ]);
+  });
+
+  it('does not count a yaml file the kustomization does not list', async () => {
+    await put({
+      'deploy/k8s/kustomization.yaml': kustomization('listed.yaml'),
+      'deploy/k8s/listed.yaml': cm('listed'),
+      'deploy/k8s/unlisted.yaml': cm('unlisted'),
+    });
+    expect((await planFromBase(dir)).objects).toEqual(['ConfigMap/listed']);
+  });
+
+  it('does not count a kustomization.yml in the base as an object file', async () => {
+    await put({
+      'deploy/k8s/kustomization.yaml': kustomization('listed.yaml'),
+      'deploy/k8s/listed.yaml': cm('listed'),
+      'deploy/k8s/kustomization.yml': `apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\n`,
+    });
+    expect((await planFromBase(dir)).objects).toEqual(['ConfigMap/listed']);
+  });
+
+  it('gives no objects without resources', async () => {
+    await put({
+      'deploy/k8s/kustomization.yaml': 'namespace: x\n',
+      'deploy/k8s/a.yaml': cm('a'),
+    });
+    expect((await planFromBase(dir)).objects).toEqual([]);
+    await put({ 'deploy/k8s/kustomization.yaml': 'resources: []\n' });
+    expect((await planFromBase(dir)).objects).toEqual([]);
+  });
+
+  it('takes the objects of a listed subdirectory from its own kustomization', async () => {
+    await put({
+      'deploy/k8s/kustomization.yaml': kustomization('first.yaml', 'extra'),
+      'deploy/k8s/first.yaml': cm('first'),
+      'deploy/k8s/extra/kustomization.yaml': kustomization('more.yaml'),
+      'deploy/k8s/extra/more.yaml': cm('more'),
+      'deploy/k8s/extra/unlisted.yaml': cm('unlisted'),
+    });
+    expect((await planFromBase(dir)).objects).toEqual([
+      'ConfigMap/first',
+      'ConfigMap/more',
+    ]);
+  });
+
+  it('throws for an entry that leaves the published folder, though the target exists', async () => {
+    await put({
+      'pub/deploy/k8s/kustomization.yaml': kustomization('../../../x.yaml'),
+      'x.yaml': cm('x'),
+    });
+    await expect(planFromBase(path.join(dir, 'pub'))).rejects.toThrow(
+      /\.\.\/\.\.\/\.\.\/x\.yaml.*outside the published folder/,
+    );
+  });
+
+  it('throws for a listed file that is a symlink to a file outside the published folder', async () => {
+    await put({
+      'pub/deploy/k8s/kustomization.yaml': kustomization('link.yaml'),
+      'x.yaml': cm('x'),
+    });
+    await fs.symlink(
+      path.join(dir, 'x.yaml'),
+      path.join(dir, 'pub', 'deploy', 'k8s', 'link.yaml'),
+    );
+    await expect(planFromBase(path.join(dir, 'pub'))).rejects.toThrow(
+      /link\.yaml.*outside the published folder/,
+    );
+  });
+
+  it('throws for a resources value that is not a list', async () => {
+    await put({
+      'deploy/k8s/kustomization.yaml': 'resources: a.yaml\n',
+      'deploy/k8s/a.yaml': cm('a'),
+    });
+    await expect(planFromBase(dir)).rejects.toThrow(
+      /resources in .*kustomization\.yaml is not a list/,
+    );
+  });
+
+  it('throws on a directory symlink back to its own base as listed more than once', async () => {
+    await put({ 'deploy/k8s/kustomization.yaml': kustomization('sub') });
+    await fs.symlink('.', path.join(dir, 'deploy', 'k8s', 'sub'));
+    await expect(planFromBase(dir)).rejects.toThrow(/more than once/);
+  });
+
+  it('throws for a remote entry, saying a dry run cannot read it', async () => {
+    await put({
+      'deploy/k8s/kustomization.yaml': kustomization(
+        'https://example.com/x.yaml',
+      ),
+    });
+    await expect(planFromBase(dir)).rejects.toThrow(
+      /https:\/\/example\.com\/x\.yaml.*remote|remote.*https:\/\/example\.com\/x\.yaml/s,
+    );
+  });
+
+  it('throws naming a listed file that does not exist, and a directory without a kustomization', async () => {
+    await put({
+      'deploy/k8s/kustomization.yaml': kustomization('missing.yaml'),
+    });
+    await expect(planFromBase(dir)).rejects.toThrow(/missing\.yaml/);
+    await put({
+      'deploy/k8s/kustomization.yaml': kustomization('sub'),
+      'deploy/k8s/sub/a.yaml': cm('a'),
+    });
+    await expect(planFromBase(dir)).rejects.toThrow(/sub/);
+  });
+
+  it('throws on a directory listed in a cycle', async () => {
+    await put({
+      'deploy/k8s/kustomization.yaml': kustomization('sub'),
+      'deploy/k8s/sub/kustomization.yaml': kustomization('..'),
+    });
+    await expect(planFromBase(dir)).rejects.toThrow(/more than once/);
   });
 });
