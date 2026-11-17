@@ -1,0 +1,4 @@
+Copied unchanged from https://github.com/finos/architecture-as-code (commit 444f932c8eb289e5887a3abc205c51a6e3e75c7d),
+shared/test_fixtures/docify/c4/<name>/<name>.arch.json and <name>.md (the .md files only gain the first comment line).
+They are docify's older C4 generator output (before CALM's C4 standard): every non-person is a Container, a system with
+children is a Deployment_Node and every Rel is "Interacts With" or "Connects To". roundtrip.test.ts checks them weakly.

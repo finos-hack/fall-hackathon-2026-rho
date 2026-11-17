@@ -6,7 +6,14 @@ import { toResult, type ConvertResult } from './result';
 
 export { convertC4 } from './c4';
 export { convertMermaid } from './mermaid';
-export { looksLike } from './markdown';
+export {
+  FORMAT_LABELS,
+  formatHint,
+  kindsIn,
+  looksLike,
+  type FoundKind,
+  type ImportKind,
+} from './markdown';
 export type { ConvertResult } from './result';
 /** The draw.io name of {@link ConvertResult}, kept for existing callers. */
 export type ConvertDrawioResult = ConvertResult;
