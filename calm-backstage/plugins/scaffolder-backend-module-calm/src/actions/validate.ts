@@ -28,7 +28,12 @@ export function createCalmValidateAction(options: { hubUrl: string }) {
               'Architecture file, relative to the workspace. Default architecture.json',
             ),
         patternUrl: z =>
-          z.string().describe('Pattern URL in CALM Hub (the pattern $id)'),
+          z
+            .string()
+            .optional()
+            .describe(
+              'Pattern URL in CALM Hub (the pattern $id). Without it, the architecture is checked against the CALM schema only',
+            ),
         reportPath: z =>
           z
             .string()

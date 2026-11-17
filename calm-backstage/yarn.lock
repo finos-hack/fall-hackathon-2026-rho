@@ -5597,6 +5597,7 @@ __metadata:
     "@backstage/cli": "npm:^0.36.7"
     "@finos/calm-cli": "npm:1.71.0"
     "@internal/backstage-plugin-calm-common": "workspace:^"
+    "@internal/calm-import": "link:../../../calm-import"
     tar: "npm:^7.5.7"
   languageName: unknown
   linkType: soft
@@ -5649,6 +5650,12 @@ __metadata:
     "@internal/backstage-plugin-calm-node": "workspace:^"
     yaml: "npm:^2.2.1"
   languageName: unknown
+  linkType: soft
+
+"@internal/calm-import@link:../../../calm-import::locator=%40internal%2Fbackstage-plugin-calm-node%40workspace%3Aplugins%2Fcalm-node":
+  version: 0.0.0-use.local
+  resolution: "@internal/calm-import@link:../../../calm-import::locator=%40internal%2Fbackstage-plugin-calm-node%40workspace%3Aplugins%2Fcalm-node"
+  languageName: node
   linkType: soft
 
 "@internationalized/date@npm:^3.12.0, @internationalized/date@npm:^3.12.4":
