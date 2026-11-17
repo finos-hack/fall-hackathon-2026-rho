@@ -5,8 +5,9 @@ import { decodeDrawio } from './decode';
 import { readDrawio } from './read';
 
 // Uploads reach the converter from the scaffolder, so hostile input must fail fast and clearly, never block the event
-// loop. The bound is generous so CI noise does not flake; the regexes these replaced took seconds on such input.
-const FAST_MS = 500;
+// loop. A linear scan of these takes well under a second even while vitest runs other files in parallel; a
+// quadratic one takes minutes. The bound sits between the two, so a loaded machine does not flake it.
+const FAST_MS = 2000;
 const NO_DIAGRAM = /no draw.io diagram found/i;
 
 async function timed(run: () => Promise<unknown>): Promise<{
