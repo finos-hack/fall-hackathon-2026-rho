@@ -1,7 +1,11 @@
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { convertDrawio } from '@internal/calm-import';
+import {
+  convertC4,
+  convertDrawio,
+  convertMermaid,
+} from '@internal/calm-import';
 import { runCalm } from './cli';
 import { validateArchitecture } from './validate';
 
@@ -73,27 +77,32 @@ describe('validateArchitecture args', () => {
 });
 
 describe('validateArchitecture with the real CLI and no pattern', () => {
-  it('finds no errors in the converted draw.io sample', async () => {
-    const { runCalm: realRunCalm } = jest.requireActual('./cli');
-    mockedRun.mockImplementation(realRunCalm);
-    const text = await fs.readFile(
-      path.resolve(
-        __dirname,
-        '../../../../calm-import/examples/trading.drawio',
-      ),
-      'utf8',
-    );
-    const { architecture } = await convertDrawio(text);
-    const architecturePath = path.join(dir, 'architecture.json');
-    await fs.writeFile(architecturePath, JSON.stringify(architecture));
-    const result = await validateArchitecture({
-      architecturePath,
-      hubUrl,
-      dir,
-      outputPath: path.join(dir, 'report.json'),
-      logger,
-    });
-    expect(result.errors).toEqual([]);
-    expect(result.hasErrors).toBe(false);
-  }, 120_000);
+  it.each([
+    ['draw.io', 'trading.drawio', convertDrawio],
+    ['C4', 'trading.c4.md', convertC4],
+    ['Mermaid', 'trading.mmd', convertMermaid],
+  ])(
+    'finds no errors in the converted %s sample',
+    async (_, sample, convert) => {
+      const { runCalm: realRunCalm } = jest.requireActual('./cli');
+      mockedRun.mockImplementation(realRunCalm);
+      const text = await fs.readFile(
+        path.resolve(__dirname, '../../../../calm-import/examples', sample),
+        'utf8',
+      );
+      const { architecture } = await convert(text);
+      const architecturePath = path.join(dir, 'architecture.json');
+      await fs.writeFile(architecturePath, JSON.stringify(architecture));
+      const result = await validateArchitecture({
+        architecturePath,
+        hubUrl,
+        dir,
+        outputPath: path.join(dir, 'report.json'),
+        logger,
+      });
+      expect(result.errors).toEqual([]);
+      expect(result.hasErrors).toBe(false);
+    },
+    120_000,
+  );
 });

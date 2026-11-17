@@ -306,6 +306,18 @@ describe('calm:import:drawio', () => {
     );
   });
 
+  it('hints at Mermaid when a Mermaid diagram is uploaded', async () => {
+    await expect(
+      run({
+        name: 'trading',
+        diagram: dataUrl(Buffer.from('flowchart LR\n  a --> b\n'), 'a.txt'),
+      }),
+    ).rejects.toThrow(
+      'The file does not match the chosen format "draw.io"; it looks like Mermaid flowchart: choose "Mermaid flowchart" as the format',
+    );
+    expect(await exists(file())).toBe(false);
+  });
+
   it('writes only inside the workspace', async () => {
     await expect(
       run({
