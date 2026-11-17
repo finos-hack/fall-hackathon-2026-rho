@@ -65,6 +65,12 @@ rules, opens a pull request in Gitea and lets Flux apply it, recording every ste
 reference for a firm plugging its own deployment platform into CALM Hub ([PROFILE.md](calm-hub-deploy-extension/PROFILE.md)),
 and runs on this stack without changing Backstage.
 
+## draw.io import
+
+[`calm-import/`](calm-import/README.md) converts a draw.io diagram into a CALM architecture: boxes become nodes,
+arrows become relationships, and every place where the two don't match is listed as a guess. It is copied from the
+experimental calm-import converter in finos/architecture-as-code.
+
 ## Installation
 
 You need Docker, Node 26 (Node 22 and 24 are allowed but untested) and the Yarn version bundled in the project. The

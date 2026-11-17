@@ -1,0 +1,29 @@
+{
+  "name": "@internal/calm-import",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Converts a draw.io diagram into a CALM architecture. Copied from calm-import in finos/architecture-as-code.",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": "22 || 24 || 26"
+  },
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "prepare": "npm run build",
+    "test": "vitest run",
+    "tsc": "tsc --noEmit"
+  },
+  "dependencies": {
+    "fast-xml-parser": "^5.12.0"
+  },
+  "devDependencies": {
+    "@types/node": "24.10.1",
+    "typescript": "5.8.3",
+    "vitest": "3.2.7"
+  }
+}
