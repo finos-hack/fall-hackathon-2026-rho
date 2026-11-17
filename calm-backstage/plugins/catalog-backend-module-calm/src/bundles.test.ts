@@ -494,7 +494,7 @@ describe('bundle entities', () => {
     return {
       ...built,
       entities: built.entities.filter(
-        e => e.metadata.name !== 'calm-import-drawio',
+        e => e.metadata.name !== 'calm-import-diagram',
       ),
     };
   };

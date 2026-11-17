@@ -1,4 +1,8 @@
-import type { PatternDecision } from '@internal/backstage-plugin-calm-common';
+import {
+  IMPORT_FORMAT_LABELS,
+  IMPORT_FORMATS,
+  type PatternDecision,
+} from '@internal/backstage-plugin-calm-common';
 import {
   BundleInfo,
   HubDocument,
@@ -594,7 +598,7 @@ describe('buildEntities: architectures of published services', () => {
       ],
     });
     expect(entities.map(e => `${e.kind}:${e.metadata.name}`)).toEqual([
-      'Template:calm-import-drawio',
+      'Template:calm-import-diagram',
       'Component:orders-service',
     ]);
     expect(serviceArchitectures).toEqual(['hackathon/billing-api']);
@@ -611,27 +615,68 @@ describe('import Template', () => {
       controls: [],
       bundles: [],
       gitops,
-    }).entities.find(e => e.metadata.name === 'calm-import-drawio') as any;
+    }).entities.find(e => e.metadata.name === 'calm-import-diagram') as any;
 
-  it('is always emitted, with drawio, validate and store steps in that order', () => {
+  // The output of whichever step ran, then the field: `0 or undefined` would render a count of 0 as blank.
+  const pick = (field: string) =>
+    `(steps.drawio.output or steps.c4.output or steps.mermaid.output).${field}`;
+
+  it('is always emitted, with three convert steps, then validate and store', () => {
     for (const gitops of [false, true]) {
       const t = find(gitops);
       expect(t.kind).toBe('Template');
-      expect(t.metadata.title).toBe('Import a draw.io diagram');
+      expect(t.metadata.title).toBe('Import a diagram');
       expect(t.metadata.tags).toEqual(['calm', 'calm-import']);
+      expect(t.spec.steps.map((s: any) => s.id)).toEqual([
+        'drawio',
+        'c4',
+        'mermaid',
+        'validate',
+        'store',
+      ]);
       expect(t.spec.steps.map((s: any) => s.action)).toEqual([
         'calm:import:drawio',
+        'calm:import:c4',
+        'calm:import:mermaid',
         'calm:validate',
         'calm:import:store',
       ]);
     }
   });
 
+  it('runs exactly the convert step that matches the format', () => {
+    const steps = find(false).spec.steps;
+    for (const id of ['drawio', 'c4', 'mermaid']) {
+      const step = steps.find((s: any) => s.id === id);
+      expect(step.if).toBe(`\${{ parameters.format === '${id}' }}`);
+      expect(step.input).toEqual({
+        name: '${{ parameters.name }}',
+        diagram: '${{ parameters.diagram }}',
+      });
+    }
+  });
+
   it('validates against the CALM schema only (no patternUrl) and stores last', () => {
     const t = find(false);
-    const validate = t.spec.steps[1];
-    expect(validate.input?.patternUrl).toBeUndefined();
-    expect(t.spec.steps[2].action).toBe('calm:import:store');
+    const validate = t.spec.steps[3];
+    expect(validate.input).toEqual({ architecturePath: 'architecture.json' });
+    expect(t.spec.steps[4].action).toBe('calm:import:store');
+    expect(t.spec.steps[4].input.architecturePath).toBe('architecture.json');
+  });
+
+  it('asks for the format, defaulting to draw.io', () => {
+    const form = find(false).spec.parameters[0];
+    expect(form.required).toEqual(['name', 'format', 'diagram']);
+    expect(form.properties.format).toMatchObject({
+      type: 'string',
+      enum: ['drawio', 'c4', 'mermaid'],
+      enumNames: ['draw.io', 'C4 (Mermaid or PlantUML)', 'Mermaid flowchart'],
+      default: 'drawio',
+    });
+    // The action's wrong-format hint names the formats with the same labels.
+    expect(form.properties.format.enumNames).toEqual(
+      IMPORT_FORMATS.map(f => IMPORT_FORMAT_LABELS[f]),
+    );
   });
 
   it('takes the diagram as a data-url and a valid name', () => {
@@ -640,8 +685,9 @@ describe('import Template', () => {
       type: 'string',
       format: 'data-url',
       title: 'Diagram',
-      description: 'A .drawio, .xml or draw.io .svg file',
-      'ui:options': { accept: '.drawio,.xml,.svg' },
+      'ui:options': {
+        accept: '.drawio,.xml,.svg,.md,.mmd,.puml,.plantuml,.txt',
+      },
       // The review step would otherwise print the whole data-url.
       'ui:backstage': { review: { mask: '(the uploaded file)' } },
     });
@@ -663,11 +709,19 @@ describe('import Template', () => {
     ).toBe(true);
   });
 
-  it('lists the guesses as a markdown list, or None. when there are none', () => {
+  it('reads the counts and guesses from whichever convert step ran', () => {
     const content: string = find(false).spec.output.text[0].content;
-    // The join separator is a real newline inside the Nunjucks string literal, which renders as is.
-    expect(content).toMatch(
-      /\nGuesses made while converting \(check them\):\n\$\{\{ \("- " \+ \(steps\.convert\.output\.guesses \| join\("\n- "\)\)\) if \(steps\.convert\.output\.guesses \| length\) else "None\." \}\}$/,
+    expect(content).toContain(
+      `**\${{ ${pick('nodes')} }} nodes** and **\${{ ${pick(
+        'relationships',
+      )} }} relationships**`,
     );
+    // The join separator is a real newline inside the Nunjucks string literal, which renders as is.
+    const g = pick('guesses');
+    expect(
+      content.endsWith(
+        `\nGuesses made while converting (check them):\n\${{ ("- " + (${g} | join("\n- "))) if (${g} | length) else "None." }}`,
+      ),
+    ).toBe(true);
   });
 });

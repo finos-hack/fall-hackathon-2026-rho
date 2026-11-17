@@ -8,6 +8,8 @@ import {
   BundleKind,
   BundlePatternRef,
   CALM_GITOPS_TAG,
+  IMPORT_FORMAT_LABELS,
+  IMPORT_FORMATS,
   PatternDecision,
   TemplateDecisionParameter,
   bundleEntityName,
@@ -983,11 +985,11 @@ export function upgradeTemplateEntity(hubUrl: string): Entity {
   };
 }
 
-/** Name of the Template that imports a draw.io diagram as an architecture in CALM Hub. */
-export const IMPORT_TEMPLATE_NAME = 'calm-import-drawio';
+/** Name of the Template that imports a draw.io, C4 or Mermaid diagram as an architecture in CALM Hub. */
+export const IMPORT_TEMPLATE_NAME = 'calm-import-diagram';
 
 /**
- * The Template that imports a draw.io diagram: convert it to a CALM architecture, validate it against the CALM
+ * The Template that imports a draw.io, C4 or Mermaid diagram: the step for the chosen format converts it to a CALM architecture, validate it against the CALM
  * schema and store it in CALM Hub. The validate step throws on errors, so nothing is stored for an invalid import.
  */
 export function importTemplateEntity(hubUrl: string): Entity {
@@ -996,9 +998,9 @@ export function importTemplateEntity(hubUrl: string): Entity {
     kind: 'Template',
     metadata: {
       name: IMPORT_TEMPLATE_NAME,
-      title: 'Import a draw.io diagram',
+      title: 'Import a diagram',
       description:
-        'Convert a draw.io diagram (.drawio, .xml or draw.io .svg) into a CALM architecture, validate it and store it in CALM Hub. It appears in the catalog as a Component.',
+        'Convert a draw.io, C4 (Mermaid or PlantUML) or Mermaid flowchart diagram into a CALM architecture, validate it and store it in CALM Hub. It appears in the catalog as a Component.',
       annotations: { [ANN.hubUrl]: hubUrl },
       tags: ['calm', 'calm-import'],
     },
@@ -1008,7 +1010,7 @@ export function importTemplateEntity(hubUrl: string): Entity {
       parameters: [
         {
           title: 'Diagram',
-          required: ['name', 'diagram'],
+          required: ['name', 'format', 'diagram'],
           properties: {
             name: {
               title: 'Name',
@@ -1019,12 +1021,22 @@ export function importTemplateEntity(hubUrl: string): Entity {
               maxLength: 63,
               'ui:autofocus': true,
             },
+            format: {
+              title: 'Format',
+              type: 'string',
+              enum: [...IMPORT_FORMATS],
+              enumNames: IMPORT_FORMATS.map(f => IMPORT_FORMAT_LABELS[f]),
+              default: 'drawio',
+            },
             diagram: {
               title: 'Diagram',
               type: 'string',
               format: 'data-url',
-              description: 'A .drawio, .xml or draw.io .svg file',
-              'ui:options': { accept: '.drawio,.xml,.svg' },
+              description:
+                'A draw.io file (.drawio, .xml, .svg), or a C4 or Mermaid diagram as a text file (.md, .mmd, .puml, .plantuml, .txt)',
+              'ui:options': {
+                accept: '.drawio,.xml,.svg,.md,.mmd,.puml,.plantuml,.txt',
+              },
               // Without a mask the review step prints the whole data-url.
               'ui:backstage': { review: { mask: '(the uploaded file)' } },
             },
@@ -1038,9 +1050,30 @@ export function importTemplateEntity(hubUrl: string): Entity {
       ],
       steps: [
         {
-          id: 'convert',
+          id: 'drawio',
           name: 'Convert the draw.io diagram to a CALM architecture',
+          if: "${{ parameters.format === 'drawio' }}",
           action: 'calm:import:drawio',
+          input: {
+            name: '${{ parameters.name }}',
+            diagram: '${{ parameters.diagram }}',
+          },
+        },
+        {
+          id: 'c4',
+          name: 'Convert the C4 diagram to a CALM architecture',
+          if: "${{ parameters.format === 'c4' }}",
+          action: 'calm:import:c4',
+          input: {
+            name: '${{ parameters.name }}',
+            diagram: '${{ parameters.diagram }}',
+          },
+        },
+        {
+          id: 'mermaid',
+          name: 'Convert the Mermaid flowchart to a CALM architecture',
+          if: "${{ parameters.format === 'mermaid' }}",
+          action: 'calm:import:mermaid',
           input: {
             name: '${{ parameters.name }}',
             diagram: '${{ parameters.diagram }}',
@@ -1051,7 +1084,7 @@ export function importTemplateEntity(hubUrl: string): Entity {
           name: 'Validate against the CALM schema',
           action: 'calm:validate',
           input: {
-            architecturePath: '${{ steps.convert.output.architecturePath }}',
+            architecturePath: 'architecture.json',
           },
         },
         {
@@ -1060,7 +1093,7 @@ export function importTemplateEntity(hubUrl: string): Entity {
           action: 'calm:import:store',
           input: {
             name: '${{ parameters.name }}',
-            architecturePath: '${{ steps.convert.output.architecturePath }}',
+            architecturePath: 'architecture.json',
             description: '${{ parameters.description }}',
           },
         },
@@ -1083,12 +1116,12 @@ export function importTemplateEntity(hubUrl: string): Entity {
           {
             title: 'Import',
             content: [
-              'Imported **${{ steps.convert.output.nodes }} nodes** and **${{ steps.convert.output.relationships }} relationships** as `${{ steps.store.output.namespace }}/${{ steps.store.output.architecture }}` version ${{ steps.store.output.version }}${{ (", at " + steps.store.output.url) if steps.store.output.url else "" }}.',
+              'Imported **${{ (steps.drawio.output or steps.c4.output or steps.mermaid.output).nodes }} nodes** and **${{ (steps.drawio.output or steps.c4.output or steps.mermaid.output).relationships }} relationships** as `${{ steps.store.output.namespace }}/${{ steps.store.output.architecture }}` version ${{ steps.store.output.version }}${{ (", at " + steps.store.output.url) if steps.store.output.url else "" }}.',
               '',
               "The Component `${{ steps.store.output.entityRef }}` appears in the catalog after the CALM provider's next read.",
               '',
               'Guesses made while converting (check them):',
-              '${{ ("- " + (steps.convert.output.guesses | join("\n- "))) if (steps.convert.output.guesses | length) else "None." }}',
+              '${{ ("- " + ((steps.drawio.output or steps.c4.output or steps.mermaid.output).guesses | join("\n- "))) if ((steps.drawio.output or steps.c4.output or steps.mermaid.output).guesses | length) else "None." }}',
             ].join('\n'),
           },
         ],
