@@ -1127,6 +1127,36 @@ describe('planFromBase', () => {
     await expect(planFromBase(dir)).rejects.toThrow(/does not exist/);
   });
 
+  it('reads an existing local entry whose first segment has a dot', async () => {
+    await put({
+      'deploy/k8s/kustomization.yaml': kustomization(
+        'v1.2/sub//x.yaml',
+        'base.d//y.yaml',
+      ),
+      'deploy/k8s/v1.2/sub/x.yaml': cm('x'),
+      'deploy/k8s/base.d/y.yaml': cm('y'),
+    });
+    expect((await planFromBase(dir)).objects).toEqual([
+      'ConfigMap/x',
+      'ConfigMap/y',
+    ]);
+  });
+
+  it.each(['gitlab.example.com/org/repo', 'github.com:org/repo'])(
+    'throws the remote message for a missing host-like entry %s',
+    async entry => {
+      await put({ 'deploy/k8s/kustomization.yaml': kustomization(entry) });
+      await expect(planFromBase(dir)).rejects.toThrow(/is remote/);
+    },
+  );
+
+  it('says a missing v1.2/missing.yaml does not exist (v1.2 is not a host)', async () => {
+    await put({
+      'deploy/k8s/kustomization.yaml': kustomization('v1.2/missing.yaml'),
+    });
+    await expect(planFromBase(dir)).rejects.toThrow(/does not exist/);
+  });
+
   it('still reads local entries such as ./sub and ../k8s', async () => {
     await put({
       'deploy/k8s/kustomization.yaml': kustomization(

@@ -267,23 +267,25 @@ export async function listAndWaitForRollouts(
   return deployed;
 }
 
-/**
- * Whether a kustomization resource entry names something remote: a URL, a git repo, a `?ref=`, or a host followed by
- * kustomize's `//` repo/sub-path separator (`example.com/org/repo//path`; `./a//b.yaml` and `sub//x.yaml` are local).
- */
+/** Whether a kustomization resource entry is clearly remote: a URL, a git address or a `?ref=`. */
 function isRemoteResource(entry: string): boolean {
-  const host = entry.split('/')[0];
-  const hostThenSeparator =
-    host.includes('.') &&
-    !host.startsWith('.') &&
-    entry.indexOf('//', host.length) !== -1;
   return (
     entry.includes('://') ||
     entry.startsWith('git@') ||
     entry.startsWith('git::') ||
     /^(github\.com|gitlab\.com|bitbucket\.org)\//.test(entry) ||
-    entry.includes('?ref=') ||
-    hostThenSeparator
+    entry.includes('?ref=')
+  );
+}
+
+/**
+ * Whether a kustomization resource entry that is not on disk starts with a host (a name ending in a letters-only
+ * TLD) followed by `/` or `:` and more text, as a kustomize git address does (`example.com/org/repo//path`).
+ */
+function looksLikeRemoteHost(entry: string): boolean {
+  const m = /^([^/:]+)[/:](.+)$/.exec(entry);
+  return (
+    m !== null && /^[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}$/.test(m[1])
   );
 }
 
@@ -295,10 +297,10 @@ function isRemoteResource(entry: string): boolean {
  * contributes the documents with a `kind`; a directory entry contributes what its own `kustomization.yaml` lists.
  * Only `kustomization.yaml` is read, as `requireBase` does (not `kustomization.yml` or `Kustomization`). Every entry
  * must stay inside `dir`. A `kustomization.yaml` that is not a mapping, an entry that is not a string, a remote
- * entry (a URL, `git@`, `git::`, `github.com/` and the like, `?ref=` or a host followed by a `//` repo path), a
- * missing file or directory, and a directory listed more than once (a cycle) throw. Nothing else of kustomize is
- * applied: `patches`, `components`, `generators`, `namePrefix` and the like are ignored, so the list is what the files
- * hold, not what `kubectl kustomize` would render.
+ * entry (a URL, `git@`, `git::`, `github.com/` and the like or `?ref=`; or, when not on disk, a host followed by `/` or
+ * `:`), a missing file or directory, and a directory listed more than once (a cycle) throw. A local path is tried
+ * first, as in kustomize. Nothing else of kustomize is applied: `patches`, `components`, `generators`, `namePrefix`
+ * and the like are ignored, so the list is what the files hold, not what `kubectl kustomize` would render.
  */
 export async function planFromBase(
   dir: string,
@@ -354,7 +356,13 @@ export async function planFromBase(
         );
       }
       const target = inside(kustomizationDir, name);
+      // A local path comes first, as in kustomize; only what is not on disk can be a git address.
       const stat = await fs.stat(target).catch(() => {
+        if (looksLikeRemoteHost(name)) {
+          throw new Error(
+            `The kustomization resource ${name} is remote, and a dry run cannot read remote resources`,
+          );
+        }
         throw new Error(
           `The kustomization resource ${name} does not exist in ${kustomizationDir}`,
         );
