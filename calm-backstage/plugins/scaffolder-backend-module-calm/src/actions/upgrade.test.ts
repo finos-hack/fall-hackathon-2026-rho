@@ -219,6 +219,7 @@ const renderAction = (
   opts: {
     hub?: (namespace: string, id: string, version: string) => Promise<any>;
     entity?: any;
+    renderInto?: typeof renderInto;
   } = {},
 ) =>
   createCalmUpgradeRenderAction({
@@ -226,7 +227,7 @@ const renderAction = (
     gitops: gitops(),
     localDir,
     listBundles: async () => bundles,
-    renderInto,
+    renderInto: opts.renderInto ?? renderInto,
     hub: { architecture: opts.hub ?? (async (n, i, v) => hubDoc(n, i, v)) },
   });
 
@@ -382,6 +383,205 @@ describe('calm:upgrade:render', () => {
     });
     expect(await git(dir, ['rev-parse', 'HEAD'])).toBe(head);
     expect(await git(dir, ['branch', '--list'])).toBe('* main');
+  });
+});
+
+describe('calm:upgrade:render with files the developer changed', () => {
+  const codeBundles = [
+    meta('node-service', '1.0.0', 'starter'),
+    meta('node-service', '1.1.0', 'starter'),
+    meta('k8s-deploy', '1.0.0', 'deployment'),
+  ];
+  const codeInput = {
+    entityRef: 'component:default/orders',
+    upgradeDeploy: false,
+  };
+  /** node-service 1.1.0 also renders src/new.js. */
+  const withNewFile = async (b: string, a: string, o: string) => {
+    const r = await renderInto(b, a, o);
+    if (b !== 'node-service@1.1.0') {
+      return r;
+    }
+    await fs.writeFile(path.join(o, 'src/new.js'), 'new\n');
+    return { ...r, files: [...r.files, 'src/new.js'].sort() };
+  };
+  /** The developer's change, committed and pushed: main stays clean. */
+  async function developerChange(
+    dir: string,
+    remote: string,
+    change: () => Promise<void>,
+  ) {
+    await change();
+    await gitCommitAll(dir, 'developer change');
+    await gitPush(dir, `file://${remote}`, 'main');
+  }
+  const write = (dir: string, f: string, t: string) =>
+    fs.writeFile(path.join(dir, f), t);
+
+  it('refuses a changed starter file, names it and both versions, and leaves main as it was', async () => {
+    const { dir, remote } = await service();
+    await developerChange(dir, remote, () =>
+      write(dir, 'src/server.js', 'developer edit\n'),
+    );
+    const head = await git(dir, ['rev-parse', 'HEAD']);
+    const remoteMain = await git(remote, ['rev-parse', 'main']);
+    const error = await renderAction(codeBundles)
+      .handler(ctx(codeInput))
+      .then(
+        () => undefined,
+        e => e as Error,
+      );
+    expect(error?.message).toContain('src/server.js');
+    expect(error?.message).toContain('orders');
+    expect(error?.message).toContain('node-service 1.1.0');
+    expect(error?.message).toContain('node-service 1.0.0');
+    expect(error?.message).toContain(
+      'Undo or move those changes, or upgrade only the deployment rules, then upgrade again; merging them is not supported yet.',
+    );
+    expect(await git(dir, ['branch', '--list'])).toBe('* main');
+    expect(await git(dir, ['rev-parse', 'HEAD'])).toBe(head);
+    expect(await git(dir, ['status', '--porcelain'])).toBe('');
+    expect(await fs.readFile(path.join(dir, 'src/server.js'), 'utf-8')).toBe(
+      'developer edit\n',
+    );
+    expect(await fs.readFile(path.join(dir, 'src/old.js'), 'utf-8')).toBe(
+      'old\n',
+    );
+    expect(await fs.readFile(path.join(dir, 'Dockerfile'), 'utf-8')).toBe(
+      'FROM node\n',
+    );
+    expect(await git(remote, ['rev-parse', 'main'])).toBe(remoteMain);
+  });
+
+  it('refuses a file the developer deleted that the new version also renders', async () => {
+    const { dir, remote } = await service();
+    await developerChange(dir, remote, () =>
+      fs.rm(path.join(dir, 'Dockerfile')),
+    );
+    await expect(
+      renderAction(codeBundles).handler(ctx(codeInput)),
+    ).rejects.toThrow(/Dockerfile/);
+    expect(await git(dir, ['branch', '--list'])).toBe('* main');
+  });
+
+  it('goes ahead when the developer deleted a file only the old version renders', async () => {
+    const { dir, remote } = await service();
+    await developerChange(dir, remote, () =>
+      fs.rm(path.join(dir, 'src/old.js')),
+    );
+    const c = ctx(codeInput);
+    await renderAction(codeBundles).handler(c);
+    expect(c.outputs.changed).toBe(true);
+    expect(await fs.readFile(path.join(dir, 'src/server.js'), 'utf-8')).toBe(
+      '// node-service@1.1.0\n',
+    );
+  });
+
+  it('refuses a developer file at a path only the new version renders, with other content', async () => {
+    const { dir, remote } = await service();
+    await developerChange(dir, remote, () =>
+      write(dir, 'src/new.js', 'mine\n'),
+    );
+    await expect(
+      renderAction(codeBundles, { renderInto: withNewFile }).handler(
+        ctx(codeInput),
+      ),
+    ).rejects.toThrow(/src\/new\.js/);
+    expect(await git(dir, ['branch', '--list'])).toBe('* main');
+    expect(await fs.readFile(path.join(dir, 'src/new.js'), 'utf-8')).toBe(
+      'mine\n',
+    );
+  });
+
+  it('goes ahead when the developer file has the content the new version renders', async () => {
+    const { dir, remote } = await service();
+    await developerChange(dir, remote, () => write(dir, 'src/new.js', 'new\n'));
+    const c = ctx(codeInput);
+    await renderAction(codeBundles, { renderInto: withNewFile }).handler(c);
+    expect(c.outputs.changed).toBe(true);
+    expect(await fs.readFile(path.join(dir, 'src/new.js'), 'utf-8')).toBe(
+      'new\n',
+    );
+  });
+
+  it('refuses a directory where the new version renders a file, and leaves main clean', async () => {
+    const { dir, remote } = await service();
+    await developerChange(dir, remote, async () => {
+      await fs.mkdir(path.join(dir, 'src/new.js'));
+      await write(dir, 'src/new.js/index.js', 'mine\n');
+    });
+    await expect(
+      renderAction(codeBundles, { renderInto: withNewFile }).handler(
+        ctx(codeInput),
+      ),
+    ).rejects.toThrow(/src\/new\.js/);
+    expect(await git(dir, ['branch', '--list'])).toBe('* main');
+    expect(await git(dir, ['status', '--porcelain'])).toBe('');
+  });
+
+  it('returns the working copy to main when a rendered path is a symlink out of the folder', async () => {
+    const { dir, remote } = await service();
+    const outside = path.join(root, 'outside.js');
+    await fs.writeFile(outside, 'elsewhere\n');
+    await developerChange(dir, remote, async () => {
+      await fs.rm(path.join(dir, 'src/server.js'));
+      await fs.symlink(outside, path.join(dir, 'src/server.js'));
+    });
+    await expect(
+      renderAction(codeBundles).handler(ctx(codeInput)),
+    ).rejects.toThrow();
+    expect(await git(dir, ['branch', '--list'])).toBe('* main');
+    expect(await git(dir, ['status', '--porcelain'])).toBe('');
+    expect(await fs.readFile(outside, 'utf-8')).toBe('elsewhere\n');
+  });
+
+  it('names every changed file, sorted', async () => {
+    const { dir, remote } = await service();
+    await developerChange(dir, remote, async () => {
+      await write(dir, 'src/server.js', 'edit\n');
+      await write(dir, 'src/new.js', 'mine\n');
+    });
+    const error = await renderAction(codeBundles, { renderInto: withNewFile })
+      .handler(ctx(codeInput))
+      .then(
+        () => undefined,
+        e => e as Error,
+      );
+    expect(error?.message).toContain('src/new.js, src/server.js');
+  });
+
+  it('does not keep the service locked after a refusal', async () => {
+    const { dir, remote } = await service();
+    await developerChange(dir, remote, () =>
+      write(dir, 'src/server.js', 'edit\n'),
+    );
+    const first = { ...ctx(codeInput), task: { id: 'task-a' } };
+    await expect(renderAction(codeBundles).handler(first)).rejects.toThrow(
+      /src\/server\.js/,
+    );
+    await developerChange(dir, remote, () =>
+      write(dir, 'src/server.js', '// node-service@1.0.0\n'),
+    );
+    const second = { ...ctx(codeInput), task: { id: 'task-b' } };
+    await renderAction(codeBundles).handler(second);
+    expect(second.outputs.changed).toBe(true);
+  });
+
+  it('does not refuse a deployment-only upgrade because a starter file changed', async () => {
+    const { dir, remote } = await service();
+    await developerChange(dir, remote, () =>
+      write(dir, 'src/server.js', 'edit\n'),
+    );
+    const c = ctx({ entityRef: 'component:default/orders' });
+    await renderAction([
+      meta('node-service', '1.0.0', 'starter'),
+      meta('k8s-deploy', '1.0.0', 'deployment'),
+      meta('k8s-deploy', '1.1.0', 'deployment'),
+    ]).handler(c);
+    expect(c.outputs).toMatchObject({ changed: true, codeChanged: false });
+    expect(await fs.readFile(path.join(dir, 'src/server.js'), 'utf-8')).toBe(
+      'edit\n',
+    );
   });
 });
 

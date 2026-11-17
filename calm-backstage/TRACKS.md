@@ -62,8 +62,9 @@ Scope: where bundles live (Git, npm, CALM Hub), versions, "bundle update availab
   bundles are published from the Gitea repository `calm-templates/bundles` with their source and revision as OCI
   annotations, and a published version never changes; the Template Explorer shows files, sources, diffs and who uses
   what; "update available" is on the service card with an Upgrade Template.
-- Left (part 3): an upgrade overwrites the files the starter rendered (no three-way merge of a developer's edits);
-  a bundle is published from Git by a script, not by a Backstage action; bundles fit patterns by id only.
+- Left (part 3): a code upgrade fails, naming the files, when the developer changed files the starter rendered (no
+  three-way merge of a developer's edits yet); a bundle is published from Git by a script, not by a Backstage action;
+  bundles fit patterns by id only.
 - Done: bundles are OCI artifacts in a local registry (`localhost:5050/calm-bundles/<name>:<version>`, pushed with
   `yarn bundles:push`); the catalog lists them and `calm:template` pulls them by digest. `calm-backstage.json` says
   which pattern a bundle fits and whether it can be deployed. Bundle fit ignores the pattern version.

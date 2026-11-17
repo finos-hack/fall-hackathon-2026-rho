@@ -144,6 +144,59 @@ export function withUpgradedBundles(
   return YAML.stringify(e);
 }
 
+/** What is at a path: its bytes, nothing, or something in the way of a file (a directory, or a file as a parent). */
+async function readIfExists(
+  file: string,
+): Promise<Buffer | 'missing' | 'blocked'> {
+  return fs.readFile(file).catch(e => {
+    if (e?.code === 'ENOENT') {
+      return 'missing' as const;
+    }
+    if (e?.code === 'EISDIR' || e?.code === 'ENOTDIR') {
+      return 'blocked' as const;
+    }
+    throw e;
+  });
+}
+
+/**
+ * The files a code upgrade would overwrite or bring back although the developer changed them: a file the old starter
+ * rendered that differs from that render or is gone (and the new one renders it), a file only the new starter
+ * renders that is already there with other content, and a rendered path with something else in the way (a
+ * directory, or a file as a parent), which a later write or delete could not get past.
+ */
+async function changedStarterFiles(
+  dir: string,
+  tmp: string,
+  oldFiles: string[],
+  newFiles: string[],
+): Promise<string[]> {
+  const changed: string[] = [];
+  for (const f of oldFiles) {
+    const theirs = await readIfExists(resolveSafeChildPath(dir, f));
+    if (theirs === 'blocked') {
+      changed.push(f);
+    } else if (theirs === 'missing') {
+      if (newFiles.includes(f)) {
+        changed.push(f);
+      }
+    } else if (!theirs.equals(await fs.readFile(path.join(tmp, 'old', f)))) {
+      changed.push(f);
+    }
+  }
+  for (const f of newFiles.filter(x => !oldFiles.includes(x))) {
+    const theirs = await readIfExists(resolveSafeChildPath(dir, f));
+    if (
+      theirs === 'blocked' ||
+      (theirs !== 'missing' &&
+        !theirs.equals(await fs.readFile(path.join(tmp, 'new', f))))
+    ) {
+      changed.push(f);
+    }
+  }
+  return changed.sort();
+}
+
 async function copyFiles(from: string, files: string[], to: string) {
   for (const f of files) {
     const dest = resolveSafeChildPath(to, f);
@@ -155,8 +208,10 @@ async function copyFiles(from: string, files: string[], to: string) {
 /**
  * `calm:upgrade:render`: prepares an upgrade of a service in its working copy, on a new branch, without pushing.
  * Starts from a clean main (a branch left by a failed run is deleted). A code upgrade replaces the files the old
- * starter rendered with those the new one renders (files the developer added stay); a deployment upgrade replaces
- * deploy/k8s. catalog-info.yaml gets the new versions. Nothing changes when neither side has a newer version.
+ * starter rendered with those the new one renders (files the developer added stay), but fails, naming the files and
+ * changing nothing, when the developer changed one of them (or put other content where the new starter renders a
+ * file); a deployment upgrade replaces deploy/k8s. catalog-info.yaml gets the new versions. Nothing changes when
+ * neither side has a newer version.
  */
 export function createCalmUpgradeRenderAction(options: {
   catalog: CatalogService;
@@ -171,7 +226,7 @@ export function createCalmUpgradeRenderAction(options: {
   return createTemplateAction({
     id: 'calm:upgrade:render',
     description:
-      "Prepares an upgrade of a CALM service's starter (code) and/or deployment rules on a branch of its working copy: re-renders with the newest fitting versions and commits, without pushing.",
+      "Prepares an upgrade of a CALM service's starter (code) and/or deployment rules on a branch of its working copy: re-renders with the newest fitting versions and commits, without pushing. A code upgrade fails, naming the files, when the developer changed files the starter rendered.",
     schema: {
       input: {
         entityRef: z => z.string().describe('The service Component'),
@@ -375,6 +430,32 @@ export function createCalmUpgradeRenderAction(options: {
                 ctx.logger,
               );
               starterRef = now;
+              let changed: string[];
+              try {
+                changed = await changedStarterFiles(
+                  dir,
+                  tmp,
+                  old.files,
+                  now.files,
+                );
+              } catch (e) {
+                await gitCheckoutBranch(dir, gitops.branch, false, git);
+                await gitDeleteBranch(dir, branch, git);
+                throw e;
+              }
+              if (changed.length) {
+                await gitCheckoutBranch(dir, gitops.branch, false, git);
+                await gitDeleteBranch(dir, branch, git);
+                throw new Error(
+                  `The upgrade of ${name} to ${wanted.starter.name} ${
+                    wanted.starter.to
+                  } would overwrite files changed since ${
+                    wanted.starter.name
+                  } ${wanted.starter.from} rendered them: ${changed.join(
+                    ', ',
+                  )}. Undo or move those changes, or upgrade only the deployment rules, then upgrade again; merging them is not supported yet.`,
+                );
+              }
               for (const f of old.files.filter(x => !now.files.includes(x))) {
                 await fs.rm(resolveSafeChildPath(dir, f), { force: true });
               }
