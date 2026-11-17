@@ -210,7 +210,8 @@ build of Quarkus 3.33.4 and 3.40.1 (BOM `com.redhat.quarkus.platform:quarkus-bom
   upgrades from every older version of a deployment bundle would have caught it.
 - **Handlebars reads `${PORT:{{port}}}` as a triple-stash** and stops rendering. Transformers give such values whole.
 - **An upgrade re-renders, it does not merge.** Files the old starter rendered are replaced; files the developer
-  added stay. Edits to rendered files are overwritten (the pull request shows it). A three-way merge is the next step.
+  added stay. If the developer changed a rendered file (or put a file where the new starter renders one), the render
+  fails and names the files, and nothing changes. A three-way merge is the next step.
 - **Java builds in `minikube image build` are fine with a BuildKit cache mount.** Spring Boot: 96 s cold, 2 s after a
   code change, 13 s after a Boot upgrade. Red Hat Quarkus: 454 s cold (the Red Hat Maven repository), 109 s for a new
   platform version on a warm cache.
