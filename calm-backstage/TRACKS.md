@@ -127,6 +127,8 @@ Scope: GitHub publish, dry run, register the architecture in the Hub.
 - Swap in `publish:github` + `catalog:register` (url location) for a real repository; no GitHub credentials are set up.
 - `calm:generate`, `calm:fill`, `calm:validate`, `calm:template`, `calm:register:hub` and the publish to deploy steps
   support dry runs; the template editor's dry run can use them.
+- Done: the `calm-import-drawio` Template (Import a draw.io diagram) runs `calm:import:drawio`, `calm:validate` and
+  `calm:import:store`: an uploaded draw.io diagram becomes an architecture in CALM Hub and a catalog Component.
 
 ## F. Provisioning
 

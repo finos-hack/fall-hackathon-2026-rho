@@ -594,9 +594,80 @@ describe('buildEntities: architectures of published services', () => {
       ],
     });
     expect(entities.map(e => `${e.kind}:${e.metadata.name}`)).toEqual([
+      'Template:calm-import-drawio',
       'Component:orders-service',
     ]);
     expect(serviceArchitectures).toEqual(['hackathon/billing-api']);
     expect(warnings).toEqual([]);
+  });
+});
+
+describe('import Template', () => {
+  const find = (gitops: boolean) =>
+    buildEntities({
+      hubUrl,
+      patterns: [],
+      architectures: [],
+      controls: [],
+      bundles: [],
+      gitops,
+    }).entities.find(e => e.metadata.name === 'calm-import-drawio') as any;
+
+  it('is always emitted, with drawio, validate and store steps in that order', () => {
+    for (const gitops of [false, true]) {
+      const t = find(gitops);
+      expect(t.kind).toBe('Template');
+      expect(t.metadata.title).toBe('Import a draw.io diagram');
+      expect(t.metadata.tags).toEqual(['calm', 'calm-import']);
+      expect(t.spec.steps.map((s: any) => s.action)).toEqual([
+        'calm:import:drawio',
+        'calm:validate',
+        'calm:import:store',
+      ]);
+    }
+  });
+
+  it('validates against the CALM schema only (no patternUrl) and stores last', () => {
+    const t = find(false);
+    const validate = t.spec.steps[1];
+    expect(validate.input?.patternUrl).toBeUndefined();
+    expect(t.spec.steps[2].action).toBe('calm:import:store');
+  });
+
+  it('takes the diagram as a data-url and a valid name', () => {
+    const props = find(false).spec.parameters[0].properties;
+    expect(props.diagram).toMatchObject({
+      type: 'string',
+      format: 'data-url',
+      title: 'Diagram',
+      description: 'A .drawio, .xml or draw.io .svg file',
+      'ui:options': { accept: '.drawio,.xml,.svg' },
+      // The review step would otherwise print the whole data-url.
+      'ui:backstage': { review: { mask: '(the uploaded file)' } },
+    });
+    expect(props.name.pattern).toBe('^[a-z][a-z0-9]*(-[a-z0-9]+)*$');
+    expect(props.name.maxLength).toBe(63);
+    expect(props.description).toBeDefined();
+  });
+
+  it('links to the Hub url only when present and to the catalog entity', () => {
+    const out = find(false).spec.output;
+    const urls = out.links.filter((l: any) => l.url);
+    expect(urls).toHaveLength(1);
+    expect(urls[0].url).toBe('${{ steps.store.output.url }}');
+    expect(urls[0].if).toBe('${{ steps.store.output.url }}');
+    expect(
+      out.links.some(
+        (l: any) => l.entityRef === '${{ steps.store.output.entityRef }}',
+      ),
+    ).toBe(true);
+  });
+
+  it('lists the guesses as a markdown list, or None. when there are none', () => {
+    const content: string = find(false).spec.output.text[0].content;
+    // The join separator is a real newline inside the Nunjucks string literal, which renders as is.
+    expect(content).toMatch(
+      /\nGuesses made while converting \(check them\):\n\$\{\{ \("- " \+ \(steps\.convert\.output\.guesses \| join\("\n- "\)\)\) if \(steps\.convert\.output\.guesses \| length\) else "None\." \}\}$/,
+    );
   });
 });

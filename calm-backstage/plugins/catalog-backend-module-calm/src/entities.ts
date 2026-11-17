@@ -983,6 +983,120 @@ export function upgradeTemplateEntity(hubUrl: string): Entity {
   };
 }
 
+/** Name of the Template that imports a draw.io diagram as an architecture in CALM Hub. */
+export const IMPORT_TEMPLATE_NAME = 'calm-import-drawio';
+
+/**
+ * The Template that imports a draw.io diagram: convert it to a CALM architecture, validate it against the CALM
+ * schema and store it in CALM Hub. The validate step throws on errors, so nothing is stored for an invalid import.
+ */
+export function importTemplateEntity(hubUrl: string): Entity {
+  return {
+    apiVersion: 'scaffolder.backstage.io/v1beta3',
+    kind: 'Template',
+    metadata: {
+      name: IMPORT_TEMPLATE_NAME,
+      title: 'Import a draw.io diagram',
+      description:
+        'Convert a draw.io diagram (.drawio, .xml or draw.io .svg) into a CALM architecture, validate it and store it in CALM Hub. It appears in the catalog as a Component.',
+      annotations: { [ANN.hubUrl]: hubUrl },
+      tags: ['calm', 'calm-import'],
+    },
+    spec: {
+      owner: OWNER,
+      type: 'service',
+      parameters: [
+        {
+          title: 'Diagram',
+          required: ['name', 'diagram'],
+          properties: {
+            name: {
+              title: 'Name',
+              type: 'string',
+              description:
+                'Name of the architecture: it must start with a lower-case letter, followed by lower-case letters, digits and single hyphens (for example trading-platform). It names the architecture in CALM Hub and the catalog Component. A name already used is refused: pick another, for example `<name>-2`.',
+              pattern: '^[a-z][a-z0-9]*(-[a-z0-9]+)*$',
+              maxLength: 63,
+              'ui:autofocus': true,
+            },
+            diagram: {
+              title: 'Diagram',
+              type: 'string',
+              format: 'data-url',
+              description: 'A .drawio, .xml or draw.io .svg file',
+              'ui:options': { accept: '.drawio,.xml,.svg' },
+              // Without a mask the review step prints the whole data-url.
+              'ui:backstage': { review: { mask: '(the uploaded file)' } },
+            },
+            description: {
+              title: 'Description',
+              type: 'string',
+              description: 'Optional: what the architecture describes.',
+            },
+          },
+        },
+      ],
+      steps: [
+        {
+          id: 'convert',
+          name: 'Convert the draw.io diagram to a CALM architecture',
+          action: 'calm:import:drawio',
+          input: {
+            name: '${{ parameters.name }}',
+            diagram: '${{ parameters.diagram }}',
+          },
+        },
+        {
+          id: 'validate',
+          name: 'Validate against the CALM schema',
+          action: 'calm:validate',
+          input: {
+            architecturePath: '${{ steps.convert.output.architecturePath }}',
+          },
+        },
+        {
+          id: 'store',
+          name: 'Store the architecture in CALM Hub',
+          action: 'calm:import:store',
+          input: {
+            name: '${{ parameters.name }}',
+            architecturePath: '${{ steps.convert.output.architecturePath }}',
+            description: '${{ parameters.description }}',
+          },
+        },
+      ],
+      output: {
+        links: [
+          // A dry run gives no url: the Hub does not hold what it would store.
+          {
+            if: '${{ steps.store.output.url }}',
+            title: 'Architecture in CALM Hub',
+            url: '${{ steps.store.output.url }}',
+          },
+          {
+            title: 'Open in the catalog',
+            icon: 'catalog',
+            entityRef: '${{ steps.store.output.entityRef }}',
+          },
+        ],
+        text: [
+          {
+            title: 'Import',
+            content: [
+              'Imported **${{ steps.convert.output.nodes }} nodes** and **${{ steps.convert.output.relationships }} relationships** as `${{ steps.store.output.namespace }}/${{ steps.store.output.architecture }}` version ${{ steps.store.output.version }}${{ (", at " + steps.store.output.url) if steps.store.output.url else "" }}.',
+              '',
+              "The Component `${{ steps.store.output.entityRef }}` appears in the catalog after the CALM provider's next read.",
+              '',
+              'Guesses made while converting (check them):',
+              '${{ ("- " + (steps.convert.output.guesses | join("\n- "))) if (steps.convert.output.guesses | length) else "None." }}',
+            ].join('\n'),
+          },
+        ],
+      },
+    },
+  };
+}
+
 /**
  * All entities for one snapshot. Later duplicates of an entity name are dropped and reported. A Hub architecture
  * that `calm:register:hub` stored for a service (its metadata names the service's entity) gets no Component here:
@@ -1008,6 +1122,7 @@ export function buildEntities(s: CalmSnapshot): {
   const emittedControls = new Set(
     s.controls.map(c => controlEntityName(c.domain, c.control)),
   );
+  add(importTemplateEntity(s.hubUrl));
   if (s.gitops) {
     add(upgradeTemplateEntity(s.hubUrl));
   }

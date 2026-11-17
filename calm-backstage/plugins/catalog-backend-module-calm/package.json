@@ -1,6 +1,6 @@
 {
   "name": "@internal/backstage-plugin-catalog-backend-module-calm",
-  "description": "The calm backend module for the catalog plugin: CALM Hub architectures, patterns, controls, template bundles and one Template per pattern.",
+  "description": "The calm backend module for the catalog plugin: CALM Hub architectures, patterns, controls, template bundles, one Template per pattern and the draw.io import Template.",
   "version": "0.1.0",
   "license": "UNLICENSED",
   "private": true,

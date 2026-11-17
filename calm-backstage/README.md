@@ -15,6 +15,7 @@ You need Docker, Node 26 and the repository's own Yarn (`.yarn/releases`, picked
 `engines` also allows Node 22 and 24, but the base has only been run on 26.
 
 ```sh
+(cd ../calm-import && npm ci)   # the draw.io converter the backend links; builds its dist/
 yarn install
 yarn hub:up && yarn hub:seed    # Hub on 127.0.0.1:8090, registry on 127.0.0.1:5050, Gitea on 127.0.0.1:3300 (seeded, idempotent)
 yarn k8s:up                     # local Kubernetes (minikube profile calm-backstage, 6 GiB, 4 CPUs) with Flux
@@ -138,8 +139,9 @@ is the same and stores the next patch version when it is not. The Hub architectu
 |---|---|
 | `plugins/calm-common` | Types, annotation and entity names, pattern options reader, placeholder scanner and filler, read-only Hub client and the Hub calls that write (architecture version, decorator), CALM → Mermaid transform, bundle kinds and upgrade targets, Flux object builders, Gitea client |
 | `plugins/calm-node` | Runs the published `@finos/calm-cli` 1.71.0 (`generate`, `validate`, `template`) with the backend's own Node; pushes and pulls template bundles as OCI artifacts (`oci.ts`, immutable publishing, registry listing); runs `kubectl` and `minikube` against the one cluster in `calm.deploy.kubernetes` (`kubernetes.ts`); the `git` CLI (`git.ts`); `calm.gitops` settings |
-| `plugins/catalog-backend-module-calm` | Entity provider: reads the Hub namespaces in `calm.namespaces` and emits architectures, patterns, controls, bundles and one Template per pattern |
-| `plugins/scaffolder-backend-module-calm` | Actions `calm:generate`, `calm:fill`, `calm:validate`, `calm:register:hub`, `calm:template`, `calm:publish:local`, `calm:git:publish`, `calm:image:build`, `calm:deploy:k8s`, `calm:deploy:gitops`, `calm:decorate:deployment`, `calm:register:local`, `calm:upgrade:render`, `calm:upgrade:merge`, `calm:catalog:refresh` |
+| `plugins/catalog-backend-module-calm` | Entity provider: reads the Hub namespaces in `calm.namespaces` and emits architectures, patterns, controls, bundles, one Template per pattern and the `calm-import-drawio` Template (Import a draw.io diagram) |
+| `plugins/scaffolder-backend-module-calm` | Actions `calm:generate`, `calm:fill`, `calm:validate`, `calm:register:hub`, `calm:template`, `calm:publish:local`, `calm:git:publish`, `calm:image:build`, `calm:deploy:k8s`, `calm:deploy:gitops`, `calm:decorate:deployment`, `calm:register:local`, `calm:upgrade:render`, `calm:upgrade:merge`, `calm:catalog:refresh`, `calm:import:drawio`, `calm:import:store` |
+| `../calm-import` | The draw.io → CALM converter (its own npm project), linked into `scaffolder-backend-module-calm` as built JavaScript; after changing it, `npm run build` there |
 | `plugins/calm-backend` | Routes `POST /api/calm/placeholders`, `GET /api/calm/architecture` (from the Hub, or a service's file; with a deployed service's workloads, network policies, Flux status and the deployments recorded in the Hub), `GET /api/calm/pattern`, `GET /api/calm/upgrades`, `GET /api/calm/bundles` (+ files, file, diff), and the unauthenticated app proxy `/api/calm/app/<name>/` |
 | `plugins/calm` | Frontend: architecture and pattern entity cards (with bundle versions, Upgrade, Git and Flux, Open the running app), the `CalmPlaceholders` form field, the Template Explorer page |
 | `hub/` | CALM Hub (`finos/calm-hub:latest`, `no-auth`), MongoDB, an OCI registry (`registry:2`, 127.0.0.1:5050) and Gitea (127.0.0.1:3300) in Docker; `seed.sh`, `gitea-seed.sh` and `push-bundles.cjs` (all idempotent) |
@@ -176,6 +178,7 @@ To validate it, the CALM CLI must trust that Hub, because it only loads remote d
 yarn tsc
 yarn test            # options reader, Hub clients, placeholders, Mermaid transform, OCI client, bundle reading, actions
 yarn build:backend
+(cd ../calm-import && npm test && npm run tsc)   # the draw.io converter, outside the Yarn workspaces
 ```
 
 ## Node

@@ -77,6 +77,7 @@ You need Docker, Node 26 (Node 22 and 24 are allowed but untested) and the Yarn 
 deployment also needs `minikube` and `kubectl`.
 
 ```sh
+(cd calm-import && npm ci)      # the draw.io converter, linked into Backstage; builds its dist/
 cd calm-backstage
 yarn install
 yarn hub:up && yarn hub:seed    # CALM Hub on http://localhost:8090, bundle registry on 5050
