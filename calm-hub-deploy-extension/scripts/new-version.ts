@@ -9,19 +9,26 @@
 //       Adds a direct connection the pattern does not allow, e.g. --connect stream-app:nisshi-broker-db. Use it to
 //       show the controls gate: the deployment of that version fails validation and nothing reaches Git.
 //
+//   npx tsx scripts/new-version.ts <namespace> <architecture> --no-pattern
+//       The same architecture, with a $schema that names no pattern (CALM's meta schema). The controls gate cannot
+//       validate it, so deploying it is refused too (it fails closed) and nothing reaches Git.
+//
 // Environment: CALM_HUB_URL (default http://localhost:8090).
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { compareVersions, nextPatchVersion } from '@internal/backstage-plugin-calm-common';
+import { compareVersions, nextPatchVersion, parsePatternUrl } from '@internal/backstage-plugin-calm-common';
 import { generateArchitecture, validateArchitecture } from '@internal/backstage-plugin-calm-node';
 import { HubClient } from '../src/hub';
 import { createLogger } from '../src/logger';
 
+/** CALM's own meta schema: a valid $schema for an architecture, but no pattern to validate it against. */
+const META_SCHEMA = 'https://calm.finos.org/release/1.1/meta/calm.json';
+
 const PLACEHOLDER = /\[\[[^\]]+\]\]|"-1"|:-1\b/;
 
 function usage(): never {
-  console.error('usage: new-version.ts <namespace> <architecture> (--choose "<decision>=<choice>" | --connect <source>:<destination>)');
+  console.error('usage: new-version.ts <namespace> <architecture> (--choose "<decision>=<choice>" | --connect <source>:<destination> | --no-pattern)');
   process.exit(2);
 }
 
@@ -41,15 +48,25 @@ async function main() {
   const args = process.argv.slice(2);
   const dryRun = args.includes('--dry-run');
   const [namespace, name, flag, value] = args.filter(a => a !== '--dry-run');
-  if (!namespace || !name || !flag || !value) usage();
+  if (!namespace || !name || !flag || (!value && flag !== '--no-pattern')) usage();
   const hubUrl = (process.env.CALM_HUB_URL ?? 'http://localhost:8090').replace(/\/+$/, '');
   const hub = new HubClient(hubUrl);
   const logger = createLogger('new-version', 'warn');
   const versions = (await hub.architectureVersions(namespace, name)).sort(compareVersions);
   if (!versions.length) throw new Error(`No architecture ${namespace}/${name}`);
   const latest = versions[versions.length - 1];
-  const current: any = await hub.architecture(namespace, name, latest);
   const next = nextPatchVersion(latest);
+  // The version to change: the newest that names its pattern. A version stored with --no-pattern has none to
+  // re-generate from or validate against, so it is skipped (the new version is still numbered after the latest).
+  let current: any;
+  for (const v of [...versions].reverse()) {
+    const doc: any = await hub.architecture(namespace, name, v);
+    if (parsePatternUrl(doc?.$schema)) {
+      current = doc;
+      break;
+    }
+  }
+  if (!current) throw new Error(`No version of ${namespace}/${name} names a pattern`);
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'new-version-'));
   let doc: any;
   let summary: string;
@@ -66,7 +83,7 @@ async function main() {
     const nodes = new Map<string, any>();
     const rels = new Map<string, any>();
     for (const v of [...versions].reverse()) {
-      const doc: any = v === latest ? current : await hub.architecture(namespace, name, v);
+      const doc: any = await hub.architecture(namespace, name, v);
       for (const n of doc.nodes ?? []) if (!nodes.has(n['unique-id'])) nodes.set(n['unique-id'], n);
       for (const r of doc.relationships ?? []) if (!rels.has(r['unique-id'])) rels.set(r['unique-id'], r);
     }
@@ -89,6 +106,9 @@ async function main() {
       'relationship-type': { connects: { source: { node: source }, destination: { node: destination } } },
     });
     summary = `adds a direct connection ${source} → ${destination}`;
+  } else if (flag === '--no-pattern') {
+    doc = { ...structuredClone(current), $schema: META_SCHEMA };
+    summary = `names no pattern ($schema ${META_SCHEMA})`;
   } else {
     usage();
   }
@@ -102,7 +122,8 @@ async function main() {
 
   const architecturePath = path.join(tmp, 'architecture.json');
   await fs.writeFile(architecturePath, text);
-  const check = await validateArchitecture({
+  // With no pattern there is nothing to validate against: that is what the controls gate refuses.
+  const check = flag === '--no-pattern' ? undefined : await validateArchitecture({
     patternUrl: doc.$schema,
     architecturePath,
     hubUrl,
@@ -118,7 +139,9 @@ async function main() {
     console.log(`  ${url}`);
   }
   console.log(
-    check.hasErrors
+    !check
+      ? '  calm validate: no pattern to validate against. Deploying it will stop at the controls gate.'
+      : check.hasErrors
       ? `  calm validate: ${check.errors.length} error(s), e.g. ${check.errors[0].message}. Deploying it will stop at the controls gate.`
       : '  calm validate: no errors',
   );
