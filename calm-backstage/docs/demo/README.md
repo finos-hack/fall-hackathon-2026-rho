@@ -62,6 +62,61 @@ node docs/demo/record-cluster-demo.cjs <suffix> <out-dir> http://localhost:3200
 It drives two Playwright pages, a ttyd terminal (bash with `cluster-demo.rc`) and Backstage, records both and joins
 them with ffmpeg into `<out-dir>/calm-backstage-cluster-demo.mp4`.
 
+## Import demo: a diagram into CALM
+
+The import demo (3:16, narrated) turns one trading platform, drawn in draw.io, written as Mermaid C4 and as a Mermaid
+flowchart, into CALM architectures with the **Import a diagram** Template. Watch it on
+[YouTube](https://youtu.be/PNV_NTW0gHQ); the video is not committed. Screenshots of the same steps are in
+[`calm-import/`](calm-import).
+
+| # | Starts at | Chapter | What you see |
+|---|---|---|---|
+| 1 | 0:00 | Diagrams already exist | A title card. |
+| 2 | 0:14 | The diagram | The trading platform in draw.io (`calm-import/examples/trading.drawio`), with a queue, a cluster, a legend and a TODO note. |
+| 3 | 0:36 | The Template | **Import a diagram** on the Create page, and its Format list: draw.io, C4 (Mermaid or PlantUML), Mermaid flowchart. |
+| 4 | 0:51 | Import the draw.io file | The form, the run (convert, validate against the CALM schema, store in CALM Hub), 7 nodes and 7 relationships, and the 2 guesses. |
+| 5 | 1:22 | The same platform in C4 | `trading.c4.md`, imported the same way: 7 and 7, and 5 guesses. |
+| 6 | 2:09 | In CALM Hub | The draw.io import on CALM Hub's own Diagram tab. |
+| 7 | 2:26 | Mermaid flowcharts | `trading.mmd`, imported with the draw.io rules. |
+| 8 | 2:38 | In the catalog | The draw.io and C4 Components, each with the CALM architecture card drawn from CALM Hub. It comes after CALM Hub and Mermaid so that the catalog, which reads CALM Hub once a minute, already has both. |
+| 9 | 2:52 | The wrong file | A draw.io file with C4 chosen: refused before anything is stored, with a hint naming draw.io. |
+| 10 | 3:01 | Recap | |
+
+It needs the stack (`yarn hub:up`, Backstage with `yarn start`), `ffmpeg` on the PATH, and calm-import built. The
+imports stay in CALM Hub, so each take needs a new suffix.
+
+Record it again (pick a suffix not used yet; it names `<suffix>-drawio`, `<suffix>-c4`, `<suffix>-mmd`, and tries
+`<suffix>-wrong`, which is refused):
+
+```sh
+node docs/demo/record-import-demo.cjs <suffix> <out-dir> http://localhost:3100
+node docs/demo/record-import-demo.cjs <suffix> <out-dir> --audio-only    # speak and time the narration only
+```
+
+It writes `calm-import-demo.mp4`, its captions `calm-import-demo.srt`, and `chapters.json`. Before it records, it
+checks that the narration and the recorder name the same beats, that the samples still give 7 nodes and 7
+relationships, and that no name is taken in CALM Hub. It records the page at its own size and scales it to 1920×1080,
+and covers the blank white frame the browser shows between two pages with the frame before it.
+
+**The voice** (`DEMO_TTS`):
+- `say` (the default): macOS `say`, voice Daniel.
+- `elevenlabs`: ElevenLabs, with `ELEVENLABS_API_KEY` and `DEMO_VOICE` (see `voice.cjs`).
+- `local`: the presenter's own voice, cloned on the recording machine from a short sample with
+  [Chatterbox](https://github.com/resemble-ai/chatterbox) (MIT). Nothing leaves the machine. It needs a Python with
+  `pip install chatterbox-tts 'setuptools<81'` (`DEMO_PYTHON`, default `python3`) and `DEMO_VOICE_SAMPLE`, a WAV of the
+  presenter reading for a minute or two, kept outside the repository. `DEMO_CFG`, `DEMO_EXAGGERATION` and
+  `DEMO_SEED` tune it (see `clone-voice.py`). A line that came out well can be kept as `docs/demo/.voice/<beat id>.wav`
+  (git-ignored), and is used instead of generating that line again.
+
+| File | |
+|---|---|
+| `record-import-demo.cjs` | Drives Backstage and CALM Hub in one Playwright page and lays the voiceover under the video |
+| `import-narration.cjs` | The voiceover, one beat per step; the guess counts come from the converter |
+| `pronunciation.cjs` | How the voice should say words it gets wrong (voice only; captions keep the spelling) |
+| `voice.cjs` | Speaks the beats (`say`, ElevenLabs or `local`), cached. From calm-hub-deploy-extension (#53), with `local` added |
+| `clone-voice.py` | The `local` voice: speaks lines in a voice cloned from a sample, with Chatterbox |
+| `revoice.cjs` | Re-voices a finished take over the same footage. From calm-hub-deploy-extension (#53) |
+
 ## Older recordings
 
 Recorded by `record-demo.cjs`: [part 2](https://youtu.be/XhFmQQTT6-k) and
