@@ -176,7 +176,13 @@ export function subjectOf(box: Box): string {
 }
 
 function decideNodeType(box: Box, containmentCertain: boolean): Decision {
-  const word = WORD_RULES.find(([pattern]) => pattern.test(box.label));
+  // The first line is the name and decides with certainty; a word only in the lines below it (a description such as
+  // "Writes to the database") is a guess.
+  const [name, ...below] = box.label.split('\n');
+  const word = WORD_RULES.find(([pattern]) => pattern.test(name));
+  const described = word
+    ? undefined
+    : WORD_RULES.map(([pattern, type]) => [pattern.exec(below.join('\n')), type] as const).find(([m]) => m);
   const base = {
     kind: 'node-type' as const,
     targetId: box.id,
@@ -200,6 +206,15 @@ function decideNodeType(box: Box, containmentCertain: boolean): Decision {
       word[1],
       true,
       `label matches "${word[0].source}"`,
+    );
+  }
+  if (described) {
+    const [match, type] = described;
+    return nodeTypeDecision(
+      base,
+      type,
+      false,
+      `a line below the name says "${match![0]}"`,
     );
   }
   const guess = box.isContainer ? 'system' : SHAPE_GUESS[box.shape] ?? 'system';
