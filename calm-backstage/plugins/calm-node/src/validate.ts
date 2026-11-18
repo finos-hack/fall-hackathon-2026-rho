@@ -12,8 +12,11 @@ export interface ValidationMessage {
 }
 
 export interface ValidateArchitectureOptions {
-  /** Pattern URL in CALM Hub (the pattern `$id`). */
-  patternUrl: string;
+  /**
+   * Pattern URL in CALM Hub (the pattern `$id`). Without it the CLI checks the architecture against the CALM schema
+   * only.
+   */
+  patternUrl?: string;
   /** Absolute path of the architecture file. */
   architecturePath: string;
   /** CALM Hub base URL (`-c`): without it, control URLs on localhost are refused as private addresses. */
@@ -36,7 +39,7 @@ export interface ValidateArchitectureResult {
 }
 
 /**
- * Runs `calm validate -p <patternUrl> -a <architecture> -c <hubUrl> -f json -o <outputPath>` and reads the report.
+ * Runs `calm validate [-p <patternUrl>] -a <architecture> -c <hubUrl> -f json -o <outputPath>` and reads the report.
  * The CLI exits 1 when the report has errors; the report is still written, so that case resolves with
  * `hasErrors: true`. Any other failure (no report written) rejects with the CLI error.
  */
@@ -46,8 +49,7 @@ export async function validateArchitecture(
   await fs.rm(opts.outputPath, { force: true });
   const args = [
     'validate',
-    '-p',
-    opts.patternUrl,
+    ...(opts.patternUrl ? ['-p', opts.patternUrl] : []),
     '-a',
     opts.architecturePath,
     '-c',

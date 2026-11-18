@@ -29,7 +29,8 @@ import { CATALOG_INFO_FILE } from './publishLocal';
 
 export const DEFAULT_HUB_VERSION = '1.0.0';
 
-const withoutId = (doc: Record<string, any>) => {
+/** The document without its `$id`. */
+export const withoutId = (doc: Record<string, any>) => {
   const { $id: _, ...rest } = doc;
   return rest;
 };
@@ -337,7 +338,7 @@ async function ownedVersions(
 }
 
 /** Reads a stored version back: the Hub must hold it under the URL the files name as its `$id`. */
-async function checkStored(
+export async function checkStored(
   hub: CalmHubWriteClient,
   namespace: string,
   name: string,

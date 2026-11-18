@@ -8,6 +8,8 @@ import {
   BundleKind,
   BundlePatternRef,
   CALM_GITOPS_TAG,
+  IMPORT_FORMAT_LABELS,
+  IMPORT_FORMATS,
   PatternDecision,
   TemplateDecisionParameter,
   bundleEntityName,
@@ -983,6 +985,151 @@ export function upgradeTemplateEntity(hubUrl: string): Entity {
   };
 }
 
+/** Name of the Template that imports a draw.io, C4 or Mermaid diagram as an architecture in CALM Hub. */
+export const IMPORT_TEMPLATE_NAME = 'calm-import-diagram';
+
+/**
+ * The Template that imports a draw.io, C4 or Mermaid diagram: the step for the chosen format converts it to a CALM architecture, validate it against the CALM
+ * schema and store it in CALM Hub. The validate step throws on errors, so nothing is stored for an invalid import.
+ */
+export function importTemplateEntity(hubUrl: string): Entity {
+  return {
+    apiVersion: 'scaffolder.backstage.io/v1beta3',
+    kind: 'Template',
+    metadata: {
+      name: IMPORT_TEMPLATE_NAME,
+      title: 'Import a diagram',
+      description:
+        'Convert a draw.io, C4 (Mermaid or PlantUML) or Mermaid flowchart diagram into a CALM architecture, validate it and store it in CALM Hub. It appears in the catalog as a Component.',
+      annotations: { [ANN.hubUrl]: hubUrl },
+      tags: ['calm', 'calm-import'],
+    },
+    spec: {
+      owner: OWNER,
+      type: 'service',
+      parameters: [
+        {
+          title: 'Diagram',
+          required: ['name', 'format', 'diagram'],
+          properties: {
+            name: {
+              title: 'Name',
+              type: 'string',
+              description:
+                'Name of the architecture: it must start with a lower-case letter, followed by lower-case letters, digits and single hyphens (for example trading-platform). It names the architecture in CALM Hub and the catalog Component. A name already used is refused: pick another, for example `<name>-2`.',
+              pattern: '^[a-z][a-z0-9]*(-[a-z0-9]+)*$',
+              maxLength: 63,
+              'ui:autofocus': true,
+            },
+            format: {
+              title: 'Format',
+              type: 'string',
+              enum: [...IMPORT_FORMATS],
+              enumNames: IMPORT_FORMATS.map(f => IMPORT_FORMAT_LABELS[f]),
+              default: 'drawio',
+            },
+            diagram: {
+              title: 'Diagram',
+              type: 'string',
+              format: 'data-url',
+              description:
+                'A draw.io file (.drawio, .xml, .svg), or a C4 or Mermaid diagram as a text file (.md, .mmd, .puml, .plantuml, .txt)',
+              'ui:options': {
+                accept: '.drawio,.xml,.svg,.md,.mmd,.puml,.plantuml,.txt',
+              },
+              // Without a mask the review step prints the whole data-url.
+              'ui:backstage': { review: { mask: '(the uploaded file)' } },
+            },
+            description: {
+              title: 'Description',
+              type: 'string',
+              description: 'Optional: what the architecture describes.',
+            },
+          },
+        },
+      ],
+      steps: [
+        {
+          id: 'drawio',
+          name: 'Convert the draw.io diagram to a CALM architecture',
+          if: "${{ parameters.format === 'drawio' }}",
+          action: 'calm:import:drawio',
+          input: {
+            name: '${{ parameters.name }}',
+            diagram: '${{ parameters.diagram }}',
+          },
+        },
+        {
+          id: 'c4',
+          name: 'Convert the C4 diagram to a CALM architecture',
+          if: "${{ parameters.format === 'c4' }}",
+          action: 'calm:import:c4',
+          input: {
+            name: '${{ parameters.name }}',
+            diagram: '${{ parameters.diagram }}',
+          },
+        },
+        {
+          id: 'mermaid',
+          name: 'Convert the Mermaid flowchart to a CALM architecture',
+          if: "${{ parameters.format === 'mermaid' }}",
+          action: 'calm:import:mermaid',
+          input: {
+            name: '${{ parameters.name }}',
+            diagram: '${{ parameters.diagram }}',
+          },
+        },
+        {
+          id: 'validate',
+          name: 'Validate against the CALM schema',
+          action: 'calm:validate',
+          input: {
+            architecturePath: 'architecture.json',
+          },
+        },
+        {
+          id: 'store',
+          name: 'Store the architecture in CALM Hub',
+          action: 'calm:import:store',
+          input: {
+            name: '${{ parameters.name }}',
+            architecturePath: 'architecture.json',
+            description: '${{ parameters.description }}',
+          },
+        },
+      ],
+      output: {
+        links: [
+          // A dry run gives no url: the Hub does not hold what it would store.
+          {
+            if: '${{ steps.store.output.url }}',
+            title: 'Architecture in CALM Hub',
+            url: '${{ steps.store.output.url }}',
+          },
+          {
+            title: 'Open in the catalog',
+            icon: 'catalog',
+            entityRef: '${{ steps.store.output.entityRef }}',
+          },
+        ],
+        text: [
+          {
+            title: 'Import',
+            content: [
+              'Imported **${{ (steps.drawio.output or steps.c4.output or steps.mermaid.output).nodes }} nodes** and **${{ (steps.drawio.output or steps.c4.output or steps.mermaid.output).relationships }} relationships** as `${{ steps.store.output.namespace }}/${{ steps.store.output.architecture }}` version ${{ steps.store.output.version }}${{ (", at " + steps.store.output.url) if steps.store.output.url else "" }}.',
+              '',
+              "The Component `${{ steps.store.output.entityRef }}` appears in the catalog after the CALM provider's next read.",
+              '',
+              'Guesses made while converting (check them):',
+              '${{ ("- " + ((steps.drawio.output or steps.c4.output or steps.mermaid.output).guesses | join("\n- "))) if ((steps.drawio.output or steps.c4.output or steps.mermaid.output).guesses | length) else "None." }}',
+            ].join('\n'),
+          },
+        ],
+      },
+    },
+  };
+}
+
 /**
  * All entities for one snapshot. Later duplicates of an entity name are dropped and reported. A Hub architecture
  * that `calm:register:hub` stored for a service (its metadata names the service's entity) gets no Component here:
@@ -1008,6 +1155,7 @@ export function buildEntities(s: CalmSnapshot): {
   const emittedControls = new Set(
     s.controls.map(c => controlEntityName(c.domain, c.control)),
   );
+  add(importTemplateEntity(s.hubUrl));
   if (s.gitops) {
     add(upgradeTemplateEntity(s.hubUrl));
   }

@@ -1,0 +1,18 @@
+%% The trading platform of trading.drawio, as a Mermaid flowchart.
+flowchart LR
+  trader([Trader]):::actor
+  ui[Trading UI]
+  db[(Trades DB)]
+
+  subgraph k8s [Kubernetes Cluster]
+    order[Order Service]
+    events@{ shape: h-cyl, label: "Trade Events" }
+    risk[Risk Service]
+  end
+
+  trader -.->|Uses| ui
+  ui -->|HTTPS| order
+  order -->|JDBC| db
+  order -->|Kafka| events
+  events -->|AMQP| risk
+  order <--> risk

@@ -1,6 +1,6 @@
 {
   "name": "@internal/backstage-plugin-scaffolder-backend-module-calm",
-  "description": "The calm backend module for the scaffolder plugin: calm:generate, calm:fill, calm:validate, calm:template (published @finos/calm-cli), calm:publish:local, calm:register:local, calm:image:build and calm:deploy:k8s (local Kubernetes), calm:register:hub and calm:decorate:deployment (CALM Hub).",
+  "description": "The calm backend module for the scaffolder plugin: calm:generate, calm:fill, calm:validate, calm:template (published @finos/calm-cli), calm:publish:local, calm:register:local, calm:image:build and calm:deploy:k8s (local Kubernetes), calm:register:hub, calm:decorate:deployment, calm:import:drawio, calm:import:c4, calm:import:mermaid and calm:import:store (CALM Hub).",
   "version": "0.1.0",
   "license": "UNLICENSED",
   "private": true,
@@ -33,6 +33,7 @@
     "@backstage/plugin-scaffolder-node": "^0.13.8",
     "@internal/backstage-plugin-calm-common": "workspace:^",
     "@internal/backstage-plugin-calm-node": "workspace:^",
+    "@internal/calm-import": "link:../../../calm-import",
     "yaml": "^2.2.1"
   },
   "devDependencies": {

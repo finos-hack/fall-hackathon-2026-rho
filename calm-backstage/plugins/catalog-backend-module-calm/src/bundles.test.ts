@@ -488,6 +488,16 @@ describe('mergeBundles', () => {
 });
 
 describe('bundle entities', () => {
+  // The import Template is always emitted; these tests are about the bundle entities.
+  const buildWithoutImport = (snap: Parameters<typeof buildEntities>[0]) => {
+    const built = buildEntities(snap);
+    return {
+      ...built,
+      entities: built.entities.filter(
+        e => e.metadata.name !== 'calm-import-diagram',
+      ),
+    };
+  };
   const snapshot = (bundles: BundleInfo[]) => ({
     hubUrl: 'http://localhost:8090',
     patterns: [],
@@ -497,7 +507,7 @@ describe('bundle entities', () => {
   });
 
   it('records the reference and digest of a registry bundle', () => {
-    const { entities } = buildEntities(
+    const { entities } = buildWithoutImport(
       snapshot([
         {
           name: 'web-service',
@@ -523,7 +533,7 @@ describe('bundle entities', () => {
   });
 
   it('leaves both off a local bundle', () => {
-    const { entities } = buildEntities(
+    const { entities } = buildWithoutImport(
       snapshot([{ name: 'web-service', version: '2.1.0', path: '/b/2.1.0' }]),
     );
     expect(entities[0].metadata.annotations).not.toHaveProperty(ANN.bundleRef);

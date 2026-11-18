@@ -65,12 +65,19 @@ rules, opens a pull request in Gitea and lets Flux apply it, recording every ste
 reference for a firm plugging its own deployment platform into CALM Hub ([PROFILE.md](calm-hub-deploy-extension/PROFILE.md)),
 and runs on this stack without changing Backstage.
 
+## draw.io, C4 and Mermaid import
+
+[`calm-import/`](calm-import/README.md) converts a draw.io, C4 or Mermaid diagram into a CALM architecture (the Backstage Template "Import a diagram" has a Format field for the three): boxes become nodes,
+arrows become relationships, and every place where the two don't match is listed as a guess. It is copied from the
+experimental calm-import converter in finos/architecture-as-code.
+
 ## Installation
 
 You need Docker, Node 26 (Node 22 and 24 are allowed but untested) and the Yarn version bundled in the project. The
 deployment also needs `minikube` and `kubectl`.
 
 ```sh
+(cd calm-import && npm ci)      # the diagram converter, linked into Backstage; builds its dist/
 cd calm-backstage
 yarn install
 yarn hub:up && yarn hub:seed    # CALM Hub on http://localhost:8090, bundle registry on 5050

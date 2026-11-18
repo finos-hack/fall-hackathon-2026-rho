@@ -25,6 +25,10 @@ import {
 } from './actions/upgradeRender';
 import { createCalmUpgradeMergeAction } from './actions/upgradeMerge';
 import { createCalmCatalogRefreshAction } from './actions/catalogRefresh';
+import { createCalmImportDrawioAction } from './actions/importDrawio';
+import { createCalmImportC4Action } from './actions/importC4';
+import { createCalmImportMermaidAction } from './actions/importMermaid';
+import { createCalmImportStoreAction } from './actions/importStore';
 import fs from 'node:fs/promises';
 import {
   BundleMeta,
@@ -174,6 +178,30 @@ export const scaffolderModuleCalm = createBackendModule({
             appBaseUrl: config.getString('app.baseUrl'),
           }),
           createCalmRegisterLocalAction({ catalog, auth, localDir }),
+          createCalmImportDrawioAction({
+            hub,
+            namespace: hubNamespace,
+            catalog,
+            auth,
+          }),
+          createCalmImportC4Action({
+            hub,
+            namespace: hubNamespace,
+            catalog,
+            auth,
+          }),
+          createCalmImportMermaidAction({
+            hub,
+            namespace: hubNamespace,
+            catalog,
+            auth,
+          }),
+          createCalmImportStoreAction({
+            hub,
+            namespace: hubNamespace,
+            catalog,
+            auth,
+          }),
         );
       },
     });
