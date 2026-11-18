@@ -7,6 +7,7 @@ import { toResult, type ConvertResult } from './result';
 export { convertC4 } from './c4';
 export { convertMermaid } from './mermaid';
 export {
+  DRAWIO_MARKERS,
   FORMAT_LABELS,
   formatHint,
   kindsIn,
@@ -20,7 +21,8 @@ export type ConvertDrawioResult = ConvertResult;
 
 /**
  * Converts a draw.io diagram (`.drawio`, `.xml` or draw.io `.svg`, plain or compressed) into a CALM architecture,
- * the way calm-import does with `--yes`: every unsure decision keeps its guess. Only the first page is converted.
+ * the way calm-import does with `--yes`: every unsure decision keeps its guess. The first page with a diagram on it is
+ * converted.
  */
 export async function convertDrawio(text: string): Promise<ConvertResult> {
   const diagram = await readDrawio(text);

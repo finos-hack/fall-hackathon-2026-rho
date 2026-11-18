@@ -99,7 +99,8 @@ function mermaidKind(text: string): 'c4' | 'mermaid' | undefined {
 
 export type FoundKind = ImportKind | 'plantuml';
 
-const DRAWIO_MARKERS = ['<mxfile', '<mxGraphModel', '<svg'];
+/** What marks a draw.io file: an `<mxfile`, a bare `<mxGraphModel` or an `<svg` export. The scaffolder action uses the same. */
+export const DRAWIO_MARKERS = ['<mxfile', '<mxGraphModel', '<svg'];
 
 /**
  * Every import format found in a text, in the order found: the kind of each mermaid block of a Markdown file (or of

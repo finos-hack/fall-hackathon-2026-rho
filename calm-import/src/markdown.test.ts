@@ -1,4 +1,5 @@
 import {
+  DRAWIO_MARKERS,
   FORMAT_LABELS,
   firstStatement,
   kindsIn,
@@ -140,5 +141,11 @@ describe('FORMAT_LABELS', () => {
       c4: 'C4 (Mermaid or PlantUML)',
       mermaid: 'Mermaid flowchart',
     });
+  });
+});
+
+describe('DRAWIO_MARKERS', () => {
+  it('names what marks a draw.io file, for the scaffolder action to share (#71)', () => {
+    expect(DRAWIO_MARKERS).toEqual(['<mxfile', '<mxGraphModel', '<svg']);
   });
 });

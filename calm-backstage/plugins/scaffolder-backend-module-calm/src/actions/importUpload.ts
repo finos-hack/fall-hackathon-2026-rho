@@ -8,10 +8,14 @@ import type { CatalogService } from '@backstage/plugin-catalog-node';
 import { createTemplateAction } from '@backstage/plugin-scaffolder-node';
 import {
   type CalmHubClient,
-  IMPORT_FORMAT_LABELS,
   type ImportFormat,
 } from '@internal/backstage-plugin-calm-common';
-import { type ConvertResult, kindsIn } from '@internal/calm-import';
+import {
+  type ConvertResult,
+  DRAWIO_MARKERS,
+  FORMAT_LABELS,
+  kindsIn,
+} from '@internal/calm-import';
 import { assertImportName, importNameClash } from './importName';
 
 /** The largest diagram accepted, in decoded bytes. */
@@ -39,8 +43,6 @@ const KINDS: Record<
     extensions: ['.md', '.mmd', '.txt'],
   },
 };
-
-const DRAWIO_MARKERS = ['<mxfile', '<mxGraphModel', '<svg'];
 
 /** What the upload is not: `The file is not a draw.io diagram (.drawio, .xml or a draw.io .svg export)`. */
 function notA(kind: UploadKind) {
@@ -123,9 +125,9 @@ export function uploadText(dataUrl: string, kind: UploadKind): string {
   const text = bytes.toString('utf-8');
   const other = otherKind(text, kind);
   if (other) {
-    const label = IMPORT_FORMAT_LABELS[other];
+    const label = FORMAT_LABELS[other];
     throw new Error(
-      `The file does not match the chosen format "${IMPORT_FORMAT_LABELS[kind]}"; it looks like ${label}: choose "${label}" as the format`,
+      `The file does not match the chosen format "${FORMAT_LABELS[kind]}"; it looks like ${label}: choose "${label}" as the format`,
     );
   }
   if (
