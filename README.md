@@ -65,6 +65,10 @@ rules, opens a pull request in Gitea and lets Flux apply it, recording every ste
 reference for a firm plugging its own deployment platform into CALM Hub ([PROFILE.md](calm-hub-deploy-extension/PROFILE.md)),
 and runs on this stack without changing Backstage.
 
+## CALM Ripples
+
+[`calm-ripples/`](calm-ripples/README.md) is an experimental CALM Hub lens for exploring possible incident impact. It traces modeled connections from a selected component and presents illustrative control declarations to investigate. The local demonstration uses a fictional architecture; the findings are model-based and do not establish live access or control effectiveness. See the [demo guide](calm-ripples/DEMO.md).
+
 ## draw.io, C4 and Mermaid import
 
 [`calm-import/`](calm-import/README.md) converts a draw.io, C4 or Mermaid diagram into a CALM architecture (the Backstage Template "Import a diagram" has a Format field for the three): boxes become nodes,
