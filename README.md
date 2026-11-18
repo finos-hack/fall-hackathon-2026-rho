@@ -67,7 +67,7 @@ and runs on this stack without changing Backstage.
 
 ## CALM Ripples
 
-[`calm-ripples/`](calm-ripples/README.md) is an experimental CALM Hub lens for exploring possible incident impact. It traces modeled connections from a selected component and presents illustrative control declarations to investigate. The local demonstration uses a fictional architecture; the findings are model-based and do not establish live access or control effectiveness. See the [demo guide](calm-ripples/DEMO.md).
+[`calm-ripples/`](calm-ripples/README.md) is an experimental CALM Hub lens for exploring possible incident impact. It traces modeled connections from a selected component and presents illustrative control declarations to investigate. The local demonstration uses a fictional architecture; the findings are model-based and do not establish live access or control effectiveness. [Watch the demo](https://www.youtube.com/watch?v=RbEa7VUfKg4) or see the [demo guide](calm-ripples/DEMO.md).
 
 ## draw.io, C4 and Mermaid import
 

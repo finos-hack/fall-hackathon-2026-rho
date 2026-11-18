@@ -2,6 +2,8 @@
 
 An experimental CALM Hub diagram lens that shows where an incident might travel through a modeled architecture. Select a starting system to trace directed `connects` relationships, see the shortest hop count, and switch between the ripple and the full architecture. The included digital bank is fictional: 42 systems, 51 connections, and the Rewards and FX examples from the presentation.
 
+**Demo:** [Watch the silent CALM Ripples walkthrough](https://www.youtube.com/watch?v=RbEa7VUfKg4) (35 seconds; screenshots from the running prototype).
+
 ## Run the demonstration
 
 Requirements: Docker with Compose, Python 3, OpenSSL, and an internet connection for the first image download. On macOS, Docker Desktop or Colima can provide Docker. This setup starts an isolated, unauthenticated local test Hub bound to `127.0.0.1:8091`, plus the Ripples backend on a container-only network. Use fictional data only.
