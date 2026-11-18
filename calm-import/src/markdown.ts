@@ -25,19 +25,38 @@ export interface MermaidBlock {
   line: number;
 }
 
-/** The bodies of every ```mermaid fenced block, in order; empty when the text has none. */
+/**
+ * The bodies of every mermaid fenced code block, in order; empty when the text has none. Fences follow CommonMark: three
+ * or more backticks or tildes, indented at most three spaces; the info string's first word is the language
+ * (`mermaid title="x"` counts); a block closes at a fence of the same character, at least as long, with nothing after it.
+ */
 export function mermaidBlocks(text: string): MermaidBlock[] {
   const lines = text.split('\n').map(l => l.replace(/\r$/, ''));
   const blocks: MermaidBlock[] = [];
-  let open: { info: string; start: number; body: string[] } | undefined;
+  let open:
+    | { char: string; length: number; lang: string; start: number; body: string[] }
+    | undefined;
   lines.forEach((raw, i) => {
-    const line = raw.trim();
+    const fence = FENCE.exec(raw);
     if (!open) {
-      if (line.startsWith('```')) {
-        open = { info: line.slice(3).trim(), start: i + 2, body: [] };
+      const info = fence?.[2]?.trim() ?? '';
+      // A backtick fence's info string may not hold a backtick (CommonMark): that line is inline code, not a fence.
+      if (fence && !(fence[1]![0] === '`' && info.includes('`'))) {
+        open = {
+          char: fence[1]![0]!,
+          length: fence[1]!.length,
+          lang: info.split(/\s+/)[0] ?? '',
+          start: i + 2,
+          body: [],
+        };
       }
-    } else if (line.startsWith('```')) {
-      if (open.info === 'mermaid') {
+    } else if (
+      fence &&
+      fence[1]![0] === open.char &&
+      fence[1]!.length >= open.length &&
+      fence[2]!.trim() === ''
+    ) {
+      if (open.lang === 'mermaid') {
         blocks.push({ body: open.body.join('\n'), line: open.start });
       }
       open = undefined;
@@ -47,6 +66,8 @@ export function mermaidBlocks(text: string): MermaidBlock[] {
   });
   return blocks;
 }
+
+const FENCE = /^ {0,3}(`{3,}|~{3,})(.*)$/;
 
 const C4_HEADERS = [
   'C4Context',

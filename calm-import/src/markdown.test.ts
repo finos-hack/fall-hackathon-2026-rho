@@ -32,6 +32,37 @@ describe('mermaidBlocks', () => {
     expect(mermaidBlocks(md)).toEqual([{ body: 'graph TD', line: 5 }]);
   });
 
+  it('reads tilde fences, longer fences and an info string with more after the language (#71)', () => {
+    const md = [
+      '~~~mermaid',
+      'flowchart LR',
+      '~~~',
+      '````mermaid title="Trading"',
+      'C4Context',
+      '```',
+      'still inside: a shorter fence does not close it',
+      '````',
+      '```  mermaid',
+      'graph TD',
+      '```',
+    ].join('\n');
+    expect(mermaidBlocks(md)).toEqual([
+      { body: 'flowchart LR', line: 2 },
+      {
+        body: 'C4Context\n```\nstill inside: a shorter fence does not close it',
+        line: 5,
+      },
+      { body: 'graph TD', line: 10 },
+    ]);
+  });
+
+  it('does not close a backtick fence with tildes, or a fence with an info string', () => {
+    const md = ['```mermaid', 'flowchart LR', '~~~', '```js', '```'].join('\n');
+    expect(mermaidBlocks(md)).toEqual([
+      { body: 'flowchart LR\n~~~\n```js', line: 2 },
+    ]);
+  });
+
   it('is empty without a mermaid fence', () => {
     expect(mermaidBlocks('flowchart LR\na-->b')).toEqual([]);
   });
