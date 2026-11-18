@@ -18,4 +18,6 @@ module.exports = [
   [/\bread-only\b/g, 'reed-only'],
   [/\bRead-only\b/g, 'Reed-only'],
   [/\bplatform-connector\b/g, 'platform connector'],
+  // Versions as Jim says them (2026-11-18): 1.0.23 is "1 point oh point 23" (twenty-three), not digit by digit.
+  [/\b(\d+)\.(\d+)\.(\d+)\b/g, (_, major, minor, patch) => `${major} point ${minor === '0' ? 'oh' : minor} point ${patch}`],
 ];

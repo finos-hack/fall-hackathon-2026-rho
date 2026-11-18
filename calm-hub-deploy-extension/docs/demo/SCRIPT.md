@@ -251,3 +251,18 @@ Your feedback on the voiced take, and what changed.
   when Git renders one (`src/sensors.ts`, plus a test).
 - **Length:** the last take was 13:22. This adds about 3½ minutes of narration, and tighter gaps take some time back,
   so I expect about 16–17 minutes. That is roughly 3× the original 2:10 take, as your pacing rule asks.
+
+## After take v3 (2026-11-18, third round)
+
+Jim's notes on take v3 (15:52):
+
+- **Full-screen panes:** whichever pane is in use fills the screen. CALM Hub fills the screen in chapters 1 and 2 (the
+  terminal was empty there), the terminal in chapter 3 (CALM Hub sat on chapter 2's record there), and the split
+  screen starts at chapter 4.
+- **The registry check** (`registry-before`) moves from the end of chapter 1 to the first beat of chapter 3. It then
+  leads into "That is what a Platform Connector adds."
+- **`architecture`:** now ends "It runs on a local Kubernetes cluster." The terminal is no longer on screen to point
+  at.
+- **Versions** are voiced "1 point oh point 23" (`pronunciation.cjs`).
+- **Chapter 8** is renamed "Runtime sensors and controls", and its card line now begins "Chapter eight: runtime
+  sensors and controls."

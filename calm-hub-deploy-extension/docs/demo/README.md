@@ -1,6 +1,6 @@
 # Demo: plugging a Platform Connector into CALM Hub
 
-A narrated walkthrough (1920×1080, one take, 15:52, in the presenter's cloned voice) with a
+A narrated walkthrough (1920×1080, one take, 15:50, in the presenter's cloned voice) with a
 terminal on the local cluster on the left and CALM Hub on the right. It opens full screen on a title and the contents,
 and each chapter opens on its own full-screen card saying what it will show. It starts with a tour of CALM Hub as it ships:
 namespaces, a pattern and its decisions, a control, an architecture, and the built-in deployment records, which are
@@ -10,7 +10,7 @@ approval and Flux, and refuses a version that breaks a control or names no patte
 holding at runtime: a deleted network policy turns its connection red on CALM Hub's diagram within seconds, and green
 again once Flux puts it back.
 
-The table gives the times of the newest take (15:52, with *Controls at runtime: evidence* and the chapter cards). The
+The table gives the times of the newest take (15:50, with *Runtime sensors and controls* and the chapter cards). The
 video on YouTube is an older take, without that chapter or the cards.
 
 ▶ [Watch it on YouTube](https://youtu.be/0r6zxzfNzJE). The video is not kept in this repository; YouTube has it, with
@@ -24,16 +24,16 @@ pattern.
 | | Chapter | What it shows |
 |---|---|---|
 | 0:00 | Introduction and contents | Full screen: the title, then the ten chapters, each picked out as the narration names it. Every chapter below starts on its own card (chapter number, title, what it shows, and a strip of all ten). |
-| 0:41 | CALM Hub today | The home page, with namespaces and control domains and no Extensions section. The `hackathon` namespace, the event-streaming pattern and its open decision (where the broker keeps its topics), and the Permitted Connection control in `hackathon-security`. `events-stream` and the `security` control on each connection. The registry lists only the two built-in decorator views. |
-| 2:24 | Deployment records are write-only | The built-in Deployments overlay, a node's badge and its details, and "View all" (the Decorators tab filtered to deployments). Any tool can write these records, but CALM Hub cannot tell whether one is still true, start a deployment, or stop one that breaks a control. |
-| 3:15 | A Platform Connector | The manifest: routes and scopes, contributions (action, Deployment tab, node detail panel, landing card, Services screen) and commands. Starts the backend with manual approval and restarts CALM Hub with it. The registry lists `platform-connector` and the MCP server has its tools. CALM Hub signs every call. |
-| 4:57 | Woven in | The home page card (services, in sync, drifted). The Extensions tab with the Deploy action and the trimmed Deployment tab. The node sidebar's Platform panel for `stream-app` (workload, replicas, image, network policies, the record that covers it). The connector's log of the calls CALM Hub made. |
-| 6:13 | Drift: what a record can't know | `stream-app` scaled to 0 behind Git's back. The panel and the tab show the drift while the deployment badge still says completed. `reconcile.sh` asks Flux to put it back, and the panel shows in sync again. |
-| 7:06 | A decision changes, and the connector deploys it | A new version with the broker's storage flipped, and the tab's warning. Deploy, the confirm dialog and Run. The controls gate comes first, then the standard deployment record goes pending and in progress on the Decorators tab and the overlay. The pull request in Gitea (files, and a commit message with who asked and the audit id), the approver merges, Flux applies, and the record ends completed. The record's `$schema`, `data.kubernetes` and `data.gitops`, CALM Hub's audit line with the same id, CALM Hub refusing a copy without `data.kubernetes.namespace` (HTTP 400), and the GitOps sub-standard in CALM Hub's Standards. |
-| 10:21 | The controls gate, as a control evaluation | A version with a forbidden connection is refused at the gate. No deployment record and no pull request, and the cluster is unchanged. The built-in Control evaluations overlay marks the connection and both nodes not met, and the details give the finding. A version that names no pattern is refused too: the gate fails closed. |
-| 11:54 | Controls at runtime: evidence | The sensors' control evaluations on the diagram (all met) and the tab's "Runtime checks holding". `api-gateway-stream-app-ingress` deleted: the connection turns not met within seconds, and its sidebar shows the evidence record (CALM's `meta/evidence.json`, expected against observed, `observed-at` and `valid-until`) and the control evaluation linking to it. Flux puts the policy back and it is met again. `default-deny` deleted: every connection fails at once, until Flux heals it. |
-| 14:12 | The same connector, for an agent | The status, history and verify commands as MCP tools: in sync, no drift, the workloads, CALM Hub's newest record, the deployments and the refusals, and every runtime check holding. |
-| 15:06 | The pattern | Recap. CALM Hub's standards keep it tool-neutral, and a connector adds understanding and action. Another firm writes one for its own platform against PROFILE.md. |
+| 0:41 | CALM Hub today | The home page, with namespaces and control domains and no Extensions section. The `hackathon` namespace, the event-streaming pattern and its open decision (where the broker keeps its topics), and the Permitted Connection control in `hackathon-security`. `events-stream` and the `security` control on each connection. CALM Hub fills the screen. |
+| 2:10 | Deployment records are write-only | The built-in Deployments overlay, a node's badge and its details, and "View all" (the Decorators tab filtered to deployments). Any tool can write these records, but CALM Hub cannot tell whether one is still true, start a deployment, or stop one that breaks a control. |
+| 3:01 | A Platform Connector | The terminal fills the screen. The registry lists only the two built-in decorator views. The manifest: routes and scopes, contributions (action, Deployment tab, node detail panel, landing card, Services screen) and commands. Starts the backend with manual approval and restarts CALM Hub with it. The registry lists `platform-connector` and the MCP server has its tools. CALM Hub signs every call. |
+| 4:56 | Woven in | The home page card (services, in sync, drifted). The Extensions tab with the Deploy action and the trimmed Deployment tab. The node sidebar's Platform panel for `stream-app` (workload, replicas, image, network policies, the record that covers it). The connector's log of the calls CALM Hub made. |
+| 6:11 | Drift: what a record can't know | `stream-app` scaled to 0 behind Git's back. The panel and the tab show the drift while the deployment badge still says completed. `reconcile.sh` asks Flux to put it back, and the panel shows in sync again. |
+| 7:04 | A decision changes, and the connector deploys it | A new version with the broker's storage flipped, and the tab's warning. Deploy, the confirm dialog and Run. The controls gate comes first, then the standard deployment record goes pending and in progress on the Decorators tab and the overlay. The pull request in Gitea (files, and a commit message with who asked and the audit id), the approver merges, Flux applies, and the record ends completed. The record's `$schema`, `data.kubernetes` and `data.gitops`, CALM Hub's audit line with the same id, CALM Hub refusing a copy without `data.kubernetes.namespace` (HTTP 400), and the GitOps sub-standard in CALM Hub's Standards. |
+| 10:16 | The controls gate, as a control evaluation | A version with a forbidden connection is refused at the gate. No deployment record and no pull request, and the cluster is unchanged. The built-in Control evaluations overlay marks the connection and both nodes not met, and the details give the finding. A version that names no pattern is refused too: the gate fails closed. |
+| 11:49 | Runtime sensors and controls | The sensors' control evaluations on the diagram (all met) and the tab's "Runtime checks holding". `api-gateway-stream-app-ingress` deleted: the connection turns not met within seconds, and its sidebar shows the evidence record (CALM's `meta/evidence.json`, expected against observed, `observed-at` and `valid-until`) and the control evaluation linking to it. Flux puts the policy back and it is met again. `default-deny` deleted: every connection fails at once, until Flux heals it. |
+| 14:11 | The same connector, for an agent | The status, history and verify commands as MCP tools: in sync, no drift, the workloads, CALM Hub's newest record, the deployments and the refusals, and every runtime check holding. |
+| 15:05 | The pattern | Recap. CALM Hub's standards keep it tool-neutral, and a connector adds understanding and action. Another firm writes one for its own platform against PROFILE.md. |
 
 ![CALM Hub before the extension: no Extensions tab](hub-before.png)
 
@@ -139,6 +139,12 @@ only, and runs the checks.
 **Cards:** the title, the contents and the chapter cards are a third recorded page (1920×1080), laid over both panes
 while a card is up. Steps that only prepare a chapter (a `clear`, CALM Hub reloading its extensions, waiting for the
 sensors) run under its card.
+
+**Full-screen panes:** whichever pane is in use fills the screen. CALM Hub is full width for chapters 1 and 2 (the
+terminal is not used there), the terminal for chapter 3 (at a larger font; CALM Hub is idle until it restarts), and
+the split screen starts at chapter 4, where commands and CALM Hub's screens go together. Both panes are recorded at
+1920 wide and shrink to their pane under a chapter card; the join crops each to its pane and lays the full-width
+recording over the split screen during its window.
 
 Each step is held until its beat has been spoken, and the next beat follows after the same short gap (0.5 s)
 everywhere, so nothing lingers on screen after a line ends. Typing is 3× the first take's pace. After the take, the

@@ -64,6 +64,14 @@ const TW = 860,
   BW = 1060,
   H = 1080,
   ZOOM = 1;
+// Whichever pane is in use fills the screen; the split screen only when both act at once. Both panes are recorded at
+// the full width: CALM Hub is full width for chapters 1-2 (the terminal is not used there), the terminal for
+// chapter 3 (CALM Hub is idle there), each at a larger terminal font. Under a chapter card each page shrinks to its
+// pane (it then renders in the left part of its recording, which the join crops). The join lays the full-width
+// recording over the split screen during its window.
+const W = TW + BW;
+const TERM_FONT = 16;
+const TERM_FONT_FULL = 24;
 /** CALM Hub's own A+ setting (diagram text size, 1 to 2): 2 wraps "PostgreSQL" in its node, 1.75 does not. */
 const DIAGRAM_TEXT_SCALE = '1.75';
 // Pacing: typing and screen holds at 3× the first take (see ~/.claude CLAUDE.md "Demo videos"), but the voice leads:
@@ -89,7 +97,7 @@ const CHAPTERS = [
   ['Drift: what a record can’t know', 'A workload scaled behind Git’s back, and Flux putting it back'],
   ['A decision changes, and the connector deploys it', 'The controls gate, a pull request, approval, Flux, a validated record'],
   ['The controls gate, as a control evaluation', 'A forbidden connection and a version with no pattern, both refused'],
-  ['Controls at runtime: evidence', 'Sensors, evidence records, and a deleted network policy turning red'],
+  ['Runtime sensors and controls', 'Sensors, evidence records, and a deleted network policy turning red'],
   ['The same connector, for an agent', 'Status, history and verify, as MCP tools'],
   ['The pattern', 'What a Platform Connector adds, for any platform'],
 ];
@@ -298,17 +306,18 @@ const srtTime = s => {
   await sleep(1000);
 
   const browser = await chromium.launch();
-  const recorded = async (width, dir, zoom = 1) => {
+  const recorded = async (width, dir, zoom = 1, viewportWidth = width) => {
     const context = await browser.newContext({
       colorScheme: 'dark',
-      viewport: { width: Math.round(width * zoom), height: Math.round(H * zoom) },
+      viewport: { width: Math.round(viewportWidth * zoom), height: Math.round(H * zoom) },
       recordVideo: { dir: path.join(OUT, dir), size: { width, height: H } },
     });
     const p = await context.newPage();
     return { context, page: p, created: Date.now() };
   };
-  const T = await recorded(TW, 'terminal');
-  const B = await recorded(BW, 'hub', ZOOM);
+  // Both start full width (CALM Hub is full screen first, then the terminal); each shrinks to its pane later.
+  const T = await recorded(W, 'terminal');
+  const B = await recorded(W, 'hub', ZOOM);
   // The full-screen cards (title, contents, a card per chapter): laid over both panes in the join while one is up.
   const S = await recorded(TW + BW, 'slides');
   // CALM Hub keeps the A+ setting in localStorage: set it before any of its pages load.
@@ -426,9 +435,9 @@ const srtTime = s => {
         if (!el) {
           el = document.createElement('div');
           el.id = id;
-          Object.assign(el.style, style);
           document.body.appendChild(el);
         }
+        Object.assign(el.style, style);
         el.textContent = text;
         el.style.display = text ? 'block' : 'none';
       },
@@ -452,13 +461,21 @@ const srtTime = s => {
       border: '1px solid rgba(122,162,255,0.45)',
       pointerEvents: 'none',
     };
-  /** The caption, on CALM Hub and on the cards (whichever is on screen shows it), larger on the full-width cards. */
+  /** The full-width caption: on the cards and on a pane that fills the screen. */
+  const WIDE_CAPTION_STYLE = { ...CAPTION_STYLE, font: '500 26px/1.4 system-ui, sans-serif', width: '76%', bottom: '40px', padding: '18px 30px' };
+  /**
+   * The caption, on CALM Hub, on the cards and on the terminal while it fills the screen (whichever is on screen shows
+   * it); full-width style on a full-width page.
+   */
   const caption = text =>
     Promise.all([
-      overlay('__demo_caption', text, CAPTION_STYLE),
-      overlay('__demo_caption', text, { ...CAPTION_STYLE, font: '500 26px/1.4 system-ui, sans-serif', width: '76%', bottom: '40px', padding: '18px 30px' }, slides),
+      overlay('__demo_caption', text, layout.pane === 'hub' ? WIDE_CAPTION_STYLE : CAPTION_STYLE),
+      overlay('__demo_caption', text, WIDE_CAPTION_STYLE, slides),
+      overlay('__demo_caption', layout.pane === 'term' ? text : '', WIDE_CAPTION_STYLE, term),
     ]);
   const badge = text =>
+    Promise.all([badgeOn(page, text), badgeOn(term, layout.pane === 'term' ? text : '')]);
+  const badgeOn = (target, text) =>
     overlay('__demo_badge', text, {
       position: 'fixed',
       right: '18px',
@@ -470,7 +487,7 @@ const srtTime = s => {
       padding: '8px 14px',
       borderRadius: '8px',
       pointerEvents: 'none',
-    });
+    }, target);
   /** The overlays are lost when the page reloads: put them back. */
   let lastCaption = '';
   let lastBadge = '';
@@ -750,6 +767,23 @@ const srtTime = s => {
       },
       { card, arg, chapters: CHAPTERS },
     );
+  /**
+   * Which pane fills the screen ('hub', 'term', or null for the split screen): windows on the take's clock, laid over
+   * the side-by-side video in the join. Switched only while a card is up.
+   */
+  const layout = { pane: null, windows: [] };
+  const fullScreen = pane => {
+    const open = layout.windows.at(-1);
+    if (open && open.end === undefined) open.end = now();
+    layout.pane = pane;
+    if (pane) layout.windows.push({ pane, start: now() });
+  };
+  /** The terminal's font size, and a resize so ttyd fits the terminal (and the shell its columns) to it. */
+  const termFont = size =>
+    term.evaluate(n => {
+      window.term.options.fontSize = n;
+      window.dispatchEvent(new Event('resize'));
+    }, size);
   /** When a card covers the panes: windows on the take's clock, laid over the side-by-side video in the join. */
   const cards = [];
   const cardOn = () => {
@@ -771,8 +805,10 @@ const srtTime = s => {
   const prBefore = await latestPr('all');
   await slides.setContent(SLIDES);
   await slide('title');
+  await termFont(TERM_FONT_FULL);
   await pause(500);
   t0 = Date.now();
+  fullScreen('hub');
 
   // ---- Introduction and contents: full screen (the panes are under the cards until chapter 1's card ends)
   cardOn();
@@ -815,10 +851,6 @@ const srtTime = s => {
     await page.locator('.react-flow__edge[aria-label="Edge from api-gateway to stream-app"]').click({ force: true });
     await page.getByText('Connections must be permitted and encrypted in transit').first().waitFor();
   });
-  await beat(
-    'registry-before',
-    termBeat('registry-before', `curl -s $HUB/api/calm/extensions | jq -c '.values[] | {id, routes: (.routes | length), contributes: (.contributes | keys)}'`),
-  );
 
   // ---- 2. Deployment records are write-only
   await chapter(1);
@@ -833,8 +865,17 @@ const srtTime = s => {
   await narrate('any-tool');
   await beat('write-only', () => scroll(300));
 
-  // ---- 3. A Platform Connector
-  await chapter(2, clear);
+  // ---- 3. A Platform Connector: the terminal fills the screen (CALM Hub is idle until chapter 4).
+  await chapter(2, async () => {
+    fullScreen('term');
+    await page.setViewportSize({ width: BW, height: H });
+    await restoreOverlays();
+    await clear();
+  });
+  await beat(
+    'registry-before',
+    termBeat('registry-before', `curl -s $HUB/api/calm/extensions | jq -c '.values[] | {id, routes: (.routes | length), contributes: (.contributes | keys)}'`),
+  );
   await beat('connector');
   await beat('manifest', termBeat('manifest', `jq '{id, name, provider, hubApi}' $MANIFEST`));
   await beat('routes', termBeat('routes', `jq -r '.routes[] | "\\(.method)\\t\\(.scope)\\t\\(.path)"' $MANIFEST | column -t`));
@@ -850,6 +891,12 @@ const srtTime = s => {
   // ---- 4. Woven in
   // Under the card: a reload, so CALM Hub's UI reads its extension registry again (a hash-only goto would not reload).
   await chapter(3, async () => {
+    // The split screen from here: the terminal back to its pane and font, without chapter 3's output.
+    fullScreen(null);
+    await term.setViewportSize({ width: TW, height: H });
+    await termFont(TERM_FONT);
+    await restoreOverlays();
+    await inTerminal(() => sh('clear', { after: 300 }));
     await page.goto(`${HUB}/#/`);
     await page.reload();
     await page.getByText('Platform Connector').first().waitFor();
@@ -1213,6 +1260,9 @@ const srtTime = s => {
   // Each line at one even level (ElevenLabs clips differ by up to 20 dB): see voiceMix in voice.cjs.
   for (const c of cards) c.end ??= duration;
   const onCard = cards.map(c => `between(t,${c.start.toFixed(2)},${c.end.toFixed(2)})`).join('+') || '0';
+  fullScreen(null);
+  const onFull = pane =>
+    layout.windows.filter(w => w.pane === pane).map(w => `between(t,${w.start.toFixed(2)},${w.end.toFixed(2)})`).join('+') || '0';
   execFileSync(
     'ffmpeg',
     [
@@ -1234,11 +1284,17 @@ const srtTime = s => {
       ...inputs,
       '-filter_complex',
       [
-        '[0:v]setpts=PTS-STARTPTS,fps=25[t]',
-        '[1:v]setpts=PTS-STARTPTS,fps=25[b]',
+        // Each pane's recording is full width: its left part is the pane in the split screen; the whole is laid over
+        // while that pane fills the screen.
+        `[0:v]setpts=PTS-STARTPTS,fps=25,split[tfull][tsrc]`,
+        `[tsrc]crop=${TW}:${H}:0:0[t]`,
+        `[1:v]setpts=PTS-STARTPTS,fps=25,split[bfull][bsrc]`,
+        `[bsrc]crop=${BW}:${H}:0:0[b]`,
         '[2:v]setpts=PTS-STARTPTS,fps=25[s]',
         '[t][b]hstack=inputs=2[tb]',
-        `[tb][s]overlay=0:0:enable='${onCard}',format=yuv420p[v]`,
+        `[tb][bfull]overlay=0:0:enable='${onFull('hub')}'[tb1]`,
+        `[tb1][tfull]overlay=0:0:enable='${onFull('term')}'[tb2]`,
+        `[tb2][s]overlay=0:0:enable='${onCard}',format=yuv420p[v]`,
         ...(CAPTIONS_ONLY ? [] : voiceMix(said, 3)),
       ].join(';'),
       '-map',
@@ -1262,13 +1318,14 @@ const srtTime = s => {
     .join('\n');
   fs.writeFileSync(path.join(OUT, `${base}.srt`), srt);
   fs.writeFileSync(path.join(OUT, 'chapters.json'), `${JSON.stringify(marks, null, 2)}\n`);
-  fs.writeFileSync(path.join(OUT, 'said.json'), `${JSON.stringify({ said, cards }, null, 2)}\n`);
+  fs.writeFileSync(path.join(OUT, 'said.json'), `${JSON.stringify({ said, cards, layout: layout.windows }, null, 2)}\n`);
   console.log('video:', out);
   // What a viewer hears and sees: the level of every line, and a frame per line on contact sheets (check-take.cjs).
   try {
     execFileSync(process.execPath, [path.join(__dirname, 'check-take.cjs'), OUT], { stdio: 'inherit' });
-  } catch {
-    console.error(`the take failed its checks: see ${path.join(OUT, 'qa.json')}`);
+  } catch (e) {
+    // A failed check exits 1 after printing why; anything else (the check could not run) says so here.
+    console.error(`the take failed its checks (${e.status !== undefined ? `exit ${e.status}` : e.message}): see ${path.join(OUT, 'qa.json')}, or run: node docs/demo/check-take.cjs ${OUT}`);
     process.exitCode = 1;
   }
   console.log('chapters:', marks.map(m => `${Math.floor(m.start / 60)}:${String(m.start % 60).padStart(2, '0')} ${m.title}`).join('\n'));

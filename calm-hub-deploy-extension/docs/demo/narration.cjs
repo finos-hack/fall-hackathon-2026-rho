@@ -66,16 +66,11 @@ module.exports = function narration(ctx) {
     },
     {
       id: 'architecture',
-      text: `And this is ${name}, an architecture made from that pattern, at version ${running}. Its broker keeps its topics in ${storage}. It runs on the local Kubernetes cluster that the terminal on the left can reach.`,
+      text: `And this is ${name}, an architecture made from that pattern, at version ${running}. Its broker keeps its topics in ${storage}. It runs on a local Kubernetes cluster.`,
     },
     {
       id: 'connection-control',
       text: 'Every connection carries that control, as security. So a change to a connection can be checked against the firm’s rules.',
-    },
-    {
-      id: 'registry-before',
-      term: 'Which extensions has CALM Hub loaded?',
-      text: 'Ask CALM Hub which extensions it has loaded. Two come back, both built in, and both are only views: one for deployment records, one for control evaluations. Neither has a backend.',
     },
 
     // ---- 2. Deployment records are write-only
@@ -110,6 +105,11 @@ module.exports = function narration(ctx) {
     {
       id: 'chapter-3',
       text: 'Chapter three: a Platform Connector. We plug one into CALM Hub: a manifest that describes it, and a backend that talks to the platform. Then CALM Hub restarts and loads it.',
+    },
+    {
+      id: 'registry-before',
+      term: 'Which extensions has CALM Hub loaded?',
+      text: 'Ask CALM Hub which extensions it has loaded. Two come back, both built in, and both are only views: one for deployment records, one for control evaluations. Neither has a backend.',
     },
     {
       id: 'connector',
@@ -368,7 +368,7 @@ module.exports = function narration(ctx) {
     // The chapter's full-screen card: what it is about to show.
     {
       id: 'chapter-8',
-      text: 'Chapter eight: controls at runtime. Passing the gate once is not enough. Sensors check that the controls still hold while the service runs; we’ll break one and watch it turn red.',
+      text: 'Chapter eight: runtime sensors and controls. Passing the gate once is not enough. Sensors check that the controls still hold while the service runs; we’ll break one and watch it turn red.',
     },
     {
       id: 'runtime-gap',
