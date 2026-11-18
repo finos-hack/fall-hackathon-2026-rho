@@ -9,6 +9,8 @@ export interface ConvertResult {
   report: string;
   /** One readable line per decision resolved by its guess. */
   guesses: string[];
+  /** One readable line per thing left out of the architecture or changed on the way (a legend, a two-headed arrow). */
+  leftOut: string[];
   nodes: number;
   relationships: number;
 }
@@ -35,6 +37,9 @@ export function toResult(r: {
     architecture: r.architecture,
     report,
     guesses: r.decisions.filter(d => d.source === 'guess').map(guessLine),
+    leftOut: r.notes.map(
+      n => `${n.subject} — ${n.kind === 'skipped' ? 'left out' : 'changed'}: ${n.message}`,
+    ),
     nodes: r.nodeCount,
     relationships: r.relationshipCount,
   };

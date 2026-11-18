@@ -136,4 +136,25 @@ describe('parseDataUrl', () => {
     expect(p.fileName).toBe('a b.md');
     expect(p.bytes.toString()).toBe('hi');
   });
+
+  it('refuses a percent-encoded upload from its length, before decoding it (#71)', () => {
+    // More than three encoded characters per allowed byte cannot decode to 2 MB or less.
+    const tooLong = `data:text/plain,${'a'.repeat(3 * MAX_DIAGRAM_BYTES + 1)}`;
+    const decode = jest.spyOn(globalThis, 'decodeURIComponent');
+    try {
+      expect(() => parseDataUrl(tooLong, 'mermaid')).toThrow(
+        'the limit is 2 MB',
+      );
+      expect(decode).not.toHaveBeenCalled();
+    } finally {
+      decode.mockRestore();
+    }
+  });
+
+  it('reads a percent-encoded upload that decodes to 2 MB or less, however long encoded (#71)', () => {
+    const encoded = '%41'.repeat(MAX_DIAGRAM_BYTES / 2);
+    expect(
+      parseDataUrl(`data:text/plain,${encoded}`, 'mermaid').bytes,
+    ).toHaveLength(MAX_DIAGRAM_BYTES / 2);
+  });
 });

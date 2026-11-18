@@ -11,6 +11,8 @@ const MAX_DECOMPRESSED_BYTES = 10 * 1024 * 1024;
 export interface DecodedDrawio {
   graphModelXml: string;
   pageNames: string[];
+  /** The page converted: the first with a diagram on it, else the first that can be read. */
+  page: number;
 }
 
 export async function decodeDrawio(content: string): Promise<DecodedDrawio> {
@@ -38,17 +40,31 @@ function svgXml(attribute: string): string {
 async function decodeXml(xml: string): Promise<DecodedDrawio | undefined> {
   const pages = diagramPages(xml);
   if (pages.length > 0) {
-    const graphModelXml = await pageModel(pages[0]!.body);
-    if (!graphModelXml) return undefined;
+    // A blank or unreadable first page (a cover, a broken copy) does not hide a diagram on a later page.
+    let readable: { model: string; page: number } | undefined;
+    let drawn: { model: string; page: number } | undefined;
+    for (let i = 0; i < pages.length && !drawn; i++) {
+      const model = await pageModel(pages[i]!.body);
+      if (!model) continue;
+      readable ??= { model, page: i };
+      if (HAS_CELLS.test(model)) drawn = { model, page: i };
+    }
+    const chosen = drawn ?? readable;
+    if (!chosen) return undefined;
     const pageNames = pages.map((page, i) => {
       const name = /\bname="([^"]*)"/.exec(page.attributes)?.[1];
       return name ? decodeEntities(name) : `Page-${i + 1}`;
     });
-    return { graphModelXml, pageNames };
+    return { graphModelXml: chosen.model, pageNames, page: chosen.page };
   }
   const graphModelXml = findModel(xml);
-  return graphModelXml ? { graphModelXml, pageNames: ['Page-1'] } : undefined;
+  return graphModelXml
+    ? { graphModelXml, pageNames: ['Page-1'], page: 0 }
+    : undefined;
 }
+
+/** A shape or a connector (a linear test): a page with only its two root cells is blank. */
+const HAS_CELLS = /\b(?:vertex|edge)="1"/;
 
 async function pageModel(page: string): Promise<string | undefined> {
   return findModel(page) ?? findModel(await inflatePage(page.trim()));

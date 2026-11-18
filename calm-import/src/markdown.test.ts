@@ -1,4 +1,5 @@
 import {
+  DRAWIO_MARKERS,
   FORMAT_LABELS,
   firstStatement,
   kindsIn,
@@ -30,6 +31,37 @@ describe('mermaidBlocks', () => {
   it('handles CRLF and skips other fences', () => {
     const md = `${FENCE}ts\nx\n${FENCE}\r\n${FENCE}mermaid\r\ngraph TD\r\n${FENCE}\r\n`;
     expect(mermaidBlocks(md)).toEqual([{ body: 'graph TD', line: 5 }]);
+  });
+
+  it('reads tilde fences, longer fences and an info string with more after the language (#71)', () => {
+    const md = [
+      '~~~mermaid',
+      'flowchart LR',
+      '~~~',
+      '````mermaid title="Trading"',
+      'C4Context',
+      '```',
+      'still inside: a shorter fence does not close it',
+      '````',
+      '```  mermaid',
+      'graph TD',
+      '```',
+    ].join('\n');
+    expect(mermaidBlocks(md)).toEqual([
+      { body: 'flowchart LR', line: 2 },
+      {
+        body: 'C4Context\n```\nstill inside: a shorter fence does not close it',
+        line: 5,
+      },
+      { body: 'graph TD', line: 10 },
+    ]);
+  });
+
+  it('does not close a backtick fence with tildes, or a fence with an info string', () => {
+    const md = ['```mermaid', 'flowchart LR', '~~~', '```js', '```'].join('\n');
+    expect(mermaidBlocks(md)).toEqual([
+      { body: 'flowchart LR\n~~~\n```js', line: 2 },
+    ]);
   });
 
   it('is empty without a mermaid fence', () => {
@@ -109,5 +141,11 @@ describe('FORMAT_LABELS', () => {
       c4: 'C4 (Mermaid or PlantUML)',
       mermaid: 'Mermaid flowchart',
     });
+  });
+});
+
+describe('DRAWIO_MARKERS', () => {
+  it('names what marks a draw.io file, for the scaffolder action to share (#71)', () => {
+    expect(DRAWIO_MARKERS).toEqual(['<mxfile', '<mxGraphModel', '<svg']);
   });
 });

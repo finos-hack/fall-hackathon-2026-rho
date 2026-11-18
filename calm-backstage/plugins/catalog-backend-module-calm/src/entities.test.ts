@@ -718,9 +718,14 @@ describe('import Template', () => {
     );
     // The join separator is a real newline inside the Nunjucks string literal, which renders as is.
     const g = pick('guesses');
+    expect(content).toContain(
+      `\nGuesses made while converting (check them):\n\${{ ("- " + (${g} | join("\n- "))) if (${g} | length) else "None." }}`,
+    );
+    // What was left out or changed shows on the result page too, not only in the log (#71).
+    const l = pick('leftOut');
     expect(
       content.endsWith(
-        `\nGuesses made while converting (check them):\n\${{ ("- " + (${g} | join("\n- "))) if (${g} | length) else "None." }}`,
+        `\nLeft out of the architecture, or changed:\n\${{ ("- " + (${l} | join("\n- "))) if (${l} | length) else "Nothing." }}`,
       ),
     ).toBe(true);
   });

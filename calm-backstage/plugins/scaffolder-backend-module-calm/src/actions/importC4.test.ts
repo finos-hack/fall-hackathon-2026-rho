@@ -28,6 +28,7 @@ function deps(opts: { hub?: string[]; catalog?: string[]; hubError?: Error }) {
         }
         return (opts.hub ?? []).map(customId => ({ customId, namespace }));
       }),
+      namespaces: jest.fn(async () => ['hackathon']),
     },
     namespace: 'hackathon',
     catalog: {
@@ -37,6 +38,11 @@ function deps(opts: { hub?: string[]; catalog?: string[]; hubError?: Error }) {
           ? ({ metadata: { name: ref.split('/')[1] } } as any)
           : undefined,
       ),
+      getEntities: jest.fn(async (req: any, o: any) => ({
+        items: (o?.credentials === credentials ? opts.catalog ?? [] : [])
+          .filter(n => req.filter['metadata.name'].includes(n))
+          .map(name => ({ metadata: { name } } as any)),
+      })),
     },
     auth: { getOwnServiceCredentials: jest.fn(async () => credentials) },
   };

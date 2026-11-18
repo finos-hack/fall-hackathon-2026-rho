@@ -96,6 +96,11 @@ const catalogWith = (names: string[] = []) => ({
       ? ({ metadata: { name: ref.split('/')[1] } } as any)
       : undefined,
   ),
+  getEntities: jest.fn(async (req: any) => ({
+    items: names
+      .filter(n => req.filter['metadata.name'].includes(n))
+      .map(name => ({ metadata: { name } } as any)),
+  })),
 });
 
 /** What calm:import:drawio writes: no title or description, the layout in metadata. */
@@ -199,6 +204,12 @@ describe('calm:import:store', () => {
     await run({ name: 'trading', description: 'Ignored' }, other);
     expect(other.posts[0].body.title).toBe('Trading');
     expect(other.posts[0].body.description).toBe('Kept');
+  });
+
+  it('stores the description input trimmed (#71)', async () => {
+    const hub = fakeHub({});
+    await run({ name: 'trading', description: '  The trading system \n' }, hub);
+    expect(hub.posts[0].body.description).toBe('The trading system');
   });
 
   it('replaces an $id the file already has', async () => {

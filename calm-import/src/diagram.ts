@@ -50,4 +50,6 @@ export interface Diagram {
   arrows: Arrow[];
   annotations: Annotation[];
   pageNames: string[];
+  /** Which of pageNames was converted (draw.io: the first page with a diagram on it). Default 0. */
+  page?: number;
 }

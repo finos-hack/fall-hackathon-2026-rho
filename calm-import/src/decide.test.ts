@@ -72,6 +72,28 @@ describe('decide', () => {
       });
     });
 
+    it('decides from the first line (the name), not from a description below it (#71)', () => {
+      const { decisions } = decide(
+        diagram({ boxes: [box('a', 'Order Service\nWrites to the database')] }),
+      );
+      expect(nodeType(decisions, 'a')).toMatchObject({
+        value: 'service',
+        certain: true,
+        subject: 'Order Service',
+      });
+    });
+
+    it('takes a word below the name only as a guess, with the line it came from (#71)', () => {
+      const { decisions } = decide(
+        diagram({ boxes: [box('a', 'Payments\nbacked by Postgres')] }),
+      );
+      expect(nodeType(decisions, 'a')).toMatchObject({
+        value: 'database',
+        certain: false,
+        reason: 'a line below the name says "Postgres"',
+      });
+    });
+
     it('plain box "Trading UI" is a certain webclient', () => {
       const { decisions } = decide(
         diagram({ boxes: [box('a', 'Trading UI')] }),
@@ -296,9 +318,19 @@ describe('decide', () => {
       },
       {
         subject: 'page "Ops"',
-        message: 'page not converted (only the first page is)',
+        message: 'page not converted (only page "Arch" is)',
         kind: 'skipped',
       },
+    ]);
+  });
+
+  it('notes the pages before the converted one too (#71)', () => {
+    const { notes } = decide(
+      diagram({ boxes: [box('a', 'A Service')], pageNames: ['Cover', 'Arch', 'Ops'], page: 1 }),
+    );
+    expect(notes.map(n => `${n.subject}: ${n.message}`)).toEqual([
+      'page "Cover": page not converted (only page "Arch" is)',
+      'page "Ops": page not converted (only page "Arch" is)',
     ]);
   });
 });

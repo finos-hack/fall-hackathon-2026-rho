@@ -20,9 +20,6 @@ import {
 
 const hasText = (v: unknown) => typeof v === 'string' && v.trim() !== '';
 
-const noNamespace = (namespace: string) =>
-  `CALM Hub has no namespace ${namespace} (calm.publish.hubNamespace); create it in CALM Hub first. Nothing was stored`;
-
 /**
  * `calm:import:store`: stores an imported architecture in CALM Hub as `<name>` version 1.0.0, after checking again
  * that the name is free in CALM Hub and the catalog. Like `calm:register:hub`, it sets `$id` to the version's Hub URL
@@ -33,7 +30,7 @@ export function createCalmImportStoreAction(options: {
   hub: CalmHubWriteClient;
   /** `calm.publish.hubNamespace`: the Hub namespace the architecture is stored in. */
   namespace: string;
-  catalog: Pick<CatalogService, 'getEntityByRef'>;
+  catalog: Pick<CatalogService, 'getEntityByRef' | 'getEntities'>;
   auth: Pick<AuthService, 'getOwnServiceCredentials'>;
 }) {
   const { hub, namespace } = options;
@@ -82,13 +79,10 @@ export function createCalmImportStoreAction(options: {
     async handler(ctx) {
       const { name } = ctx.input;
       assertImportName(name);
+      // Also refuses a namespace CALM Hub does not have (the convert step already did, before converting).
       const clash = await importNameClash(name, options);
       if (clash) {
         throw new Error(clash);
-      }
-      // The architecture list of a missing namespace answers 404, which the name check takes as "no architectures".
-      if (!(await hub.namespaces()).includes(namespace)) {
-        throw new Error(noNamespace(namespace));
       }
       const file = resolveSafeChildPath(
         ctx.workspacePath,
@@ -107,7 +101,7 @@ export function createCalmImportStoreAction(options: {
       )}`;
       const described =
         ctx.input.description?.trim() && !hasText(read.description)
-          ? { description: ctx.input.description }
+          ? { description: ctx.input.description.trim() }
           : {};
       // $schema, $id, title, description, then the rest; no service mark.
       const doc = withTitle(

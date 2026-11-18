@@ -39,7 +39,7 @@ interface Cell {
 }
 
 export async function readDrawio(content: string): Promise<Diagram> {
-  const { graphModelXml, pageNames } = await decodeDrawio(content);
+  const { graphModelXml, pageNames, page } = await decodeDrawio(content);
   const parsed = parseModel(graphModelXml).find(
     node => node['#name'] === 'mxGraphModel',
   );
@@ -188,7 +188,7 @@ export async function readDrawio(content: string): Promise<Diagram> {
       };
     });
 
-  return { boxes, arrows, annotations, pageNames };
+  return { boxes, arrows, annotations, pageNames, page };
 }
 
 /**

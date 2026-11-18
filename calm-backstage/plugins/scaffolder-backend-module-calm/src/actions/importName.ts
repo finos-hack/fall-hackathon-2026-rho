@@ -27,17 +27,22 @@ export function assertImportName(name: string): void {
 
 const LAST_SUGGESTION = 50;
 
+/** The message for a Hub namespace (calm.publish.hubNamespace) that CALM Hub does not have. */
+export const noNamespace = (namespace: string) =>
+  `CALM Hub has no namespace ${namespace} (calm.publish.hubNamespace); create it in CALM Hub first. Nothing was stored`;
+
 /**
  * Why `name` cannot be the name of an imported architecture, or undefined when it is free. It is taken when CALM Hub
  * has an architecture with that id in `namespace`, or the catalog has `component:default/<name>` (read with the
- * backend's own credentials). The message suggests the first free `<name>-2` … `<name>-50`.
+ * backend's own credentials). The message suggests the first free `<name>-2` … `<name>-50`, read from the catalog in
+ * one query. Throws when CALM Hub does not have `namespace`.
  */
 export async function importNameClash(
   name: string,
   deps: {
-    hub: Pick<CalmHubClient, 'architectures'>;
+    hub: Pick<CalmHubClient, 'architectures' | 'namespaces'>;
     namespace: string;
-    catalog: Pick<CatalogService, 'getEntityByRef'>;
+    catalog: Pick<CatalogService, 'getEntityByRef' | 'getEntities'>;
     auth: Pick<AuthService, 'getOwnServiceCredentials'>;
   },
 ): Promise<string | undefined> {
@@ -57,31 +62,60 @@ export async function importNameClash(
     return undefined;
   }
   const where = places.join(' and ');
-  let suggestion: string | undefined;
-  for (let i = 2; i <= LAST_SUGGESTION && !suggestion; i++) {
-    const candidate = `${name}-${i}`;
-    if (
-      candidate.length <= IMPORT_NAME_MAX &&
-      !inHub.has(candidate) &&
-      !(await inCatalog(candidate))
-    ) {
-      suggestion = candidate;
-    }
-  }
+  const candidates = Array.from(
+    { length: LAST_SUGGESTION - 1 },
+    (_, i) => `${name}-${i + 2}`,
+  ).filter(c => c.length <= IMPORT_NAME_MAX && !inHub.has(c));
+  const takenInCatalog = await catalogComponents(deps, candidates);
+  const suggestion = candidates.find(c => !takenInCatalog.has(c));
   return `The name ${name} is already used (${where}); choose another${
     suggestion ? `, for example ${suggestion}` : ''
   }`;
 }
 
-/** The architectures of the namespace; a namespace the Hub does not have holds none. */
+/**
+ * Which of `names` the catalog holds as `component:default/<name>`, in one query, read with the backend's own
+ * credentials (as {@link lookUpClaim} reads the name itself).
+ */
+async function catalogComponents(
+  deps: {
+    catalog: Pick<CatalogService, 'getEntities'>;
+    auth: Pick<AuthService, 'getOwnServiceCredentials'>;
+  },
+  names: string[],
+): Promise<Set<string>> {
+  if (names.length === 0) {
+    return new Set();
+  }
+  const { items } = await deps.catalog.getEntities(
+    {
+      filter: {
+        kind: 'Component',
+        'metadata.namespace': 'default',
+        'metadata.name': names,
+      },
+      fields: ['metadata.name'],
+    },
+    { credentials: await deps.auth.getOwnServiceCredentials() },
+  );
+  return new Set(items.map(e => e.metadata.name.toLowerCase()));
+}
+
+/**
+ * The architectures of the namespace. The list answers 404 for a namespace the Hub does not have, and for one with no
+ * architectures yet: the first is refused here, before anything is converted; the second holds none.
+ */
 async function hubArchitectures(
-  hub: Pick<CalmHubClient, 'architectures'>,
+  hub: Pick<CalmHubClient, 'architectures' | 'namespaces'>,
   namespace: string,
 ) {
   try {
     return await hub.architectures(namespace);
   } catch (e) {
     if (e instanceof CalmHubError && e.status === 404) {
+      if (!(await hub.namespaces()).includes(namespace)) {
+        throw new Error(noNamespace(namespace));
+      }
       return [];
     }
     throw e;

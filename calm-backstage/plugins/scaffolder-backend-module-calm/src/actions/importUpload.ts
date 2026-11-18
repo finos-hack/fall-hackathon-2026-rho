@@ -8,10 +8,14 @@ import type { CatalogService } from '@backstage/plugin-catalog-node';
 import { createTemplateAction } from '@backstage/plugin-scaffolder-node';
 import {
   type CalmHubClient,
-  IMPORT_FORMAT_LABELS,
   type ImportFormat,
 } from '@internal/backstage-plugin-calm-common';
-import { type ConvertResult, kindsIn } from '@internal/calm-import';
+import {
+  type ConvertResult,
+  DRAWIO_MARKERS,
+  FORMAT_LABELS,
+  kindsIn,
+} from '@internal/calm-import';
 import { assertImportName, importNameClash } from './importName';
 
 /** The largest diagram accepted, in decoded bytes. */
@@ -39,8 +43,6 @@ const KINDS: Record<
     extensions: ['.md', '.mmd', '.txt'],
   },
 };
-
-const DRAWIO_MARKERS = ['<mxfile', '<mxGraphModel', '<svg'];
 
 /** What the upload is not: `The file is not a draw.io diagram (.drawio, .xml or a draw.io .svg export)`. */
 function notA(kind: UploadKind) {
@@ -76,6 +78,9 @@ export function parseDataUrl(
     const data = match[2];
     const padding = /={0,2}$/.exec(data)![0].length;
     assertSize(Math.floor((data.length * 3) / 4) - padding);
+  } else if (match[2].length > 3 * MAX_DIAGRAM_BYTES) {
+    // Percent-encoding at most triples a file (each byte as %XX): longer cannot decode to the limit or less.
+    assertSize(Math.ceil(match[2].length / 3));
   }
   let bytes: Buffer;
   try {
@@ -123,9 +128,9 @@ export function uploadText(dataUrl: string, kind: UploadKind): string {
   const text = bytes.toString('utf-8');
   const other = otherKind(text, kind);
   if (other) {
-    const label = IMPORT_FORMAT_LABELS[other];
+    const label = FORMAT_LABELS[other];
     throw new Error(
-      `The file does not match the chosen format "${IMPORT_FORMAT_LABELS[kind]}"; it looks like ${label}: choose "${label}" as the format`,
+      `The file does not match the chosen format "${FORMAT_LABELS[kind]}"; it looks like ${label}: choose "${label}" as the format`,
     );
   }
   if (
@@ -142,10 +147,10 @@ export function uploadText(dataUrl: string, kind: UploadKind): string {
 
 /** What every import action needs: CALM Hub and the catalog, for the name check. */
 export interface ImportActionOptions {
-  hub: Pick<CalmHubClient, 'architectures'>;
+  hub: Pick<CalmHubClient, 'architectures' | 'namespaces'>;
   /** `calm.publish.hubNamespace`: the Hub namespace whose architecture names are taken. */
   namespace: string;
-  catalog: Pick<CatalogService, 'getEntityByRef'>;
+  catalog: Pick<CatalogService, 'getEntityByRef' | 'getEntities'>;
   auth: Pick<AuthService, 'getOwnServiceCredentials'>;
 }
 
@@ -162,7 +167,7 @@ export function createImportAction(
 ) {
   return createTemplateAction({
     id,
-    description: `Converts an uploaded ${KINDS[kind].name} (${KINDS[kind].files}, at most 2 MB) into a CALM architecture in the workspace. Fails when the name is taken in CALM Hub (namespace calm.publish.hubNamespace) or the catalog. Unsure decisions keep the converter's guess; the guesses are an output and the report is logged.`,
+    description: `Converts an uploaded ${KINDS[kind].name} (${KINDS[kind].files}, at most 2 MB) into a CALM architecture in the workspace. Fails when CALM Hub has no namespace calm.publish.hubNamespace, or the name is taken there or in the catalog. Unsure decisions keep the converter's guess; the guesses and what was left out or changed are outputs, and the report is logged.`,
     // Reads the Hub and the catalog, and writes only inside the workspace.
     supportsDryRun: true,
     schema: {
@@ -195,6 +200,12 @@ export function createImportAction(
           z
             .array(z.string())
             .describe('One line per decision the converter guessed'),
+        leftOut: z =>
+          z
+            .array(z.string())
+            .describe(
+              'One line per thing left out of the architecture (a legend, a note) or changed on the way',
+            ),
         architecturePath: z =>
           z.string().describe('The architecture, relative to the workspace'),
       },
@@ -222,6 +233,7 @@ export function createImportAction(
       ctx.output('nodes', result.nodes);
       ctx.output('relationships', result.relationships);
       ctx.output('guesses', result.guesses);
+      ctx.output('leftOut', result.leftOut);
       ctx.output('architecturePath', path.relative(ctx.workspacePath, file));
     },
   });
