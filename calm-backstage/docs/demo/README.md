@@ -64,22 +64,23 @@ them with ffmpeg into `<out-dir>/calm-backstage-cluster-demo.mp4`.
 
 ## Import demo: a diagram into CALM
 
-The import demo (about 3 minutes, narrated) turns one trading platform, drawn in draw.io, written as Mermaid C4 and as a
-Mermaid flowchart, into CALM architectures with the **Import a diagram** Template. The video is not committed; it will
-be linked here once it is on YouTube. Screenshots of the same steps are in [`calm-import/`](calm-import).
+The import demo (3:16, narrated) turns one trading platform, drawn in draw.io, written as Mermaid C4 and as a Mermaid
+flowchart, into CALM architectures with the **Import a diagram** Template. Watch it on
+[YouTube](https://youtu.be/PNV_NTW0gHQ); the video is not committed. Screenshots of the same steps are in
+[`calm-import/`](calm-import).
 
-| # | Chapter | What you see |
-|---|---|---|
-| 1 | Diagrams already exist | A title card. |
-| 2 | The diagram | The trading platform in draw.io (`calm-import/examples/trading.drawio`), with a queue, a cluster, a legend and a TODO note. |
-| 3 | The Template | **Import a diagram** on the Create page, and its Format list: draw.io, C4 (Mermaid or PlantUML), Mermaid flowchart. |
-| 4 | Import the draw.io file | The form, the run (convert, validate against the CALM schema, store in CALM Hub), 7 nodes and 7 relationships, and the 2 guesses. |
-| 5 | The same platform in C4 | `trading.c4.md`, imported the same way: 7 and 7, and 5 guesses. |
-| 6 | In CALM Hub | The draw.io import on CALM Hub's own Diagram tab. |
-| 7 | Mermaid flowcharts | `trading.mmd`, imported with the draw.io rules. |
-| 8 | In the catalog | The draw.io and C4 Components, each with the CALM architecture card drawn from CALM Hub. It comes after CALM Hub and Mermaid so that the catalog, which reads CALM Hub once a minute, already has both. |
-| 9 | The wrong file | A draw.io file with C4 chosen: refused before anything is stored, with a hint naming draw.io. |
-| 10 | Recap | |
+| # | Starts at | Chapter | What you see |
+|---|---|---|---|
+| 1 | 0:00 | Diagrams already exist | A title card. |
+| 2 | 0:14 | The diagram | The trading platform in draw.io (`calm-import/examples/trading.drawio`), with a queue, a cluster, a legend and a TODO note. |
+| 3 | 0:36 | The Template | **Import a diagram** on the Create page, and its Format list: draw.io, C4 (Mermaid or PlantUML), Mermaid flowchart. |
+| 4 | 0:51 | Import the draw.io file | The form, the run (convert, validate against the CALM schema, store in CALM Hub), 7 nodes and 7 relationships, and the 2 guesses. |
+| 5 | 1:22 | The same platform in C4 | `trading.c4.md`, imported the same way: 7 and 7, and 5 guesses. |
+| 6 | 2:09 | In CALM Hub | The draw.io import on CALM Hub's own Diagram tab. |
+| 7 | 2:26 | Mermaid flowcharts | `trading.mmd`, imported with the draw.io rules. |
+| 8 | 2:38 | In the catalog | The draw.io and C4 Components, each with the CALM architecture card drawn from CALM Hub. It comes after CALM Hub and Mermaid so that the catalog, which reads CALM Hub once a minute, already has both. |
+| 9 | 2:52 | The wrong file | A draw.io file with C4 chosen: refused before anything is stored, with a hint naming draw.io. |
+| 10 | 3:01 | Recap | |
 
 Record it again. It needs the stack (`yarn hub:up`, Backstage with `yarn start`), `ffmpeg` on the PATH, and calm-import
 built. Pick a suffix not used yet: it imports `<suffix>-drawio`, `<suffix>-c4` and `<suffix>-mmd`, which stay in CALM
