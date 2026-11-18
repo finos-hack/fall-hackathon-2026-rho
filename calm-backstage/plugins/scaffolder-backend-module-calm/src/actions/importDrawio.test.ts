@@ -27,7 +27,8 @@ function deps(opts: {
   namespaces?: string[];
 }) {
   const credentials = { principal: { type: 'service' } } as any;
-  const inCatalog = (o: any) => (o?.credentials === credentials ? opts.catalog ?? [] : []);
+  const inCatalog = (o: any) =>
+    o?.credentials === credentials ? opts.catalog ?? [] : [];
   return {
     hub: {
       architectures: jest.fn(async (namespace: string) => {
@@ -48,7 +49,7 @@ function deps(opts: {
       getEntities: jest.fn(async (req: any, o: any) => ({
         items: inCatalog(o)
           .filter(n => req.filter['metadata.name'].includes(n))
-          .map(name => ({ metadata: { name } }) as any),
+          .map(name => ({ metadata: { name } } as any)),
       })),
     },
     auth: { getOwnServiceCredentials: jest.fn(async () => credentials) },

@@ -99,7 +99,7 @@ const catalogWith = (names: string[] = []) => ({
   getEntities: jest.fn(async (req: any) => ({
     items: names
       .filter(n => req.filter['metadata.name'].includes(n))
-      .map(name => ({ metadata: { name } }) as any),
+      .map(name => ({ metadata: { name } } as any)),
   })),
 });
 

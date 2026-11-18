@@ -20,7 +20,6 @@ import {
 
 const hasText = (v: unknown) => typeof v === 'string' && v.trim() !== '';
 
-
 /**
  * `calm:import:store`: stores an imported architecture in CALM Hub as `<name>` version 1.0.0, after checking again
  * that the name is free in CALM Hub and the catalog. Like `calm:register:hub`, it sets `$id` to the version's Hub URL

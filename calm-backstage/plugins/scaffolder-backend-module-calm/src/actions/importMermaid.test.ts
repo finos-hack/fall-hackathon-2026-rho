@@ -41,7 +41,7 @@ function deps(opts: { hub?: string[]; catalog?: string[]; hubError?: Error }) {
       getEntities: jest.fn(async (req: any, o: any) => ({
         items: (o?.credentials === credentials ? opts.catalog ?? [] : [])
           .filter(n => req.filter['metadata.name'].includes(n))
-          .map(name => ({ metadata: { name } }) as any),
+          .map(name => ({ metadata: { name } } as any)),
       })),
     },
     auth: { getOwnServiceCredentials: jest.fn(async () => credentials) },

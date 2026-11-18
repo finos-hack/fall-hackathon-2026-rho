@@ -153,8 +153,8 @@ describe('parseDataUrl', () => {
 
   it('reads a percent-encoded upload that decodes to 2 MB or less, however long encoded (#71)', () => {
     const encoded = '%41'.repeat(MAX_DIAGRAM_BYTES / 2);
-    expect(parseDataUrl(`data:text/plain,${encoded}`, 'mermaid').bytes).toHaveLength(
-      MAX_DIAGRAM_BYTES / 2,
-    );
+    expect(
+      parseDataUrl(`data:text/plain,${encoded}`, 'mermaid').bytes,
+    ).toHaveLength(MAX_DIAGRAM_BYTES / 2);
   });
 });
