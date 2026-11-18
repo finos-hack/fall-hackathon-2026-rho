@@ -105,6 +105,11 @@ const handlers: Record<string, Handler> = {
   async verify(deps, p) {
     const arch = await findArchitecture(deps.hub, p.namespace, p.architecture);
     const base = { namespace: arch.namespace, architecture: arch.name };
+    // The sensors record only in the namespaces this connector deploys to (DEPLOY_NAMESPACES).
+    if (!deps.settings.deployNamespaces.includes(arch.namespace)) {
+      const problem = `${arch.namespace} is not one of this connector's deploy namespaces (DEPLOY_NAMESPACES): it neither senses nor records there`;
+      return { status: 200, body: { ...base, managed: false, checks: [], problems: [problem] } };
+    }
     const r = await deps.sensors.check(arch.namespace, arch.name);
     if (!r) return { status: 200, body: { ...base, managed: false, checks: [], problems: [] } };
     const holding = r.checks.filter(c => c.result === 'pass').length;

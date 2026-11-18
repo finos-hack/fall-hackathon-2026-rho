@@ -2,7 +2,9 @@ import { afterEach, describe, expect, it } from 'vitest';
 import fs from 'node:fs';
 import { handle } from './app';
 import { HubClient } from './hub';
-import { Sensors } from './sensors';
+import { readService } from './resolve';
+import { Sensors, senseService } from './sensors';
+import type { Kubectl } from './deploy/kube';
 import { architectureDoc, world, type World } from './test/fakes';
 
 const worlds: World[] = [];
@@ -92,6 +94,26 @@ describe('runtime checks', () => {
     expect(r!.checks[0].observed).toContain('default-deny');
   });
 
+  it('compares default-deny with the one Git renders: an ingress-only default-deny holds when Git asks for that', async () => {
+    const w = make();
+    const service = (await readService(w.deps.gitea, w.deps.settings, 'events-stream'))!;
+    const ingressOnly = (d: any) => (d?.metadata?.name === 'default-deny' ? { ...d, spec: { ...d.spec, policyTypes: ['Ingress'] } } : d);
+    // The cluster's default-deny denies ingress only.
+    const kubectl: Kubectl = async (args, ...rest) => {
+      const out = await w.deps.kubectl(args, ...rest);
+      if (!args.join(' ').includes('get networkpolicy')) return out;
+      const json = JSON.parse(out);
+      return JSON.stringify({ ...json, items: json.items.map(ingressOnly) });
+    };
+    // Git asks for ingress and egress: not as Git asks.
+    const asks = await senseService({ ...w.deps, kubectl }, service);
+    expect(asks.checks.map(c => c.result)).toEqual(['fail', 'fail']);
+    expect(asks.checks[0].observed).toContain('default-deny is not as Git asks');
+    // Git asks for ingress only too: it holds.
+    const same = await senseService({ ...w.deps, kubectl }, { ...service, manifests: service.manifests.map(ingressOnly) });
+    expect(same.checks.map(c => c.result)).toEqual(['pass', 'pass']);
+  });
+
   it('checks TLS on an HTTPS relationship: the Certificate is Ready and the destination runs tls-proxy', async () => {
     const w = make();
     await deployHttps(w);
@@ -103,6 +125,29 @@ describe('runtime checks', () => {
     w.cluster.certNotReady.length = 0;
     w.cluster.dropContainer.cache = 'tls-proxy';
     expect((await tls())).toMatchObject({ result: 'fail', observed: expect.stringContaining('tls-proxy') });
+  });
+
+  it('reads no Certificates for an HTTPS relationship when Git renders none, as k8s-deploy 1.2.x without cert-manager', async () => {
+    const w = make();
+    await deployHttps(w);
+    const service = (await readService(w.deps.gitea, w.deps.settings, 'events-stream'))!;
+    // As k8s-deploy 1.2.x renders: the policies are annotated HTTPS, but there is no Certificate.
+    service.manifests = service.manifests.filter(m => m?.kind !== 'Certificate');
+    const certReads: string[] = [];
+    const kubectl: Kubectl = async (args, ...rest) => {
+      if (args.join(' ').includes('get certificate')) {
+        certReads.push(args.join(' '));
+        throw new Error('kubectl exited with code 1: error: the server doesn\'t have a resource type "certificate"');
+      }
+      return w.deps.kubectl(args, ...rest);
+    };
+    const r = await senseService({ ...w.deps, kubectl }, service);
+    expect(r.problems).toEqual([]);
+    expect(certReads).toEqual([]);
+    expect(r.checks.map(c => [c.element, c.check, c.result])).toEqual([
+      ['web-service-database', 'network-policy', 'pass'],
+      ['web-service-cache', 'network-policy', 'pass'],
+    ]);
   });
 
   it('reports a kubectl failure as a problem and never as a failed check', async () => {
@@ -156,6 +201,22 @@ describe('verify command', () => {
     release();
     await w.deps.sensors.sweep();
     expect(byType(w, 'evidence')).toHaveLength(2);
+  });
+
+  it('neither senses nor records outside the deploy namespaces', async () => {
+    const w = make();
+    const settings = { ...w.deps.settings, deployNamespaces: ['elsewhere'] };
+    const deps = { ...w.deps, settings, sensors: new Sensors({ ...w.deps, settings }) };
+    const r: any = await handle(deps, {
+      method: 'POST',
+      url: '/namespaces/hackathon/architectures/events-stream/verify',
+      identity: 'token',
+      body: Buffer.from('{}'),
+    });
+    expect(r.body).toMatchObject({ managed: false, checks: [] });
+    expect(r.body.problems[0]).toContain('DEPLOY_NAMESPACES');
+    expect(await deps.sensors.run('hackathon', 'events-stream')).toBeUndefined();
+    expect(byType(w, 'evidence')).toHaveLength(0);
   });
 
   it('says so for an architecture the platform does not run', async () => {
@@ -375,8 +436,135 @@ describe('evidence records', () => {
     );
     const s = new Sensors({ ...w.deps, hub, writeTimeoutMs: 20, now: () => T0 });
     await s.run('hackathon', 'events-stream');
+    expect(byType(w, 'evidence')).toHaveLength(1);
+    // A timed-out create is not sent again for six timeouts, in case it lands late; then it is.
+    await new Promise(r => setTimeout(r, 150));
     await s.run('hackathon', 'events-stream');
     expect(byType(w, 'evidence')).toHaveLength(2);
+  });
+
+  it('tracks a create that lands after it timed out, rather than creating the record twice', async () => {
+    const w = make();
+    let slow = 0;
+    const hub = new HubClient('http://hub.test', async (url, init) => {
+      if (init?.method === 'POST' && slow++ === 0) await new Promise(r => setTimeout(r, 60));
+      return w.hub.fetch(url, init);
+    });
+    const { s: _unused, clock } = sensors(w);
+    const s = new Sensors({ ...w.deps, hub, writeTimeoutMs: 20, now: () => clock.t });
+    await s.run('hackathon', 'events-stream');
+    await new Promise(r => setTimeout(r, 200));
+    w.cluster.dropPolicies.push('web-service-database-ingress');
+    clock.t = T0 + 5_000;
+    await s.run('hackathon', 'events-stream');
+    expect(byType(w, 'evidence').filter(d => d['unique-id'] === DB_EV)).toHaveLength(1);
+    expect(evidence(w, DB_EV).data.result).toBe('fail');
+  });
+
+  it('records again a record someone deleted from CALM Hub', async () => {
+    const w = make();
+    const { s, clock } = sensors(w);
+    await s.run('hackathon', 'events-stream');
+    const [id] = [...w.hub.decorators].find(([, d]) => d['unique-id'] === DB_EV)!;
+    w.hub.decorators.delete(id);
+    w.cluster.dropPolicies.push('web-service-database-ingress');
+    clock.t = T0 + 5_000;
+    await s.run('hackathon', 'events-stream');
+    expect(evidence(w, DB_EV).data.result).toBe('fail');
+    expect(evaluation(w, DB_EVAL).data.status).toBe('not-met');
+  });
+
+  it('tries again to replace the record of a check that comes back, when CALM Hub refused the first replacement', async () => {
+    const w = make();
+    await deployHttps(w);
+    const { s, clock } = sensors(w);
+    await s.run('hackathon', 'events-stream');
+    const tlsId = 'events-stream-local-web-service-cache-tls';
+    const deploy = async (version: string, https: boolean) => {
+      const doc = architectureDoc('events-stream', version, ['database', 'cache']);
+      if (https) doc.relationships[1].protocol = 'HTTPS';
+      w.hub.architectures.get('events-stream')!.versions.set(version, doc);
+      await handle(w.deps, { method: 'POST', url: `/deploy/hackathon/architectures/events-stream/${version}`, identity: 'token', body: Buffer.from('{}') });
+      await w.deps.jobs.idle();
+    };
+    await deploy('1.0.3', false);
+    clock.t = T0 + 5_000;
+    await s.run('hackathon', 'events-stream');
+    await deploy('1.0.4', true);
+    let refused = 0;
+    w.hub.rejectPut = (_n, d) => d['unique-id'] === tlsId && refused++ === 0;
+    clock.t = T0 + 10_000;
+    await s.run('hackathon', 'events-stream');
+    clock.t = T0 + 15_000;
+    await s.run('hackathon', 'events-stream');
+    const tls = byType(w, 'evidence').filter(d => d['unique-id'] === tlsId);
+    expect(tls).toHaveLength(1);
+    expect(tls[0].target[0]).toBe('/calm/namespaces/hackathon/architectures/events-stream/versions/1.0.4');
+    expect(tls[0].data.result).toBe('pass');
+  });
+
+  it('leaves a relationship the deployed version no longer has not-applicable, not at its last status', async () => {
+    const w = make();
+    const { s, clock } = sensors(w);
+    w.cluster.dropPolicies.push('web-service-cache-ingress');
+    await s.run('hackathon', 'events-stream');
+    expect(evaluation(w, CACHE_EVAL).data.status).toBe('not-met');
+    // 1.0.3 has no cache, so no web-service → cache relationship and no check on it.
+    const doc = architectureDoc('events-stream', '1.0.3', ['database']);
+    w.hub.architectures.get('events-stream')!.versions.set('1.0.3', doc);
+    await handle(w.deps, { method: 'POST', url: '/deploy/hackathon/architectures/events-stream/1.0.3', identity: 'token', body: Buffer.from('{}') });
+    await w.deps.jobs.idle();
+    clock.t = T0 + 5_000;
+    await s.run('hackathon', 'events-stream');
+    expect(evaluation(w, CACHE_EVAL).data.status).toBe('not-applicable');
+    expect(evidence(w, 'events-stream-local-web-service-cache-network-policy').data.result).toBe('not-applicable');
+    // No longer tracked: nothing turns it stale (and red) later.
+    clock.t = T0 + 200_000;
+    await s.sweep();
+    expect(evaluation(w, CACHE_EVAL).data.status).toBe('not-applicable');
+  });
+
+  it('keeps a dropped relationship tracked until CALM Hub takes its not-applicable evaluation', async () => {
+    const w = make();
+    const { s, clock } = sensors(w);
+    w.cluster.dropPolicies.push('web-service-cache-ingress');
+    await s.run('hackathon', 'events-stream');
+    const doc = architectureDoc('events-stream', '1.0.3', ['database']);
+    w.hub.architectures.get('events-stream')!.versions.set('1.0.3', doc);
+    await handle(w.deps, { method: 'POST', url: '/deploy/hackathon/architectures/events-stream/1.0.3', identity: 'token', body: Buffer.from('{}') });
+    await w.deps.jobs.idle();
+    let refused = 0;
+    w.hub.rejectPut = (_n, d) => d['unique-id'] === CACHE_EVAL && refused++ === 0;
+    clock.t = T0 + 5_000;
+    await s.run('hackathon', 'events-stream');
+    expect(evaluation(w, CACHE_EVAL).data.status).toBe('not-met');
+    clock.t = T0 + 10_000;
+    await s.run('hackathon', 'events-stream');
+    expect(evaluation(w, CACHE_EVAL).data.status).toBe('not-applicable');
+  });
+
+  it('reads each stored architecture version from CALM Hub once, and each service from Gitea once per tick', async () => {
+    const w = make();
+    const versionReads: string[] = [];
+    const hub = new HubClient('http://hub.test', async (url, init) => {
+      if (/\/architectures\/[^/]+\/versions\/[\d.]+$/.test(String(url))) versionReads.push(String(url));
+      return w.hub.fetch(url, init);
+    });
+    let giteaCalls = 0;
+    const gitea = new Proxy(w.deps.gitea, {
+      get(target, prop, receiver) {
+        const v = Reflect.get(target, prop, receiver);
+        return typeof v === 'function' ? (...a: unknown[]) => (giteaCalls++, v.apply(target, a)) : v;
+      },
+    });
+    await readService(gitea, w.deps.settings, 'events-stream');
+    const perService = giteaCalls;
+    giteaCalls = 0;
+    const s = new Sensors({ ...w.deps, hub, gitea, now: () => T0 });
+    await s.tick();
+    expect(giteaCalls).toBe(1 + perService); // the list of repositories, then the one service
+    await s.run('hackathon', 'events-stream');
+    expect(versionReads.filter(u => u.endsWith('/versions/1.0.0'))).toHaveLength(1);
   });
 
   it('replaces, not duplicates, the record of a check that comes back', async () => {

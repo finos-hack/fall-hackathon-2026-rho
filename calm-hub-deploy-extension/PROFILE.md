@@ -21,7 +21,9 @@ turns each into `calm hub ext <id> <command>` and the MCP tool `ext_<id>_<comman
 | `deploy` | `write`, `idempotent: true` | `namespace`, `architecture`, `version` (optional `environment`, see 5) | `deploymentId`, `status: "pending"` |
 | `verify` | `read`, `idempotent: true` | `namespace`, `architecture` | `managed`, `version`, `observedAt`, `holding`, `checked`, `checks[]` (`element`, `check`, `result`, `expected`, `observed`, `paths`), `problems[]` |
 
-`verify` collects runtime evidence now and records it (see 2, the evidence record). A connector also collects it on its
+`verify` collects runtime evidence now and records it (see 2, the evidence record). Its scope is `read` because it
+changes nothing on the platform or in the architecture: the records it writes are observations, the same ones the
+connector writes on its own. A connector also collects it on its
 own, often enough that a broken control shows within seconds.
 
 `status` also gives, in the reference connector: `repository`, `deploymentRules`, `commit`, `commitUrl`, `mainCommit`,
@@ -159,7 +161,7 @@ A connector contributes these to CALM Hub (the manifest's `contributes`). Each i
 |---|---|---|
 | `action` "Deploy this version" | The architecture version's Extensions | Nothing of its own: CALM Hub shows only running, done or failed. Progress is the decorator. Route `POST /deploy/{namespace}/{resourceType}/{resourceId}/{version}`, scope `write` |
 | `designer-tab` "Deployment" | The architecture version's Extensions | Where the version runs, whether the version on screen is the one running, the platform's health (here Flux), and CALM Hub's newest deployment record with whether it matches. Headline: deploying, the first drift reason, or in sync. It does not repeat deployment history: CALM Hub's Deployments view has it |
-| `detail-panel` "Platform" | The node sidebar, under Extensions | For the selected node: what the platform runs for it (workload, replicas ready, image, last change), what the platform allows in and out of it, and CALM Hub's newest record covering it. For a connection: its runtime evidence (whether the control holds, each check). For something the platform does not run, say so. Route scope `read` |
+| `detail-panel` "Platform" | The node sidebar, under Extensions | For the selected node: what the platform runs for it (workload, replicas ready, image, last change), what the platform allows in and out of it, and CALM Hub's newest record covering it. For a connection: its runtime evidence (whether the control holds, each check), once CALM Hub asks for a connection's panel (FINDINGS X13). For something the platform does not run, say so. Route scope `read` |
 | `landing-card` | CALM Hub's home page | The count of services, how many are in sync and how many have drifted, as the **first** `stats` block: CALM Hub draws only that block of a card, not an alert after it. Route scope `authenticated` |
 | `screen` "Services" | An extension screen | Every service the connector manages with its running version, platform health and drift (reasons in full). Route scope `authenticated` |
 

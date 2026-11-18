@@ -107,8 +107,8 @@ command. For each `connects` relationship the deployment rules render (NetworkPo
 `calm.finos.org/relationship`), they check:
 
 - **network-policy**: each of the relationship's NetworkPolicies on `main` is in the cluster and allows what Git
-  renders (pod, peers, ports), and `default-deny` is there. Deleting `default-deny` fails every relationship, since
-  nothing else is then denied.
+  renders (pod, peers, ports), and `default-deny` is there as Git renders it (the same pods, and ingress, egress or
+  both). Deleting `default-deny` fails every relationship, since nothing else is then denied.
 - **tls** (HTTPS relationships): the destination's cert-manager Certificate is Ready and its Deployment runs the
   `tls-proxy` sidecar.
 
@@ -118,7 +118,7 @@ Each check is one **evidence decorator** and each relationship one standard **co
   (`https://calm.finos.org/release/1.3/meta/decorators.json#/defs/decorator`), so CALM Hub checks its structure. Its
   `data.evidence` is CALM's `meta/evidence.json` (`unique-id`, `evidence-paths` such as
   `k8s://calm-events-stream/networkpolicy/web-service-database-ingress`, `control-config-url`). Beside it: `control`,
-  `check`, `result` (`pass`, `fail`, `stale`), `expected`, `observed`, `observed-at`, `valid-until`, `sensor`,
+  `check`, `result` (`pass`, `fail`, `stale`, `not-applicable`), `expected`, `observed`, `observed-at`, `valid-until`, `sensor`,
   `deployment`.
 - The control evaluation (the bundled 1.0 standard, validated) applies to the relationship only, is `not-met` when any
   of its checks fails or is stale (one finding each) and points at the evidence with `report-uri`. One per
@@ -128,8 +128,12 @@ Writes are on change only, plus a heartbeat every 60 s for the evidence. An obse
 (`valid-until`); past it the evidence is marked `stale` and the relationship not met, so evidence nobody refreshes never
 stays green. A read that fails (kubectl, a timeout) is a problem in the `verify` reply, never a failed check; if it goes
 on, the evidence turns stale. While this connector deploys a service the sensors leave it alone (Git is ahead of the
-cluster meanwhile). After a restart the connector takes over its earlier records rather than writing new ones. The
-connection's node panel shows the checks, and the Deployment tab counts the checks that hold.
+cluster meanwhile). A check the deployed version no longer makes is written once more as `not-applicable` and then left
+alone, so a relationship with no check left ends `not-applicable` rather than keeping its last status. After a restart
+the connector takes over its earlier records rather than writing new ones; a record someone deleted from CALM Hub is
+written again, and a write CALM Hub answers late is kept rather than sent twice. The sensors record only in
+`DEPLOY_NAMESPACES`: `verify` on any other namespace answers `managed: false` with the reason. The
+Deployment tab counts the checks that hold. A connection's sidebar in CALM Hub lists its evidence and control evaluation among its decorators. The connector also answers a detail panel for a connection, but CALM Hub asks for detail panels only for nodes, so it is not shown (FINDINGS X13).
 
 Try it on the running demo: `kubectl -n calm-events-stream delete networkpolicy <relationship>-ingress`, watch the
 connection turn red on the diagram, then green again at Flux's next reconcile (1 min) or the annotation in

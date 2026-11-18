@@ -1,5 +1,6 @@
 import {
   architectureVersionPath,
+  CalmHubError,
   evidenceDecorator,
   isStale,
   mirrorEvaluation,
@@ -84,6 +85,20 @@ const items = (json: any): any[] => (Array.isArray(json?.items) ? json.items : [
 const shape = (p: Policy) =>
   JSON.stringify([p.node, p.ingress, p.egress, p.peers, p.ports, p.allPods]);
 
+/** What a default-deny covers, for saying how the cluster's differs from Git's. */
+const denyScope = (p: Policy) =>
+  [p.allPods ? 'every pod' : `pods of ${p.node ?? 'some pods'}`, [p.ingress && 'ingress', p.egress && 'egress'].filter(Boolean).join(' and ') || 'nothing', p.peers === 'nothing allowed' ? '' : `but allows ${p.peers}`]
+    .filter(Boolean)
+    .join(', ');
+
+/** A write CALM Hub did not answer in time: it may still land. */
+class WriteTimeout extends Error {
+  constructor(ms: number) {
+    super(`CALM Hub did not answer within ${ms} ms`);
+    this.name = 'WriteTimeout';
+  }
+}
+
 /** The checks for one service, from what `main` renders (Git) and what the cluster holds. */
 export async function senseService(deps: SensorDeps, service: ServiceInfo): Promise<{ checks: CheckResult[]; problems: string[] }> {
   const ns = service.kubernetesNamespace;
@@ -96,19 +111,24 @@ export async function senseService(deps: SensorDeps, service: ServiceInfo): Prom
   const gitPolicies = parsePolicies({ items: service.manifests.filter(m => m?.kind === 'NetworkPolicy') });
   const related = gitPolicies.filter(p => p.relationship);
   if (!related.length) return { checks: [], problems };
-  const https = related.some(p => p.protocol === 'HTTPS');
+  // TLS is checked only against a Certificate Git renders: older bundles (k8s-deploy 1.2.x) annotate HTTPS but render
+  // none, and their clusters may lack cert-manager, where reading Certificates fails on every tick for nothing.
+  const tls = related.some(p => p.protocol === 'HTTPS') && service.manifests.some(m => m?.kind === 'Certificate');
   const [policyJson, certJson, deployJson] = await Promise.all([
     read('networkpolicy'),
-    https ? read('certificate') : undefined,
-    https ? read('deploy') : undefined,
+    tls ? read('certificate') : undefined,
+    tls ? read('deploy') : undefined,
   ]);
   const checks: CheckResult[] = [];
   const path = (kind: string, name: string) => `k8s://${ns}/${kind}/${name}`;
 
   if (policyJson) {
     const live = parsePolicies(policyJson);
-    const denyInGit = gitPolicies.some(p => p.name === 'default-deny');
-    const denyLive = live.some(p => p.name === 'default-deny' && p.allPods && p.ingress && p.egress);
+    // default-deny holds when the cluster's has the shape Git's has (an ingress-only default-deny is as Git asks).
+    const gitDeny = gitPolicies.find(p => p.name === 'default-deny');
+    const denyInGit = gitDeny !== undefined;
+    const liveDeny = live.find(p => p.name === 'default-deny');
+    const denyLive = gitDeny !== undefined && liveDeny !== undefined && shape(liveDeny) === shape(gitDeny);
     for (const element of [...new Set(related.map(p => p.relationship!))]) {
       const mine = related.filter(p => p.relationship === element);
       const reasons: string[] = [];
@@ -122,7 +142,13 @@ export async function senseService(deps: SensorDeps, service: ServiceInfo): Prom
       }
       // The policy that broke first, so the panel's evidence link points at it.
       const ordered = [...mine].sort((a, b) => Number(broken.includes(b.name)) - Number(broken.includes(a.name)));
-      if (denyInGit && !denyLive) reasons.push('default-deny is missing: traffic is no longer limited to the architecture');
+      if (denyInGit && !denyLive) {
+        reasons.push(
+          liveDeny
+            ? `default-deny is not as Git asks (it denies ${denyScope(liveDeny)}; Git asks ${denyScope(gitDeny!)}): traffic is no longer limited to the architecture`
+            : 'default-deny is missing: traffic is no longer limited to the architecture',
+        );
+      }
       const expected = mine.map(p => `${p.name}: ${p.peers}`).join('; ');
       checks.push({
         element,
@@ -174,6 +200,13 @@ export class Sensors {
   /** CALM Hub ids of records no longer tracked, by unique-id: a check that comes back replaces its old record. */
   private readonly retired = new Map<string, number>();
   private readonly numericIds = new Map<string, number | undefined>();
+  /** Architecture versions as CALM Hub stores them, which never change once stored: read once each. */
+  private readonly docs = new Map<string, unknown>();
+  /**
+   * Records whose create timed out, by unique-id, until when (wall clock): the POST may still land, and is tracked if
+   * it does, so the record is not created a second time meanwhile.
+   */
+  private readonly creating = new Map<string, number>();
 
   constructor(private readonly deps: SensorDeps) {}
 
@@ -224,8 +257,8 @@ export class Sensors {
   }
 
   /** Senses one architecture's service now and records what changed; undefined when the platform does not run it. */
-  async run(namespace: string, architecture: string): Promise<Sensing | undefined> {
-    const { sensing, recorded } = await this.start(namespace, architecture);
+  async run(namespace: string, architecture: string, service?: ServiceInfo): Promise<Sensing | undefined> {
+    const { sensing, recorded } = await this.start(namespace, architecture, service);
     await recorded;
     return sensing;
   }
@@ -235,11 +268,11 @@ export class Sensors {
     return (await this.start(namespace, architecture)).sensing;
   }
 
-  private start(namespace: string, architecture: string) {
+  private start(namespace: string, architecture: string, service?: ServiceInfo) {
     const key = `${namespace}/${architecture}`;
     const busy = this.running.get(key);
     if (busy) return busy;
-    const job = this.sense(namespace, architecture).finally(() => this.running.delete(key));
+    const job = this.sense(namespace, architecture, service).finally(() => this.running.delete(key));
     this.running.set(key, job);
     return job;
   }
@@ -263,7 +296,8 @@ export class Sensors {
       const service = await readService(gitea, settings, repo).catch(() => undefined);
       const ns = service?.architectureNamespace;
       if (!service?.architecture || !ns || !settings.deployNamespaces.includes(ns)) continue;
-      await this.run(ns, service.architecture).catch(e => logger.warn(`Sensors failed on ${service.architecture}: ${oneLine(e)}`));
+      // The service as just read, so the run does not read it from Gitea again.
+      await this.run(ns, service.architecture, service).catch(e => logger.warn(`Sensors failed on ${service.architecture}: ${oneLine(e)}`));
     }
     await this.sweep();
   }
@@ -304,10 +338,12 @@ export class Sensors {
     return { rows, problems: this.latest.get(`${namespace}/${architecture}`)?.problems ?? [] };
   }
 
-  private async sense(namespace: string, architecture: string): Promise<{ sensing?: Sensing; recorded: Promise<void> }> {
-    const { hub, gitea, settings, logger } = this.deps;
+  private async sense(namespace: string, architecture: string, read?: ServiceInfo): Promise<{ sensing?: Sensing; recorded: Promise<void> }> {
+    const { gitea, settings } = this.deps;
     const none = { recorded: Promise.resolve() };
-    const service = await readService(gitea, settings, architecture);
+    // Only the namespaces this connector deploys to: it records nothing anywhere else.
+    if (!settings.deployNamespaces.includes(namespace)) return none;
+    const service = read ?? (await readService(gitea, settings, architecture));
     const version = service?.deployedVersion;
     if (!service || !version || service.architecture !== architecture || service.architectureNamespace !== namespace) return none;
     const now = this.now();
@@ -319,10 +355,7 @@ export class Sensors {
     if (this.deps.jobs?.isRunning(architecture)) return deploying();
     const [found, doc, numericId] = await Promise.all([
       senseService(this.deps, service),
-      hub.architecture(namespace, architecture, version).catch(e => {
-        logger.warn(`Sensors could not read ${architecture} ${version}: ${oneLine(e)}`);
-        return undefined;
-      }),
+      this.architectureDoc(namespace, architecture, version),
       this.numericId(namespace, architecture),
     ]);
     // A deployment that started during the reads may have changed the cluster under them.
@@ -383,23 +416,51 @@ export class Sensors {
       else await this.create({ namespace, architecture, base }, body);
     }
     // Evidence of a check this version no longer makes is not kept fresh, so it would go stale and keep its
-    // relationship red: stop tracking it. Only after a full read: when a read failed, the checks it would have made
-    // stay tracked and go stale.
+    // relationship red. It is written once more as not-applicable, its relationship evaluated from that (so a
+    // relationship with no check left ends not-applicable in CALM Hub rather than keeping its last status), and then
+    // no longer tracked. Only after a full read: when a read failed, the checks it would have made stay tracked and
+    // go stale.
+    const dropped: [string, Tracked][] = [];
     if (!sensing.problems.length) {
       const seen = new Set(sensing.checks.map(c => `${baseOf(c.element)}-${c.check}`));
       for (const [uid, t] of this.tracked) {
         if (t.namespace !== namespace || t.architecture !== architecture || t.body.type !== 'evidence' || seen.has(uid)) continue;
-        this.untrack(uid, t);
+        dropped.push([uid, t]);
         bases.add(t.base);
       }
-      for (const [uid, t] of this.tracked) {
-        // The evaluation of a relationship with no check left.
-        if (t.body.type !== 'evidence' && t.namespace === namespace && t.architecture === architecture && !sensing.checks.some(c => baseOf(c.element) === t.base)) {
-          this.untrack(uid, t);
-        }
+      for (const [, t] of dropped) {
+        const d = t.body.data;
+        await this.put(t, {
+          ...t.body,
+          data: {
+            ...d,
+            result: 'not-applicable',
+            observed: `${version} no longer makes this check`,
+            'observed-at': observedAt,
+            'valid-until': new Date(now + VALID_FOR_MS).toISOString(),
+          },
+        });
       }
     }
     for (const base of bases) await this.evaluate(base, now);
+    // Stop tracking only what CALM Hub took: a write that failed is tried again on the next run.
+    const checked = (base: string) => sensing.checks.some(c => baseOf(c.element) === base);
+    for (const [uid] of dropped) {
+      const t = this.tracked.get(uid);
+      if (t?.body.data.result !== 'not-applicable') continue;
+      // A relationship with no check left keeps its evidence until its evaluation is written not-applicable too.
+      const ev = this.tracked.get(`${t.base}-${CONTROL}`);
+      if (!checked(t.base) && ev && ev.body.data.status !== 'not-applicable') continue;
+      this.untrack(uid, t);
+    }
+    if (!sensing.problems.length) {
+      for (const [uid, t] of this.tracked) {
+        if (t.body.type === 'evidence' || t.namespace !== namespace || t.architecture !== architecture || checked(t.base)) continue;
+        // The evaluation of a relationship with no check left, once it is not-applicable and its evidence is let go.
+        const evidenceLeft = [...this.tracked.values()].some(e => e.base === t.base && e.body.type === 'evidence');
+        if (t.body.data.status === 'not-applicable' && !evidenceLeft) this.untrack(uid, t);
+      }
+    }
   }
 
   /** Writes the control evaluation for one relationship from its evidence, when its status or target changed. */
@@ -438,37 +499,91 @@ export class Sensors {
 
   /** A write that CALM Hub does not answer in time fails, so one hung call cannot stop the sensors. */
   private bounded<T>(write: Promise<T>): Promise<T> {
-    const ms = this.deps.writeTimeoutMs ?? 5_000;
+    const ms = this.writeTimeoutMs();
     let timer: NodeJS.Timeout | undefined;
     const timeout = new Promise<never>((_, reject) => {
-      timer = setTimeout(() => reject(new Error(`CALM Hub did not answer within ${ms} ms`)), ms);
+      timer = setTimeout(() => reject(new WriteTimeout(ms)), ms);
     });
     return Promise.race([write, timeout]).finally(() => clearTimeout(timer));
   }
 
+  private writeTimeoutMs() {
+    return this.deps.writeTimeoutMs ?? 5_000;
+  }
+
+  /** Writes a record not tracked yet: over the one it replaces when it comes back, else as a new one. */
   private async create(owner: Pick<Tracked, 'namespace' | 'architecture' | 'base'>, body: any): Promise<void> {
     const uid = body['unique-id'];
     const old = this.retired.get(uid);
-    if (old !== undefined) {
-      this.retired.delete(uid);
-      return this.put({ ...owner, id: old, body }, body).then(() => {
-        this.tracked.set(uid, { ...owner, id: old, body });
-      });
+    if (old === undefined) {
+      await this.post(owner, body);
+      return;
     }
+    this.retired.delete(uid);
+    const t: Tracked = { ...owner, id: old, body };
+    const ok = await this.put(t, body);
+    // put() may have recorded it afresh (the old record was gone); else it is tracked only once CALM Hub took it,
+    // and the old record is kept to be replaced on the next try.
+    if (this.tracked.has(uid)) return;
+    if (ok) this.tracked.set(uid, t);
+    else this.retired.set(uid, old);
+  }
+
+  /** POSTs a new record and tracks it. A POST that times out is tracked if it lands later, and not sent twice. */
+  private async post(owner: Pick<Tracked, 'namespace' | 'architecture' | 'base'>, body: any): Promise<boolean> {
+    const uid = body['unique-id'];
+    if ((this.creating.get(uid) ?? 0) > Date.now()) return false;
+    const write = this.deps.hub.createDecorator(owner.namespace, body);
     try {
-      const id = await this.bounded(this.deps.hub.createDecorator(owner.namespace, body));
+      const id = await this.bounded(write);
       this.tracked.set(uid, { ...owner, id, body });
+      return true;
     } catch (e) {
-      this.deps.logger.warn(`Could not record ${body['unique-id']}: ${oneLine(e)}`);
+      this.deps.logger.warn(`Could not record ${uid}: ${oneLine(e)}`);
+      if (e instanceof WriteTimeout) {
+        this.creating.set(uid, Date.now() + 6 * this.writeTimeoutMs());
+        write.then(
+          id => {
+            this.creating.delete(uid);
+            const t = this.tracked.get(uid);
+            if (!t) this.tracked.set(uid, { ...owner, id, body });
+            else if (t.id !== id) this.deps.logger.warn(`A slow write of ${uid} landed late as decorator ${id}, beside decorator ${t.id}`);
+          },
+          () => this.creating.delete(uid),
+        );
+      }
+      return false;
     }
   }
 
-  private async put(t: Tracked, body: any): Promise<void> {
+  /** Replaces a tracked record; one CALM Hub no longer has (deleted there) is recorded afresh. True if CALM Hub took it. */
+  private async put(t: Tracked, body: any): Promise<boolean> {
+    const uid = body['unique-id'];
     try {
       await this.bounded(this.deps.hub.updateDecorator(t.namespace, t.id, body));
       t.body = body;
+      return true;
     } catch (e) {
-      this.deps.logger.warn(`Could not update ${body['unique-id']}: ${oneLine(e)}`);
+      if (e instanceof CalmHubError && e.status === 404) {
+        this.deps.logger.warn(`${uid} is gone from CALM Hub (decorator ${t.id}): recording it again`);
+        if (this.tracked.get(uid) === t) this.tracked.delete(uid);
+        return this.post(t, body);
+      }
+      this.deps.logger.warn(`Could not update ${uid}: ${oneLine(e)}`);
+      return false;
+    }
+  }
+
+  private async architectureDoc(namespace: string, architecture: string, version: string): Promise<unknown> {
+    const key = `${namespace}/${architecture}/${version}`;
+    if (this.docs.has(key)) return this.docs.get(key);
+    try {
+      const doc = await this.deps.hub.architecture(namespace, architecture, version);
+      this.docs.set(key, doc);
+      return doc;
+    } catch (e) {
+      this.deps.logger.warn(`Sensors could not read ${architecture} ${version}: ${oneLine(e)}`);
+      return undefined;
     }
   }
 
