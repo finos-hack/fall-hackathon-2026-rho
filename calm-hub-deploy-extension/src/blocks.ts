@@ -1,6 +1,7 @@
 import { allPodsPolicies, hubRecords, inSync, policiesNaming, type DriftReason, type HubRecord, type Platform, type PlatformView } from './platform';
 import type { ServiceRow } from './services';
 import type { Status } from './status';
+import type { EvidenceRow } from './sensors';
 
 /** A reply CALM Hub draws (blocks schema 0). */
 export interface BlocksReply {
@@ -82,7 +83,7 @@ const notManaged = (view: PlatformView): Block => {
 };
 
 /** The designer tab for an architecture version: what runs, and whether it matches Git and CALM Hub's record. */
-export function tabReply(view: PlatformView, version?: string): BlocksReply {
+export function tabReply(view: PlatformView, version?: string, evidence: EvidenceRow[] = []): BlocksReply {
   const { status: s, platform: p } = view;
   if (!s.managed || !p) {
     return {
@@ -117,6 +118,15 @@ export function tabReply(view: PlatformView, version?: string): BlocksReply {
     blocks: [
       headline(p, version),
       { type: 'keyValue', items },
+      // Runtime evidence is about the running version only.
+      ...(evidence.length && (!version || version === p.version)
+        ? [
+            {
+              type: 'stats' as const,
+              items: [{ label: 'Runtime checks holding', value: `${evidence.filter(e => e.result === 'pass').length}/${evidence.length}` }],
+            },
+          ]
+        : []),
       ...(links.length ? [{ type: 'links' as const, items: links }] : []),
       { type: 'markdown', text: 'Deployment history: the Deployments view on the diagram (View all).' },
     ],
@@ -125,8 +135,31 @@ export function tabReply(view: PlatformView, version?: string): BlocksReply {
 
 const listOr = (names: string[], none = 'none') => (names.length ? names.join('; ') : none);
 
+const RESULT_TONE: Record<string, Tone> = { pass: 'positive', fail: 'negative', stale: 'warning', 'not-applicable': 'neutral' };
+
+/** The runtime evidence recorded for one element: whether its control holds, and each check. */
+function evidenceBlocks(rows: EvidenceRow[]): Block[] {
+  if (!rows.length) return [];
+  const failing = rows.find(r => r.result === 'fail');
+  const stale = rows.find(r => r.result === 'stale');
+  const alert: Block = failing
+    ? { type: 'alert', tone: 'negative', text: `Control not met at runtime: ${failing.observed}` }
+    : stale
+      ? { type: 'alert', tone: 'warning', text: `Runtime evidence is stale (last observed ${when(stale.observedAt)}): shown as not met until the sensors report again` }
+      : { type: 'alert', tone: 'positive', text: `Control holds at runtime: ${rows.length} check${rows.length === 1 ? '' : 's'} pass` };
+  return [
+    alert,
+    {
+      type: 'table',
+      columns: ['Check', 'Result', 'Observed', 'At', 'Evidence'],
+      rows: rows.map(r => [r.check, { badge: r.result, tone: RESULT_TONE[r.result] ?? 'neutral' }, r.observed, when(r.observedAt), r.path ?? '']),
+    },
+  ];
+}
+
 /** The detail panel for one node (or relationship) of the diagram: what the platform runs for it. */
-export function nodeReply(view: PlatformView, node: string): BlocksReply {
+export function nodeReply(view: PlatformView, node: string, evidence: EvidenceRow[] = []): BlocksReply {
+  const mineEvidence = evidenceBlocks(evidence.filter(e => e.element === node));
   const { status: s, platform: p } = view;
   if (!s.managed || !p) return { hubApi: 0, blocks: [notManaged(view)] };
   const workloads = p.workloads.filter(w => w.node === node);
@@ -137,7 +170,7 @@ export function nodeReply(view: PlatformView, node: string): BlocksReply {
     return {
       hubApi: 0,
       blocks: [
-        { type: 'alert', tone: 'info', text: 'Not run by the platform' },
+        ...(mineEvidence.length ? mineEvidence : [{ type: 'alert' as const, tone: 'info' as const, text: 'Not run by the platform' }]),
         ...(named.length
           ? [
               {

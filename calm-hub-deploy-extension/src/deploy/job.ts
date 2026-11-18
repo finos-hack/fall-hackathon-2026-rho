@@ -434,21 +434,21 @@ export async function runDeployment(
 
     // The controls gate, before any deployment record: nothing reaches Git, nor a deployment decorator, unless the
     // version passes its pattern and controls. A refusal is recorded as a control evaluation.
+    // A version that names no pattern cannot be checked, so it is refused (fails closed), not deployed unchecked.
     const schema = (ctx.doc as any)?.$schema;
-    let gate: string;
-    if (typeof schema === 'string' && parsePatternUrl(schema)) {
-      report({ status: 'validating', notes: `Validating ${record.version} against its pattern and controls` });
-      const result = await (deps.validate ?? cliValidate(deps))({ patternUrl: schema, architecturePath, dir: tmp });
-      if (result.hasErrors) {
-        await refuse(deps, ctx, result.errors, iso());
-        return;
-      }
-      gate = `${record.version} passed its pattern and controls`;
-    } else {
-      gate = `${record.version} names no pattern in CALM Hub: validation skipped`;
+    if (typeof schema !== 'string' || !parsePatternUrl(schema)) {
+      const message = `${record.version} names no pattern in CALM Hub ($schema ${typeof schema === 'string' ? schema : 'missing'}): the controls gate cannot validate it`;
+      await refuse(deps, ctx, [{ severity: 'error', message }], iso());
+      return;
+    }
+    report({ status: 'validating', notes: `Validating ${record.version} against its pattern and controls` });
+    const result = await (deps.validate ?? cliValidate(deps))({ patternUrl: schema, architecturePath, dir: tmp });
+    if (result.hasErrors) {
+      await refuse(deps, ctx, result.errors, iso());
+      return;
     }
 
-    record.notes = `${gate}. ${record.notes}`;
+    record.notes = `${record.version} passed its pattern and controls. ${record.notes}`;
     decoratorId = await hub.createDecorator(record.namespace, decoratorOf(record));
     report({ status: record.status, notes: record.notes, decoratorId });
     await update({ status: 'in-progress', notes: `Rendering ${bundle.name}@${bundle.version} against ${record.version}` });

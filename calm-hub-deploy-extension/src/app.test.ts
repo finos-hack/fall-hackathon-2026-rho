@@ -538,6 +538,30 @@ function addStreamVersion(w: World) {
 }
 
 describe('controls gate', () => {
+  it.each([
+    ['no $schema', undefined],
+    ['a $schema that is not a pattern', 'https://calm.finos.org/release/1.3/meta/calm.json'],
+  ])('refuses a version with %s, and writes nothing to Git', async (_, schema) => {
+    // The gate itself would pass: only the missing pattern may refuse it.
+    const w = make({ validateErrors: [] });
+    addStreamVersion(w);
+    const doc = w.hub.architectures.get('events-stream')!.versions.get('1.0.2');
+    if (schema === undefined) delete doc.$schema;
+    else doc.$schema = schema;
+    const before = w.gitea.head('events-stream');
+    await call(w, 'POST', '/deploy/hackathon/architectures/events-stream/1.0.2', {});
+    await w.deps.jobs.idle();
+
+    expect(w.hub.decorators.size).toBe(1);
+    const d = w.hub.latest();
+    expect(d.type).toBe('control-evaluation');
+    expect(d.data.status).toBe('not-met');
+    expect(d.data.findings[0].description).toContain('names no pattern');
+    expect(w.gitea.head('events-stream')).toBe(before);
+    expect(w.gitea.pulls).toHaveLength(0);
+    expect((await history(w))[0].status).toBe('refused');
+  });
+
   it('records a refused version as one control evaluation on the relationship it adds, and nothing else', async () => {
     const errors = ['connection web-service → stream is not permitted', 'e2', 'e3', 'e4', 'e5', 'e6'];
     const w = make({ validateErrors: errors });

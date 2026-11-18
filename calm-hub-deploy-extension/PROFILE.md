@@ -19,6 +19,10 @@ turns each into `calm hub ext <id> <command>` and the MCP tool `ext_<id>_<comman
 | `status` | `read`, readOnly | `namespace`, `architecture` | `managed`, `environment`, `deployedVersion`, `latestVersion`, `ready`, `message`, `inSync`, `drift[]`, and anything else the platform knows (see below) |
 | `history` | `read`, readOnly | `namespace`, `architecture` | `deployments[]`, newest first: `id`, `deploymentId`, `evaluationId`, `version`, `status`, `startTime`, `endTime`, `environment`, `requestedBy`, `pullRequest`, `details`, `notes` |
 | `deploy` | `write`, `idempotent: true` | `namespace`, `architecture`, `version` (optional `environment`, see 5) | `deploymentId`, `status: "pending"` |
+| `verify` | `read`, `idempotent: true` | `namespace`, `architecture` | `managed`, `version`, `observedAt`, `holding`, `checked`, `checks[]` (`element`, `check`, `result`, `expected`, `observed`, `paths`), `problems[]` |
+
+`verify` collects runtime evidence now and records it (see 2, the evidence record). A connector also collects it on its
+own, often enough that a broken control shows within seconds.
 
 `status` also gives, in the reference connector: `repository`, `deploymentRules`, `commit`, `commitUrl`, `mainCommit`,
 `fluxAtMain`, `deploying`, `problems[]`, `pendingApproval`, `workloads[]` (name, architecture node, replicas Git asks
@@ -83,6 +87,25 @@ CALM Hub) with the same two targets:
   `data.engine`.
 - `data.actors`: `requested-by`, `hub-audit-id` and `connector`.
 
+### The evidence record
+
+What the platform observed about one control on one architecture element: one decorator per (environment, element,
+check), replaced (PUT) as it changes, so CALM Hub keeps its history. `type: "evidence"`, `$schema` the base decorator
+definition `https://calm.finos.org/release/1.3/meta/decorators.json#/defs/decorator` (CALM bundles no evidence
+standard), the two targets of the running version, and:
+
+- `applies-to`: the relationship for a connection check, the node for a node check.
+- `data.evidence`: CALM's `meta/evidence.json`: `unique-id`, `evidence-paths[]` (where the raw evidence is, in the
+  platform's own terms), `control-config-url` (the requirement's configuration, else the requirement).
+- `data.control` (`unique-id`, `control-id`, `requirement-url`), `data.check`, `data.result` (`pass`, `fail`, `stale`,
+  `not-applicable`), `data.expected`, `data.observed`, `data.observed-at`, `data.valid-until`, `data.sensor`,
+  `data.deployment`.
+
+Beside it, one control evaluation per element and control (the 1.0 standard, as above) mirrors the evidence of every
+check on that element: `not-met` when any is `fail` or `stale` (one finding each), `not-applicable` when none applies,
+else `met`, with `report-uri` pointing at the evidence and `data.engine` naming the sensor. It is what CALM Hub's
+Control evaluations overlay draws. It carries no `actors.connector`, so `history` does not list it as a refusal.
+
 ## 3. Status semantics
 
 ### Deployment status
@@ -119,6 +142,15 @@ Rules for any connector:
   finishes (drift compares the newest completed record with what runs).
 - The reference connector treats only Kubernetes Deployments as workloads, not StatefulSets or DaemonSets.
 
+### Runtime evidence
+
+- `pass` and `fail` are what the platform observed. A read that fails is not a `fail`: it is a problem, and the
+  evidence ages.
+- An observation holds until `valid-until`. Evidence past it is `stale`, and a stale check makes its control `not-met`:
+  **evidence nobody refreshes is never shown as met**. A connector refreshes unchanged evidence before it expires (the
+  reference connector: heartbeat 60 s, valid 90 s).
+- While the connector deploys a service it does not record that service's evidence, and does not let it go stale.
+
 ## 4. The UI contributions
 
 A connector contributes these to CALM Hub (the manifest's `contributes`). Each is blocks CALM Hub draws.
@@ -127,7 +159,7 @@ A connector contributes these to CALM Hub (the manifest's `contributes`). Each i
 |---|---|---|
 | `action` "Deploy this version" | The architecture version's Extensions | Nothing of its own: CALM Hub shows only running, done or failed. Progress is the decorator. Route `POST /deploy/{namespace}/{resourceType}/{resourceId}/{version}`, scope `write` |
 | `designer-tab` "Deployment" | The architecture version's Extensions | Where the version runs, whether the version on screen is the one running, the platform's health (here Flux), and CALM Hub's newest deployment record with whether it matches. Headline: deploying, the first drift reason, or in sync. It does not repeat deployment history: CALM Hub's Deployments view has it |
-| `detail-panel` "Platform" | The node sidebar, under Extensions | For the selected node: what the platform runs for it (workload, replicas ready, image, last change), what the platform allows in and out of it, and CALM Hub's newest record covering it. For something the platform does not run, say so. Route scope `read` |
+| `detail-panel` "Platform" | The node sidebar, under Extensions | For the selected node: what the platform runs for it (workload, replicas ready, image, last change), what the platform allows in and out of it, and CALM Hub's newest record covering it. For a connection: its runtime evidence (whether the control holds, each check). For something the platform does not run, say so. Route scope `read` |
 | `landing-card` | CALM Hub's home page | The count of services, how many are in sync and how many have drifted, as the **first** `stats` block: CALM Hub draws only that block of a card, not an alert after it. Route scope `authenticated` |
 | `screen` "Services" | An extension screen | Every service the connector manages with its running version, platform health and drift (reasons in full). Route scope `authenticated` |
 
@@ -143,7 +175,8 @@ that is (here `DEPLOY_NAMESPACES`) and should document it.
    that the thing it deploys belongs to that namespace's architecture.
 3. **Nothing reaches the platform without passing the controls gate.** Validate the version against its pattern and
    controls before anything is written to the platform, and before the deployment decorator exists. A refusal is a
-   control evaluation.
+   control evaluation. A version that names no pattern cannot be validated, so it is refused too.
+10. **Never show stale evidence as met** (3, Runtime evidence).
 4. **Enforce the firm's own rules** with `sub`: who may deploy where, maker-checker, change windows. CALM Hub's
    scopes are per namespace only.
 5. **One deployment per service at a time.** A second `deploy` while one runs is refused (HTTP 409).
@@ -166,3 +199,4 @@ that is (here `DEPLOY_NAMESPACES`) and should document it.
 - Promotion (`uat` → `prod`) as one command, or as a deploy per environment with the firm's gate between them.
 - A `rollback` command, and whether `rolled-back` is recorded on the old deployment or a new one.
 - Where a connector keeps what it cannot yet write to CALM Hub (see guarantee 6).
+- Who marks evidence stale when the connector itself is down: today nobody does (FINDINGS X11).

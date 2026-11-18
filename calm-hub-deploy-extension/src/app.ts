@@ -9,10 +9,12 @@ import { readServices } from './services';
 import { publicEntry, readHistory } from './status';
 import { requestDeployment, type DeployDeps } from './deploy/job';
 import { oneLine } from './deploy/kube';
+import type { Sensors } from './sensors';
 
 export interface AppDeps extends DeployDeps {
   routes: RouteTable;
   verify: VerifyAssertion;
+  sensors: Sensors;
 }
 
 export interface Request {
@@ -38,7 +40,8 @@ const handlers: Record<string, Handler> = {
     // A tab shows its own error rather than CALM Hub's generic "Extension request failed."
     return panel(deps, 'designer tab', async () => {
       const arch = await resolveArchitecture(deps.hub, p.namespace, p.resourceType, p.resourceId);
-      return tabReply(await readPlatform(deps, arch.namespace, arch.name), q.get('version') ?? undefined);
+      const view = await readPlatform(deps, arch.namespace, arch.name);
+      return tabReply(view, q.get('version') ?? undefined, deps.sensors.snapshot(arch.namespace, arch.name).rows);
     });
   },
 
@@ -46,7 +49,8 @@ const handlers: Record<string, Handler> = {
   async node(deps, p) {
     return panel(deps, 'node panel', async () => {
       const arch = await resolveArchitecture(deps.hub, p.namespace, p.resourceType, p.resourceId);
-      return nodeReply(await readPlatform(deps, arch.namespace, arch.name), p.selectedElement);
+      const view = await readPlatform(deps, arch.namespace, arch.name);
+      return nodeReply(view, p.selectedElement, deps.sensors.snapshot(arch.namespace, arch.name).rows);
     });
   },
 
@@ -95,6 +99,19 @@ const handlers: Record<string, Handler> = {
       deps.logger.warn(`Could not read the history of ${p.namespace}/${p.architecture}: ${e.message}`);
       return { status: 200, body: { deployments: unrecorded.map(publicEntry), problems: [`Cannot read CALM Hub's records: ${e.message}`] } };
     }
+  },
+
+  /** The verify command: runtime evidence now, recorded in CALM Hub. */
+  async verify(deps, p) {
+    const arch = await findArchitecture(deps.hub, p.namespace, p.architecture);
+    const base = { namespace: arch.namespace, architecture: arch.name };
+    const r = await deps.sensors.check(arch.namespace, arch.name);
+    if (!r) return { status: 200, body: { ...base, managed: false, checks: [], problems: [] } };
+    const holding = r.checks.filter(c => c.result === 'pass').length;
+    return {
+      status: 200,
+      body: { ...base, managed: true, version: r.version, observedAt: r.observedAt, holding, checked: r.checks.length, checks: r.checks, problems: r.problems },
+    };
   },
 
   /** The "Deploy this version" action: the version on screen. */

@@ -26,6 +26,10 @@ describe('RouteTable (from the manifest)', () => {
       route: { id: 'node', scope: 'read', readOnly: true },
       params: { namespace: 'hackathon', resourceType: 'architectures', resourceId: 'orders', selectedElement: 'stream-app' },
     });
+    expect(table.match('POST', '/namespaces/hackathon/architectures/orders/verify')).toMatchObject({
+      route: { id: 'verify', scope: 'read' },
+      params: { namespace: 'hackathon', architecture: 'orders' },
+    });
     expect(table.match('GET', '/card')).toMatchObject({ route: { id: 'card', scope: 'authenticated', readOnly: true }, params: {} });
     expect(table.match('GET', '/screen')).toMatchObject({ route: { id: 'screen', scope: 'authenticated', readOnly: true } });
   });

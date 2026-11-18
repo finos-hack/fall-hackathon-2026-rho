@@ -39,6 +39,12 @@ export interface Policy {
   peers: string;
   /** Nodes the policy's peers select. */
   peerNodes: string[];
+  /** The ports its rules allow. */
+  ports: number[];
+  /** The architecture relationship it implements (annotation `calm.finos.org/relationship`). */
+  relationship?: string;
+  /** That relationship's protocol (annotation `calm.finos.org/protocol`). */
+  protocol?: string;
 }
 
 /** A CALM Hub deployment record, as the platform compares it. */
@@ -158,6 +164,10 @@ export function parsePolicies(json: any): Policy[] {
     const allPods = isEmptySelector(spec.podSelector);
     const node = allPods ? undefined : label(spec.podSelector);
     const peers = [...ingress.text, ...egress.text];
+    const ports = [...list(spec.ingress), ...list(spec.egress)]
+      .flatMap((rule: any) => list(rule?.ports).map((x: any) => Number(x?.port)))
+      .filter(Number.isFinite);
+    const annotations = p?.metadata?.annotations ?? {};
     return {
       name: String(p?.metadata?.name ?? ''),
       ...(node ? { node } : {}),
@@ -166,9 +176,15 @@ export function parsePolicies(json: any): Policy[] {
       egress: types.includes('Egress'),
       peers: peers.length ? peers.join('; ') : 'nothing allowed',
       peerNodes: [...new Set([...ingress.nodes, ...egress.nodes])],
+      ports: [...new Set(ports)].sort((a, b) => a - b),
+      ...(typeof annotations[RELATIONSHIP] === 'string' ? { relationship: annotations[RELATIONSHIP] } : {}),
+      ...(typeof annotations[PROTOCOL] === 'string' ? { protocol: annotations[PROTOCOL] } : {}),
     };
   });
 }
+
+const RELATIONSHIP = 'calm.finos.org/relationship';
+const PROTOCOL = 'calm.finos.org/protocol';
 
 /** Policies with an empty pod selector: they apply to every pod (e.g. default-deny, allow-dns). */
 export const allPodsPolicies = (p: Platform) => p.policies.filter(x => x.allPods);
@@ -240,7 +256,7 @@ export function driftOf(p: Omit<Platform, 'drift'>): DriftReason[] {
 /** In sync: nothing deploying, nothing unknown, no drift. */
 export const inSync = (p: Platform) => !p.deploying && !p.problems.length && !p.drift.length;
 
-async function kubectlJson(deps: ReadDeps, ns: string, kind: string): Promise<any> {
+export async function kubectlJson(deps: ReadDeps, ns: string, kind: string): Promise<any> {
   const text = await deps.kubectl(['-n', ns, 'get', kind, '-o', 'json'], true, KUBECTL_TIMEOUT_MS);
   return text.trim() ? JSON.parse(text) : { items: [] };
 }

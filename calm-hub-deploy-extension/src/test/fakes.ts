@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import YAML from 'yaml';
-import type { FetchLike } from '@internal/backstage-plugin-calm-common';
+import { EVIDENCE_DECORATOR_SCHEMA, type FetchLike } from '@internal/backstage-plugin-calm-common';
 import type { AppDeps } from '../app';
 import { readSettings, type Settings } from '../config';
 import { Gitea } from '../gitea';
@@ -18,6 +18,7 @@ import { Jobs, type Render, type Validate } from '../deploy/job';
 import { CONTROL_EVALUATION_STANDARD } from '../evaluation';
 import { KUBERNETES_DEPLOYMENT_STANDARD } from '../record';
 import type { Kubectl } from '../deploy/kube';
+import { Sensors } from '../sensors';
 
 const HUB = 'http://hub.test';
 const GITEA = 'http://gitea.test';
@@ -51,6 +52,7 @@ export function architectureDoc(name: string, version: string, extras: string[])
  */
 export function standardErrors(d: any): { location: string; error: string }[] {
   if (d?.$schema === CONTROL_EVALUATION_STANDARD) return evaluationErrors(d);
+  if (d?.$schema === EVIDENCE_DECORATOR_SCHEMA) return baseDecoratorErrors(d);
   if (d?.$schema !== KUBERNETES_DEPLOYMENT_STANDARD) return [];
   const errors: { location: string; error: string }[] = [];
   if (d.type !== 'deployment') errors.push({ location: '/type', error: 'must be "deployment"' });
@@ -108,6 +110,24 @@ export function evaluationErrors(d: any): { location: string; error: string }[] 
   } else if (data.findings !== undefined) {
     errors.push({ location: '/data/findings', error: 'only allowed when not-met' });
   }
+  return errors;
+}
+
+/**
+ * What CALM Hub would refuse in a decorator stamped with the base decorator definition (CALM 1.3
+ * `meta/decorators.json#/defs/decorator`): its required fields, non-empty arrays, and no other top-level property.
+ */
+export function baseDecoratorErrors(d: any): { location: string; error: string }[] {
+  const allowed = ['$schema', 'unique-id', 'type', 'target-type', 'target', 'applies-to', 'data'];
+  const errors: { location: string; error: string }[] = [];
+  for (const k of ['unique-id', 'type']) if (!nonEmpty(d[k])) errors.push({ location: `/${k}`, error: 'required' });
+  for (const k of ['target', 'applies-to']) {
+    if (!Array.isArray(d[k]) || !d[k].length) errors.push({ location: `/${k}`, error: 'must be a non-empty array' });
+  }
+  if (typeof d.data !== 'object' || d.data === null || !Object.keys(d.data).length) {
+    errors.push({ location: '/data', error: 'must be an object with at least one property' });
+  }
+  for (const k of Object.keys(d)) if (!allowed.includes(k)) errors.push({ location: `/${k}`, error: 'property is not allowed' });
   return errors;
 }
 
@@ -330,11 +350,17 @@ export class FakeGitea {
 const NODE = 'calm.finos.org/node';
 
 /** A NetworkPolicy as the deployment rules render it: `podSelector` the node (or every pod when undefined). */
-function policy(name: string, node: string | undefined, types: string[], rules: Record<string, unknown> = {}) {
+function policy(
+  name: string,
+  node: string | undefined,
+  types: string[],
+  rules: Record<string, unknown> = {},
+  annotations?: Record<string, string>,
+) {
   return {
     apiVersion: 'networking.k8s.io/v1',
     kind: 'NetworkPolicy',
-    metadata: { name },
+    metadata: { name, ...(annotations ? { annotations } : {}) },
     spec: { podSelector: node ? { matchLabels: { [NODE]: node } } : {}, policyTypes: types, ...rules },
   };
 }
@@ -356,31 +382,49 @@ export function manifestsFor(doc: any): Record<string, string> {
     }),
     ...rels.flatMap(r => {
       const { source, destination } = r['relationship-type'].connects;
+      // As k8s-deploy 1.3.1: annotated with the relationship; an HTTPS destination is reached on its TLS sidecar.
+      const port = r.protocol === 'HTTPS' ? 8443 : 5432;
+      const annotations = { 'calm.finos.org/relationship': r['unique-id'], 'calm.finos.org/protocol': r.protocol ?? 'TCP' };
       return [
         policy(`${r['unique-id']}-egress`, source.node, ['Egress'], {
-          egress: [{ to: [{ podSelector: { matchLabels: { [NODE]: destination.node } } }], ports: [{ port: 5432 }] }],
-        }),
+          egress: [{ to: [{ podSelector: { matchLabels: { [NODE]: destination.node } } }], ports: [{ port }] }],
+        }, annotations),
         policy(`${r['unique-id']}-ingress`, destination.node, ['Ingress'], {
-          ingress: [{ from: [{ podSelector: { matchLabels: { [NODE]: source.node } } }], ports: [{ port: 5432 }] }],
-        }),
+          ingress: [{ from: [{ podSelector: { matchLabels: { [NODE]: source.node } } }], ports: [{ port }] }],
+        }, annotations),
       ];
     }),
   ];
+  // Each HTTPS destination runs with a tls-proxy sidecar and a cert-manager Certificate.
+  const tls: string[] = [
+    ...new Set(rels.filter(r => r.protocol === 'HTTPS').map(r => r['relationship-type'].connects.destination.node as string)),
+  ];
+  const deployment = (node: string, containers: { name: string; image: string }[]) => ({
+    apiVersion: 'apps/v1',
+    kind: 'Deployment',
+    metadata: { name: node, labels: { [NODE]: node } },
+    spec: {
+      selector: { matchLabels: { [NODE]: node } },
+      template: { metadata: { labels: { [NODE]: node } }, spec: { containers } },
+    },
+  });
+  const workloads = [
+    deployment('web-service', [{ name: 'web-service', image: 'calm-service' }]),
+    ...tls.map(n => deployment(n, [{ name: n, image: `${n}:1` }, { name: 'tls-proxy', image: 'nginx:1.27' }])),
+  ];
+  const certificates = tls.map(n => ({
+    apiVersion: 'cert-manager.io/v1',
+    kind: 'Certificate',
+    metadata: { name: `${n}-tls`, labels: { [NODE]: n } },
+    spec: { secretName: `${n}-tls`, dnsNames: [n] },
+  }));
   return {
-    'deploy/k8s/kustomization.yaml': YAML.stringify({ resources: ['workloads.yaml', 'network-policy.yaml'] }),
-    'deploy/k8s/workloads.yaml': YAML.stringify({
-      apiVersion: 'apps/v1',
-      kind: 'Deployment',
-      metadata: { name: 'web-service', labels: { [NODE]: 'web-service' } },
-      spec: {
-        selector: { matchLabels: { [NODE]: 'web-service' } },
-        template: {
-          metadata: { labels: { [NODE]: 'web-service' } },
-          spec: { containers: [{ name: 'web-service', image: 'calm-service' }] },
-        },
-      },
+    'deploy/k8s/kustomization.yaml': YAML.stringify({
+      resources: ['workloads.yaml', 'network-policy.yaml', ...(tls.length ? ['tls.yaml'] : [])],
     }),
+    'deploy/k8s/workloads.yaml': workloads.map(x => YAML.stringify(x)).join('---\n'),
     'deploy/k8s/network-policy.yaml': policies.map(x => YAML.stringify(x)).join('---\n'),
+    ...(tls.length ? { 'deploy/k8s/tls.yaml': certificates.map(x => YAML.stringify(x)).join('---\n') } : {}),
   };
 }
 
@@ -416,6 +460,18 @@ export interface Cluster {
   fluxBehind: boolean;
   /** kubectl reads of Deployments and NetworkPolicies fail (the cluster cannot be reached). */
   unreachable: boolean;
+  /** NetworkPolicies someone deleted from the cluster. */
+  dropPolicies: string[];
+  /** The port a NetworkPolicy allows in the cluster, as if someone edited it. */
+  policyPort: Record<string, number>;
+  /** Certificates that are not Ready. */
+  certNotReady: string[];
+  /** A container someone removed from a Deployment: Deployment name → container name. */
+  dropContainer: Record<string, string>;
+  /** Kinds whose reads fail (e.g. `networkpolicy`), as if kubectl timed out on them. */
+  failKinds: string[];
+  /** NetworkPolicies someone widened: their ingress rules also let in any address. */
+  widen: string[];
 }
 
 const OLD_COMMIT = '0123456789abcdef0123456789abcdef01234567';
@@ -427,7 +483,19 @@ const OLD_COMMIT = '0123456789abcdef0123456789abcdef01234567';
  */
 export function fakeKubectl(gitea: FakeGitea, opts: { fluxReady?: boolean; noKustomization?: boolean } = {}) {
   const calls: string[] = [];
-  const cluster: Cluster = { scaled: {}, ready: {}, images: {}, fluxBehind: false, unreachable: false };
+  const cluster: Cluster = {
+    scaled: {},
+    ready: {},
+    images: {},
+    fluxBehind: false,
+    unreachable: false,
+    dropPolicies: [],
+    policyPort: {},
+    certNotReady: [],
+    dropContainer: {},
+    failKinds: [],
+    widen: [],
+  };
   const docs = (svc: string) =>
     gitea
       .files(svc, 'deploy/k8s')
@@ -456,10 +524,35 @@ export function fakeKubectl(gitea: FakeGitea, opts: { fluxReady?: boolean; noKus
       });
     }
     if (line.includes('get deployments')) return JSON.stringify({ items: [{ metadata: { name: 'web-service' } }] });
-    if (/get (deploy|networkpolicy) -o json/.test(line)) {
+    const read = /get (deploy|networkpolicy|certificate) -o json/.exec(line);
+    if (read) {
       if (cluster.unreachable) throw new Error('Unable to connect to the server: dial tcp 127.0.0.1:6443: connect: connection refused');
+      if (cluster.failKinds.includes(read[1])) throw new Error(`kubectl get ${read[1]} timed out`);
       const svc = service(args);
-      if (line.includes('networkpolicy')) return JSON.stringify({ items: docs(svc).filter((d: any) => d.kind === 'NetworkPolicy') });
+      if (read[1] === 'networkpolicy') {
+        const items = docs(svc)
+          .filter((d: any) => d.kind === 'NetworkPolicy' && !cluster.dropPolicies.includes(d.metadata.name))
+          .map((d: any) => {
+            if (cluster.widen.includes(d.metadata.name)) {
+              const ingress = d.spec.ingress?.map((r: any) => ({ ...r, from: [...(r.from ?? []), { ipBlock: { cidr: '0.0.0.0/0' } }] }));
+              d = { ...d, spec: { ...d.spec, ingress } };
+            }
+            const port = cluster.policyPort[d.metadata.name];
+            if (port === undefined) return d;
+            const rules = (rs: any[] | undefined) => rs?.map(r => ({ ...r, ports: [{ protocol: 'TCP', port }] }));
+            return { ...d, spec: { ...d.spec, ingress: rules(d.spec.ingress), egress: rules(d.spec.egress) } };
+          });
+        return JSON.stringify({ items });
+      }
+      if (read[1] === 'certificate') {
+        const items = docs(svc)
+          .filter((d: any) => d.kind === 'Certificate')
+          .map((d: any) => ({
+            ...d,
+            status: { conditions: [{ type: 'Ready', status: cluster.certNotReady.includes(d.metadata.name) ? 'False' : 'True' }] },
+          }));
+        return JSON.stringify({ items });
+      }
       const image = overlayImage(svc);
       const items = docs(svc)
         .filter((d: any) => d.kind === 'Deployment')
@@ -467,7 +560,9 @@ export function fakeKubectl(gitea: FakeGitea, opts: { fluxReady?: boolean; noKus
           const name = d.metadata.name;
           const replicas = cluster.scaled[name] ?? d.spec?.replicas ?? 1;
           const ready = Math.min(cluster.ready[name] ?? replicas, replicas);
-          const containers = (d.spec?.template?.spec?.containers ?? []).map((c: any) => ({
+          const containers = (d.spec?.template?.spec?.containers ?? [])
+            .filter((c: any) => cluster.dropContainer[name] !== c.name)
+            .map((c: any) => ({
             ...c,
             image: c.image === 'calm-service' ? cluster.images[name] ?? image : c.image,
           }));
@@ -561,7 +656,7 @@ export function world(opts: { approval?: 'auto' | 'manual'; validateErrors?: str
   sh(seed, 'push', '-q', bare, 'main');
 
   const { kubectl, calls, cluster } = fakeKubectl(gitea, { fluxReady: opts.fluxReady });
-  const deps: AppDeps = {
+  const base: Omit<AppDeps, 'sensors'> = {
     settings,
     logger: silentLogger,
     hub: new HubClient(HUB, hub.fetch),
@@ -577,5 +672,6 @@ export function world(opts: { approval?: 'auto' | 'manual'; validateErrors?: str
     approvalPollMs: 1,
     fluxPollMs: 1,
   };
+  const deps: AppDeps = { ...base, sensors: new Sensors(base) };
   return { root, settings, hub, gitea, deps, kubectlCalls: calls, cluster, claims: { sub: 'alice', jti: 'aaaa1111-2222', ns: 'hackathon' } };
 }

@@ -1,15 +1,10 @@
-import { architectureVersionPath, type CalmHubDecorator } from '@internal/backstage-plugin-calm-common';
+import { architectureVersionPath, CONTROL_EVALUATION_STANDARD, type CalmHubDecorator } from '@internal/backstage-plugin-calm-common';
 import type { ValidationMessage } from '@internal/backstage-plugin-calm-node';
 import { CONNECTOR, versionTargets, type HistoryEntry } from './record';
 import type { ReadDeps } from './status';
 import { oneLine } from './deploy/kube';
 
-/**
- * The control-evaluation decorator standard CALM Hub bundles: one evaluated control, its status and, when `not-met`,
- * at least one finding. CALM Hub's Control evaluations view draws `not-met` in red on the elements in `applies-to`.
- */
-export const CONTROL_EVALUATION_STANDARD =
-  'https://calm.finos.org/standards/control-evaluation/1.0/control-evaluation.decorator.standard.json';
+export { CONTROL_EVALUATION_STANDARD };
 
 const ENGINE = 'calm validate';
 const MAX_FINDINGS = 5;

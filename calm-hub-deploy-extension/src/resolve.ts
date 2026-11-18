@@ -64,6 +64,8 @@ export interface ServiceInfo {
   nodes: string[];
   /** The Deployments `main` asks for (rendered manifests in deploy/k8s). */
   deployments: GitDeployment[];
+  /** Every rendered manifest in deploy/k8s on `main`, parsed: what the cluster should hold. */
+  manifests: any[];
 }
 
 /**
@@ -101,6 +103,7 @@ export async function readService(gitea: Gitea, settings: Settings, name: string
       annotations['backstage.io/kubernetes-namespace'] ?? deployNamespace(settings.kubernetes.namespacePrefix, name),
     nodes: nodesInManifests(texts),
     deployments: deploymentsInManifests(texts),
+    manifests: texts.flatMap(t => YAML.parseAllDocuments(t).map(d => d.toJS())).filter(Boolean),
   };
 }
 
