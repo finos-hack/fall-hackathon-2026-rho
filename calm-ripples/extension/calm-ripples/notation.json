@@ -1,0 +1,173 @@
+{
+  "shapes": {
+    "component": {
+      "viewBox": [
+        0,
+        0,
+        200,
+        86
+      ],
+      "resize": {
+        "mode": "stretch"
+      },
+      "minSize": [
+        170,
+        76
+      ],
+      "parts": [
+        {
+          "rect": {
+            "x": 0,
+            "y": 0,
+            "width": 200,
+            "height": 86,
+            "rx": 10
+          },
+          "fill": "background",
+          "stroke": "stroke"
+        },
+        {
+          "rect": {
+            "x": 14,
+            "y": 14,
+            "width": 5,
+            "height": 18,
+            "rx": 2
+          },
+          "fill": "accent",
+          "stroke": "none"
+        },
+        {
+          "line": {
+            "x1": 14,
+            "y1": 39,
+            "x2": 186,
+            "y2": 39
+          },
+          "stroke": "stroke",
+          "strokeWidth": 1
+        }
+      ],
+      "slots": {
+        "metadata": {
+          "x": 28,
+          "y": 12,
+          "width": 156,
+          "height": 18,
+          "align": "start",
+          "weight": "bold"
+        },
+        "label": {
+          "x": 14,
+          "y": 47,
+          "width": 172,
+          "height": 25,
+          "align": "start",
+          "weight": "bold",
+          "grow": true
+        }
+      },
+      "ports": "outline"
+    }
+  },
+  "styles": {
+    "elements": [
+      {
+        "tag": "origin",
+        "label": "Starting component",
+        "shape": "component",
+        "background": "#fff1f2",
+        "stroke": "#e11d48",
+        "color": "#881337",
+        "accent": "#e11d48",
+        "strokeWidth": 2,
+        "dark": {
+          "background": "#352031",
+          "stroke": "#fb7185",
+          "color": "#fff1f2",
+          "accent": "#fb7185"
+        }
+      },
+      {
+        "tag": "reached",
+        "label": "Reachable component",
+        "shape": "component",
+        "background": "#eff6ff",
+        "stroke": "#0284c7",
+        "color": "#0c4a6e",
+        "accent": "#0284c7",
+        "strokeWidth": 2,
+        "dark": {
+          "background": "#102c42",
+          "stroke": "#38bdf8",
+          "color": "#e0f2fe",
+          "accent": "#38bdf8"
+        }
+      },
+      {
+        "tag": "other",
+        "label": "Other component",
+        "shape": "component",
+        "background": "#f8fafc",
+        "stroke": "#94a3b8",
+        "color": "#475569",
+        "accent": "#94a3b8",
+        "dark": {
+          "background": "#192638",
+          "stroke": "#52647a",
+          "color": "#afc0d3",
+          "accent": "#64748b"
+        }
+      },
+      {
+        "tag": "upstream",
+        "label": "Upstream \u00b7 click to navigate",
+        "shape": "component",
+        "background": "#fffbeb",
+        "stroke": "#d97706",
+        "color": "#78350f",
+        "accent": "#d97706",
+        "strokeWidth": 2,
+        "dark": {
+          "background": "#372b19",
+          "stroke": "#fbbf24",
+          "color": "#fef3c7",
+          "accent": "#fbbf24"
+        }
+      }
+    ],
+    "relationships": [
+      {
+        "tag": "ripple",
+        "label": "Modeled path",
+        "color": "#0284c7",
+        "dark": {
+          "color": "#38bdf8"
+        },
+        "thickness": 2,
+        "routing": "orthogonal"
+      },
+      {
+        "tag": "review",
+        "label": "Control not declared",
+        "color": "#b45309",
+        "dark": {
+          "color": "#fb923c"
+        },
+        "thickness": 2,
+        "style": "dashed",
+        "routing": "orthogonal"
+      },
+      {
+        "tag": "context",
+        "label": "Other connection",
+        "color": "#94a3b8",
+        "dark": {
+          "color": "#52647a"
+        },
+        "thickness": 1,
+        "routing": "orthogonal"
+      }
+    ]
+  }
+}

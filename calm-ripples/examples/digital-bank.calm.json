@@ -1,0 +1,1087 @@
+{
+  "nodes": [
+    {
+      "unique-id": "retail-customer",
+      "node-type": "actor",
+      "name": "Retail Customer",
+      "description": "Fictional example: Retail Customer"
+    },
+    {
+      "unique-id": "mobile-app",
+      "node-type": "service",
+      "name": "Mobile App",
+      "description": "Fictional example: Mobile App"
+    },
+    {
+      "unique-id": "web-banking",
+      "node-type": "service",
+      "name": "Web Banking",
+      "description": "Fictional example: Web Banking"
+    },
+    {
+      "unique-id": "branch-staff",
+      "node-type": "actor",
+      "name": "Branch Staff",
+      "description": "Fictional example: Branch Staff"
+    },
+    {
+      "unique-id": "staff-portal",
+      "node-type": "service",
+      "name": "Staff Portal",
+      "description": "Fictional example: Staff Portal"
+    },
+    {
+      "unique-id": "partner-fintech",
+      "node-type": "actor",
+      "name": "Partner Fintech",
+      "description": "Fictional example: Partner Fintech"
+    },
+    {
+      "unique-id": "partner-api-gateway",
+      "node-type": "service",
+      "name": "Partner API Gateway",
+      "description": "Fictional example: Partner API Gateway"
+    },
+    {
+      "unique-id": "api-gateway",
+      "node-type": "service",
+      "name": "API Gateway",
+      "description": "Fictional example: API Gateway"
+    },
+    {
+      "unique-id": "identity-provider",
+      "node-type": "service",
+      "name": "Identity Provider",
+      "description": "Fictional example: Identity Provider"
+    },
+    {
+      "unique-id": "rewards-service",
+      "node-type": "service",
+      "name": "Rewards Service",
+      "description": "Fictional example: Rewards Service"
+    },
+    {
+      "unique-id": "customer-profile-service",
+      "node-type": "service",
+      "name": "Customer Profile Service",
+      "description": "Fictional example: Customer Profile Service"
+    },
+    {
+      "unique-id": "customer-pii-store",
+      "node-type": "database",
+      "name": "Customer PII Store",
+      "description": "Fictional example: Customer PII Store",
+      "controls": {
+        "security": {
+          "description": "Illustrative demo control declaration",
+          "requirements": [
+            {
+              "requirement-url": "https://example.org/calm-ripples-demo/controls/encryption-at-rest"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "unique-id": "session-cache",
+      "node-type": "database",
+      "name": "Session Cache",
+      "description": "Fictional example: Session Cache"
+    },
+    {
+      "unique-id": "event-bus",
+      "node-type": "service",
+      "name": "Event Bus",
+      "description": "Fictional example: Event Bus"
+    },
+    {
+      "unique-id": "notifications-service",
+      "node-type": "service",
+      "name": "Notifications Service",
+      "description": "Fictional example: Notifications Service"
+    },
+    {
+      "unique-id": "statements-service",
+      "node-type": "service",
+      "name": "Statements Service",
+      "description": "Fictional example: Statements Service"
+    },
+    {
+      "unique-id": "analytics-warehouse",
+      "node-type": "database",
+      "name": "Analytics Warehouse",
+      "description": "Fictional example: Analytics Warehouse"
+    },
+    {
+      "unique-id": "audit-logger",
+      "node-type": "service",
+      "name": "Audit Logger",
+      "description": "Fictional example: Audit Logger"
+    },
+    {
+      "unique-id": "sms-provider",
+      "node-type": "system",
+      "name": "SMS Provider",
+      "description": "Fictional example: SMS Provider"
+    },
+    {
+      "unique-id": "email-provider",
+      "node-type": "system",
+      "name": "Email Provider",
+      "description": "Fictional example: Email Provider"
+    },
+    {
+      "unique-id": "document-store",
+      "node-type": "database",
+      "name": "Document Store",
+      "description": "Fictional example: Document Store",
+      "controls": {
+        "security": {
+          "description": "Illustrative demo control declaration",
+          "requirements": [
+            {
+              "requirement-url": "https://example.org/calm-ripples-demo/controls/encryption-at-rest"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "unique-id": "log-archive",
+      "node-type": "database",
+      "name": "Log Archive",
+      "description": "Fictional example: Log Archive",
+      "controls": {
+        "security": {
+          "description": "Illustrative demo control declaration",
+          "requirements": [
+            {
+              "requirement-url": "https://example.org/calm-ripples-demo/controls/encryption-at-rest"
+            },
+            {
+              "requirement-url": "https://example.org/calm-ripples-demo/controls/audit-logging"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "unique-id": "payments-service",
+      "node-type": "service",
+      "name": "Payments Service",
+      "description": "Fictional example: Payments Service"
+    },
+    {
+      "unique-id": "fx-rates-service",
+      "node-type": "service",
+      "name": "FX Rates Service",
+      "description": "Fictional example: FX Rates Service"
+    },
+    {
+      "unique-id": "fx-data-vendor",
+      "node-type": "system",
+      "name": "FX Data Vendor",
+      "description": "Fictional example: FX Data Vendor"
+    },
+    {
+      "unique-id": "payments-ledger",
+      "node-type": "database",
+      "name": "Payments Ledger",
+      "description": "Fictional example: Payments Ledger"
+    },
+    {
+      "unique-id": "fraud-engine",
+      "node-type": "service",
+      "name": "Fraud Engine",
+      "description": "Fictional example: Fraud Engine"
+    },
+    {
+      "unique-id": "accounts-service",
+      "node-type": "service",
+      "name": "Accounts Service",
+      "description": "Fictional example: Accounts Service"
+    },
+    {
+      "unique-id": "accounts-database",
+      "node-type": "database",
+      "name": "Accounts Database",
+      "description": "Fictional example: Accounts Database"
+    },
+    {
+      "unique-id": "cards-service",
+      "node-type": "service",
+      "name": "Cards Service",
+      "description": "Fictional example: Cards Service"
+    },
+    {
+      "unique-id": "cards-vault",
+      "node-type": "database",
+      "name": "Cards Vault",
+      "description": "Fictional example: Cards Vault"
+    },
+    {
+      "unique-id": "card-network",
+      "node-type": "system",
+      "name": "Card Network",
+      "description": "Fictional example: Card Network"
+    },
+    {
+      "unique-id": "loans-service",
+      "node-type": "service",
+      "name": "Loans Service",
+      "description": "Fictional example: Loans Service"
+    },
+    {
+      "unique-id": "loans-database",
+      "node-type": "database",
+      "name": "Loans Database",
+      "description": "Fictional example: Loans Database"
+    },
+    {
+      "unique-id": "kyc-service",
+      "node-type": "service",
+      "name": "KYC Service",
+      "description": "Fictional example: KYC Service"
+    },
+    {
+      "unique-id": "credit-bureau",
+      "node-type": "system",
+      "name": "Credit Bureau",
+      "description": "Fictional example: Credit Bureau"
+    },
+    {
+      "unique-id": "reporting-service",
+      "node-type": "service",
+      "name": "Reporting Service",
+      "description": "Fictional example: Reporting Service"
+    },
+    {
+      "unique-id": "regulatory-reporting",
+      "node-type": "service",
+      "name": "Regulatory Reporting",
+      "description": "Fictional example: Regulatory Reporting"
+    },
+    {
+      "unique-id": "regulator-portal",
+      "node-type": "system",
+      "name": "Regulator Portal",
+      "description": "Fictional example: Regulator Portal"
+    },
+    {
+      "unique-id": "nightly-reconciliation",
+      "node-type": "service",
+      "name": "Nightly Reconciliation",
+      "description": "Fictional example: Nightly Reconciliation"
+    },
+    {
+      "unique-id": "legacy-ftp-server",
+      "node-type": "system",
+      "name": "Legacy FTP Server",
+      "description": "Fictional example: Legacy FTP Server"
+    },
+    {
+      "unique-id": "legacy-database",
+      "node-type": "database",
+      "name": "Legacy Database",
+      "description": "Fictional example: Legacy Database"
+    }
+  ],
+  "relationships": [
+    {
+      "unique-id": "connection-1",
+      "relationship-type": {
+        "connects": {
+          "source": {
+            "node": "rewards-service"
+          },
+          "destination": {
+            "node": "customer-profile-service"
+          }
+        }
+      },
+      "protocol": "HTTPS"
+    },
+    {
+      "unique-id": "connection-2",
+      "relationship-type": {
+        "connects": {
+          "source": {
+            "node": "rewards-service"
+          },
+          "destination": {
+            "node": "event-bus"
+          }
+        }
+      },
+      "protocol": "AMQP",
+      "controls": {
+        "security": {
+          "description": "Illustrative demo control declaration",
+          "requirements": [
+            {
+              "requirement-url": "https://example.org/calm-ripples-demo/controls/encryption-in-transit"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "unique-id": "connection-3",
+      "relationship-type": {
+        "connects": {
+          "source": {
+            "node": "customer-profile-service"
+          },
+          "destination": {
+            "node": "customer-pii-store"
+          }
+        }
+      },
+      "protocol": "HTTPS",
+      "controls": {
+        "security": {
+          "description": "Illustrative demo control declaration",
+          "requirements": [
+            {
+              "requirement-url": "https://example.org/calm-ripples-demo/controls/encryption-in-transit"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "unique-id": "connection-4",
+      "relationship-type": {
+        "connects": {
+          "source": {
+            "node": "customer-profile-service"
+          },
+          "destination": {
+            "node": "session-cache"
+          }
+        }
+      },
+      "protocol": "HTTPS"
+    },
+    {
+      "unique-id": "connection-5",
+      "relationship-type": {
+        "connects": {
+          "source": {
+            "node": "event-bus"
+          },
+          "destination": {
+            "node": "notifications-service"
+          }
+        }
+      },
+      "protocol": "AMQP"
+    },
+    {
+      "unique-id": "connection-6",
+      "relationship-type": {
+        "connects": {
+          "source": {
+            "node": "event-bus"
+          },
+          "destination": {
+            "node": "statements-service"
+          }
+        }
+      },
+      "protocol": "AMQP"
+    },
+    {
+      "unique-id": "connection-7",
+      "relationship-type": {
+        "connects": {
+          "source": {
+            "node": "event-bus"
+          },
+          "destination": {
+            "node": "analytics-warehouse"
+          }
+        }
+      },
+      "protocol": "AMQP"
+    },
+    {
+      "unique-id": "connection-8",
+      "relationship-type": {
+        "connects": {
+          "source": {
+            "node": "event-bus"
+          },
+          "destination": {
+            "node": "audit-logger"
+          }
+        }
+      },
+      "protocol": "AMQP"
+    },
+    {
+      "unique-id": "connection-9",
+      "relationship-type": {
+        "connects": {
+          "source": {
+            "node": "notifications-service"
+          },
+          "destination": {
+            "node": "sms-provider"
+          }
+        }
+      },
+      "protocol": "HTTPS",
+      "controls": {
+        "security": {
+          "description": "Illustrative demo control declaration",
+          "requirements": [
+            {
+              "requirement-url": "https://example.org/calm-ripples-demo/controls/encryption-in-transit"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "unique-id": "connection-10",
+      "relationship-type": {
+        "connects": {
+          "source": {
+            "node": "notifications-service"
+          },
+          "destination": {
+            "node": "email-provider"
+          }
+        }
+      },
+      "protocol": "HTTPS",
+      "controls": {
+        "security": {
+          "description": "Illustrative demo control declaration",
+          "requirements": [
+            {
+              "requirement-url": "https://example.org/calm-ripples-demo/controls/encryption-in-transit"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "unique-id": "connection-11",
+      "relationship-type": {
+        "connects": {
+          "source": {
+            "node": "statements-service"
+          },
+          "destination": {
+            "node": "document-store"
+          }
+        }
+      },
+      "protocol": "HTTPS",
+      "controls": {
+        "security": {
+          "description": "Illustrative demo control declaration",
+          "requirements": [
+            {
+              "requirement-url": "https://example.org/calm-ripples-demo/controls/encryption-in-transit"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "unique-id": "connection-12",
+      "relationship-type": {
+        "connects": {
+          "source": {
+            "node": "audit-logger"
+          },
+          "destination": {
+            "node": "log-archive"
+          }
+        }
+      },
+      "protocol": "HTTPS",
+      "controls": {
+        "security": {
+          "description": "Illustrative demo control declaration",
+          "requirements": [
+            {
+              "requirement-url": "https://example.org/calm-ripples-demo/controls/encryption-in-transit"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "unique-id": "connection-13",
+      "relationship-type": {
+        "connects": {
+          "source": {
+            "node": "fx-rates-service"
+          },
+          "destination": {
+            "node": "fx-data-vendor"
+          }
+        }
+      },
+      "protocol": "HTTPS",
+      "controls": {
+        "security": {
+          "description": "Illustrative demo control declaration",
+          "requirements": [
+            {
+              "requirement-url": "https://example.org/calm-ripples-demo/controls/encryption-in-transit"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "unique-id": "connection-14",
+      "relationship-type": {
+        "connects": {
+          "source": {
+            "node": "retail-customer"
+          },
+          "destination": {
+            "node": "mobile-app"
+          }
+        }
+      },
+      "protocol": "HTTPS"
+    },
+    {
+      "unique-id": "connection-15",
+      "relationship-type": {
+        "connects": {
+          "source": {
+            "node": "retail-customer"
+          },
+          "destination": {
+            "node": "web-banking"
+          }
+        }
+      },
+      "protocol": "HTTPS"
+    },
+    {
+      "unique-id": "connection-16",
+      "relationship-type": {
+        "connects": {
+          "source": {
+            "node": "branch-staff"
+          },
+          "destination": {
+            "node": "staff-portal"
+          }
+        }
+      },
+      "protocol": "HTTPS"
+    },
+    {
+      "unique-id": "connection-17",
+      "relationship-type": {
+        "connects": {
+          "source": {
+            "node": "partner-fintech"
+          },
+          "destination": {
+            "node": "partner-api-gateway"
+          }
+        }
+      },
+      "protocol": "HTTPS"
+    },
+    {
+      "unique-id": "connection-18",
+      "relationship-type": {
+        "connects": {
+          "source": {
+            "node": "mobile-app"
+          },
+          "destination": {
+            "node": "api-gateway"
+          }
+        }
+      },
+      "protocol": "HTTPS"
+    },
+    {
+      "unique-id": "connection-19",
+      "relationship-type": {
+        "connects": {
+          "source": {
+            "node": "web-banking"
+          },
+          "destination": {
+            "node": "api-gateway"
+          }
+        }
+      },
+      "protocol": "HTTPS"
+    },
+    {
+      "unique-id": "connection-20",
+      "relationship-type": {
+        "connects": {
+          "source": {
+            "node": "staff-portal"
+          },
+          "destination": {
+            "node": "api-gateway"
+          }
+        }
+      },
+      "protocol": "HTTPS"
+    },
+    {
+      "unique-id": "connection-21",
+      "relationship-type": {
+        "connects": {
+          "source": {
+            "node": "partner-api-gateway"
+          },
+          "destination": {
+            "node": "api-gateway"
+          }
+        }
+      },
+      "protocol": "HTTPS"
+    },
+    {
+      "unique-id": "connection-22",
+      "relationship-type": {
+        "connects": {
+          "source": {
+            "node": "api-gateway"
+          },
+          "destination": {
+            "node": "identity-provider"
+          }
+        }
+      },
+      "protocol": "HTTPS"
+    },
+    {
+      "unique-id": "connection-23",
+      "relationship-type": {
+        "connects": {
+          "source": {
+            "node": "api-gateway"
+          },
+          "destination": {
+            "node": "rewards-service"
+          }
+        }
+      },
+      "protocol": "HTTPS"
+    },
+    {
+      "unique-id": "connection-24",
+      "relationship-type": {
+        "connects": {
+          "source": {
+            "node": "api-gateway"
+          },
+          "destination": {
+            "node": "payments-service"
+          }
+        }
+      },
+      "protocol": "HTTPS"
+    },
+    {
+      "unique-id": "connection-25",
+      "relationship-type": {
+        "connects": {
+          "source": {
+            "node": "api-gateway"
+          },
+          "destination": {
+            "node": "accounts-service"
+          }
+        }
+      },
+      "protocol": "HTTPS"
+    },
+    {
+      "unique-id": "connection-26",
+      "relationship-type": {
+        "connects": {
+          "source": {
+            "node": "api-gateway"
+          },
+          "destination": {
+            "node": "cards-service"
+          }
+        }
+      },
+      "protocol": "HTTPS"
+    },
+    {
+      "unique-id": "connection-27",
+      "relationship-type": {
+        "connects": {
+          "source": {
+            "node": "api-gateway"
+          },
+          "destination": {
+            "node": "loans-service"
+          }
+        }
+      },
+      "protocol": "HTTPS"
+    },
+    {
+      "unique-id": "connection-28",
+      "relationship-type": {
+        "connects": {
+          "source": {
+            "node": "payments-service"
+          },
+          "destination": {
+            "node": "fx-rates-service"
+          }
+        }
+      },
+      "protocol": "HTTPS"
+    },
+    {
+      "unique-id": "connection-29",
+      "relationship-type": {
+        "connects": {
+          "source": {
+            "node": "payments-service"
+          },
+          "destination": {
+            "node": "payments-ledger"
+          }
+        }
+      },
+      "protocol": "HTTPS"
+    },
+    {
+      "unique-id": "connection-30",
+      "relationship-type": {
+        "connects": {
+          "source": {
+            "node": "payments-service"
+          },
+          "destination": {
+            "node": "fraud-engine"
+          }
+        }
+      },
+      "protocol": "HTTPS"
+    },
+    {
+      "unique-id": "connection-31",
+      "relationship-type": {
+        "connects": {
+          "source": {
+            "node": "payments-service"
+          },
+          "destination": {
+            "node": "event-bus"
+          }
+        }
+      },
+      "protocol": "AMQP"
+    },
+    {
+      "unique-id": "connection-32",
+      "relationship-type": {
+        "connects": {
+          "source": {
+            "node": "accounts-service"
+          },
+          "destination": {
+            "node": "accounts-database"
+          }
+        }
+      },
+      "protocol": "HTTPS"
+    },
+    {
+      "unique-id": "connection-33",
+      "relationship-type": {
+        "connects": {
+          "source": {
+            "node": "accounts-service"
+          },
+          "destination": {
+            "node": "customer-profile-service"
+          }
+        }
+      },
+      "protocol": "HTTPS"
+    },
+    {
+      "unique-id": "connection-34",
+      "relationship-type": {
+        "connects": {
+          "source": {
+            "node": "cards-service"
+          },
+          "destination": {
+            "node": "cards-vault"
+          }
+        }
+      },
+      "protocol": "HTTPS"
+    },
+    {
+      "unique-id": "connection-35",
+      "relationship-type": {
+        "connects": {
+          "source": {
+            "node": "cards-service"
+          },
+          "destination": {
+            "node": "card-network"
+          }
+        }
+      },
+      "protocol": "HTTPS"
+    },
+    {
+      "unique-id": "connection-36",
+      "relationship-type": {
+        "connects": {
+          "source": {
+            "node": "cards-service"
+          },
+          "destination": {
+            "node": "fraud-engine"
+          }
+        }
+      },
+      "protocol": "HTTPS"
+    },
+    {
+      "unique-id": "connection-37",
+      "relationship-type": {
+        "connects": {
+          "source": {
+            "node": "loans-service"
+          },
+          "destination": {
+            "node": "loans-database"
+          }
+        }
+      },
+      "protocol": "HTTPS"
+    },
+    {
+      "unique-id": "connection-38",
+      "relationship-type": {
+        "connects": {
+          "source": {
+            "node": "loans-service"
+          },
+          "destination": {
+            "node": "kyc-service"
+          }
+        }
+      },
+      "protocol": "HTTPS"
+    },
+    {
+      "unique-id": "connection-39",
+      "relationship-type": {
+        "connects": {
+          "source": {
+            "node": "kyc-service"
+          },
+          "destination": {
+            "node": "credit-bureau"
+          }
+        }
+      },
+      "protocol": "HTTPS"
+    },
+    {
+      "unique-id": "connection-40",
+      "relationship-type": {
+        "connects": {
+          "source": {
+            "node": "kyc-service"
+          },
+          "destination": {
+            "node": "customer-profile-service"
+          }
+        }
+      },
+      "protocol": "HTTPS"
+    },
+    {
+      "unique-id": "connection-41",
+      "relationship-type": {
+        "connects": {
+          "source": {
+            "node": "reporting-service"
+          },
+          "destination": {
+            "node": "analytics-warehouse"
+          }
+        }
+      },
+      "protocol": "HTTPS"
+    },
+    {
+      "unique-id": "connection-42",
+      "relationship-type": {
+        "connects": {
+          "source": {
+            "node": "reporting-service"
+          },
+          "destination": {
+            "node": "regulatory-reporting"
+          }
+        }
+      },
+      "protocol": "HTTPS"
+    },
+    {
+      "unique-id": "connection-43",
+      "relationship-type": {
+        "connects": {
+          "source": {
+            "node": "regulatory-reporting"
+          },
+          "destination": {
+            "node": "regulator-portal"
+          }
+        }
+      },
+      "protocol": "HTTPS"
+    },
+    {
+      "unique-id": "connection-44",
+      "relationship-type": {
+        "connects": {
+          "source": {
+            "node": "nightly-reconciliation"
+          },
+          "destination": {
+            "node": "payments-ledger"
+          }
+        }
+      },
+      "protocol": "HTTPS"
+    },
+    {
+      "unique-id": "connection-45",
+      "relationship-type": {
+        "connects": {
+          "source": {
+            "node": "nightly-reconciliation"
+          },
+          "destination": {
+            "node": "accounts-database"
+          }
+        }
+      },
+      "protocol": "HTTPS"
+    },
+    {
+      "unique-id": "connection-46",
+      "relationship-type": {
+        "connects": {
+          "source": {
+            "node": "identity-provider"
+          },
+          "destination": {
+            "node": "session-cache"
+          }
+        }
+      },
+      "protocol": "HTTPS"
+    },
+    {
+      "unique-id": "connection-47",
+      "relationship-type": {
+        "connects": {
+          "source": {
+            "node": "fraud-engine"
+          },
+          "destination": {
+            "node": "event-bus"
+          }
+        }
+      },
+      "protocol": "AMQP"
+    },
+    {
+      "unique-id": "connection-48",
+      "relationship-type": {
+        "connects": {
+          "source": {
+            "node": "legacy-ftp-server"
+          },
+          "destination": {
+            "node": "legacy-database"
+          }
+        }
+      },
+      "protocol": "HTTPS"
+    },
+    {
+      "unique-id": "connection-49",
+      "relationship-type": {
+        "connects": {
+          "source": {
+            "node": "payments-ledger"
+          },
+          "destination": {
+            "node": "accounts-database"
+          }
+        }
+      },
+      "protocol": "HTTPS"
+    },
+    {
+      "unique-id": "connection-50",
+      "relationship-type": {
+        "connects": {
+          "source": {
+            "node": "loans-service"
+          },
+          "destination": {
+            "node": "event-bus"
+          }
+        }
+      },
+      "protocol": "AMQP"
+    },
+    {
+      "unique-id": "connection-51",
+      "relationship-type": {
+        "connects": {
+          "source": {
+            "node": "cards-service"
+          },
+          "destination": {
+            "node": "event-bus"
+          }
+        }
+      },
+      "protocol": "AMQP"
+    }
+  ],
+  "metadata": {
+    "calm-ripples-demo": {
+      "notice": "Fictional classifications and illustrative example.org control identifiers; not an official CALM control catalog.",
+      "classifications": {
+        "customer-pii-store": "restricted",
+        "analytics-warehouse": "confidential",
+        "document-store": "confidential",
+        "log-archive": "confidential"
+      },
+      "enable-control-demo": true
+    }
+  }
+}

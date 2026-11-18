@@ -1,0 +1,56 @@
+{
+  "id": "calm-ripples",
+  "version": "0.1.0",
+  "hubApi": 0,
+  "name": "CALM Ripples",
+  "provider": "Hackathon prototype",
+  "description": "Explore possible downstream impact using modeled connections.",
+  "routes": [
+    {
+      "id": "lens",
+      "method": "POST",
+      "path": "/lens/{namespace}/{resourceType}/{resourceId}",
+      "scope": "read",
+      "readOnly": true,
+      "hubData": [
+        "document"
+      ]
+    }
+  ],
+  "contributes": {
+    "diagram-lens": [
+      {
+        "id": "ripples",
+        "title": "Ripples",
+        "route": "lens",
+        "appliesTo": {
+          "resourceTypes": [
+            "architectures"
+          ]
+        },
+        "params": {
+          "origin": {
+            "pattern": "^[^\\p{Cc}]{1,128}$"
+          },
+          "view": {
+            "values": [
+              "ripple",
+              "all"
+            ],
+            "default": "ripple"
+          },
+          "depth": {
+            "values": [
+              "1",
+              "2",
+              "3",
+              "all"
+            ],
+            "default": "2"
+          }
+        },
+        "notation": "notation.json"
+      }
+    ]
+  }
+}

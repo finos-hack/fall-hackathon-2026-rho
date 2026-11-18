@@ -1,0 +1,28 @@
+services:
+  ripples:
+    build: .
+    networks: [demo]
+  hub:
+    image: finos/calm-hub:sha-ced8547
+    depends_on: [ripples]
+    ports:
+      - "127.0.0.1:8091:8080"
+    volumes:
+      - ./extension:/calm-extensions:ro
+      - ./.keys:/calm-keys:ro
+    environment:
+      CALM_HUB_BASE_URL: http://localhost:8091
+      JAVA_OPTS: >-
+        -Dquarkus.profile=standalone
+        -Dcalm.hub.base-url=http://localhost:8091
+        -Dcalm.standalone.data-directory=/tmp/calm-demo-data
+        -Dcalm.standalone.seed-demo-data=true
+        -Dcalm.extensions.dir=/calm-extensions
+        -Dcalm.extensions.allow-without-auth=true
+        -Dcalm.extensions.identity.private-key-location=/calm-keys/hub-private.pem
+        -Dcalm.extensions.identity.public-key-locations=/calm-keys/hub-public.pem
+        -Dcalm.extensions."calm-ripples".backend-url=http://ripples:8095
+        -Dcalm.extensions."calm-ripples".allow-http=true
+    networks: [demo]
+networks:
+  demo:
