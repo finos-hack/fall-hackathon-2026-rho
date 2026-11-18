@@ -13,7 +13,8 @@
     { "id": "deploy", "method": "POST", "path": "/namespaces/{namespace}/architectures/{architecture}/versions/{version}/deployments", "scope": "write" },
     { "id": "node", "method": "GET", "path": "/node/{namespace}/{resourceType}/{resourceId}/{selectedElement}", "scope": "read", "readOnly": true },
     { "id": "card", "method": "GET", "path": "/card", "scope": "authenticated", "readOnly": true },
-    { "id": "screen", "method": "GET", "path": "/screen", "scope": "authenticated", "readOnly": true }
+    { "id": "screen", "method": "GET", "path": "/screen", "scope": "authenticated", "readOnly": true },
+    { "id": "verify", "method": "POST", "path": "/namespaces/{namespace}/architectures/{architecture}/verify", "scope": "read" }
   ],
   "commands": {
     "status": {
@@ -151,6 +152,53 @@
           "status": { "type": "string" }
         },
         "required": ["deploymentId", "status"]
+      },
+      "destructive": false,
+      "idempotent": true
+    },
+    "verify": {
+      "route": "verify",
+      "description": "Collect runtime evidence now: check in the cluster that each connection the architecture's controls cover still holds (its network policies as Git renders them, default-deny, and for HTTPS a Ready Certificate and the tls-proxy sidecar). Records an evidence decorator per check and a control evaluation per relationship in CALM Hub, which its Control evaluations view draws. The sensors also run every 5 s on their own.",
+      "input": {
+        "type": "object",
+        "properties": {
+          "namespace": { "type": "string", "description": "CALM Hub namespace" },
+          "architecture": { "type": "string", "description": "Architecture name (its id in the name-based API)" }
+        },
+        "required": ["namespace", "architecture"],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "namespace": { "type": "string" },
+          "architecture": { "type": "string" },
+          "managed": { "type": "boolean", "description": "The platform runs the architecture's service" },
+          "version": { "type": "string", "description": "The architecture version running, which the evidence is recorded on" },
+          "observedAt": { "type": "string" },
+          "holding": { "type": "integer", "description": "Checks that pass" },
+          "checked": { "type": "integer", "description": "Checks made" },
+          "checks": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "element": { "type": "string", "description": "The relationship's unique-id" },
+                "check": { "type": "string", "enum": ["network-policy", "tls"] },
+                "result": { "type": "string", "enum": ["pass", "fail"] },
+                "expected": { "type": "string" },
+                "observed": { "type": "string" },
+                "paths": { "type": "array", "items": { "type": "string" }, "description": "Where the raw evidence is, e.g. k8s://<namespace>/networkpolicy/<name>" }
+              }
+            }
+          },
+          "problems": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Reads that failed: their checks were not made, and are never reported as failed"
+          }
+        },
+        "required": ["managed", "checks", "problems"]
       },
       "destructive": false,
       "idempotent": true

@@ -65,8 +65,13 @@ Organised by the CALM Hub feature each piece appears in.
 - **Refused versions in the built-in Control evaluations view.** A version refused at the controls gate is recorded
   as a `not-met` control evaluation naming the offending connection and its two nodes, so the overlay draws it in
   red on all three.
+- **Runtime evidence on the diagram.** Sensors in the connector check every 5 s that what the architecture's controls
+  ask of each connection still holds in the cluster, and record it in CALM Hub. A deleted or edited NetworkPolicy turns
+  its connection red in the built-in Control evaluations view within about 10 s, and green again once Flux puts it
+  back. See [Runtime evidence](#runtime-evidence).
 - **Commands.** For the CLI (`calm hub ext platform-connector <command>`, once a CLI with it is published) and as MCP
-  tools `ext_platform-connector_status`, `ext_platform-connector_history` and `ext_platform-connector_deploy`.
+  tools `ext_platform-connector_status`, `ext_platform-connector_history`, `ext_platform-connector_deploy` and
+  `ext_platform-connector_verify`.
   `status` includes the drift and the workloads; `history` lists deployments and refusals, newest first, from the
   records of the architecture's newest 10 versions (the read side also reads the running version's, for drift).
 
@@ -93,6 +98,47 @@ workloads; StatefulSets and DaemonSets are not read.
 The routes need CALM Hub's `read` scope (tab, node panel, status, history), `write` scope (deploy) or only a signed-in
 user (card and screen). Every call that deploys is in CALM Hub's audit log; its audit id is stored on the decorator
 and in the commit message.
+
+## Runtime evidence
+
+The controls gate checks a version before it deploys; nothing checked afterwards that the controls still hold. The
+connector's sensors (`src/sensors.ts`) do, for every service in `DEPLOY_NAMESPACES`, every 5 s and on the `verify`
+command. For each `connects` relationship the deployment rules render (NetworkPolicies annotated
+`calm.finos.org/relationship`), they check:
+
+- **network-policy**: each of the relationship's NetworkPolicies on `main` is in the cluster and allows what Git
+  renders (pod, peers, ports), and `default-deny` is there as Git renders it (the same pods, and ingress, egress or
+  both). Deleting `default-deny` fails every relationship, since nothing else is then denied.
+- **tls** (HTTPS relationships): the destination's cert-manager Certificate is Ready and its Deployment runs the
+  `tls-proxy` sidecar.
+
+Each check is one **evidence decorator** and each relationship one standard **control evaluation**:
+
+- The evidence decorator (`type: "evidence"`) is stamped with the base decorator definition
+  (`https://calm.finos.org/release/1.3/meta/decorators.json#/defs/decorator`), so CALM Hub checks its structure. Its
+  `data.evidence` is CALM's `meta/evidence.json` (`unique-id`, `evidence-paths` such as
+  `k8s://calm-events-stream/networkpolicy/web-service-database-ingress`, `control-config-url`). Beside it: `control`,
+  `check`, `result` (`pass`, `fail`, `stale`, `not-applicable`), `expected`, `observed`, `observed-at`, `valid-until`, `sensor`,
+  `deployment`.
+- The control evaluation (the bundled 1.0 standard, validated) applies to the relationship only, is `not-met` when any
+  of its checks fails or is stale (one finding each) and points at the evidence with `report-uri`. One per
+  relationship, not per check, because CALM Hub draws only the newest evaluation per element and control.
+
+Writes are on change only, plus a heartbeat every 60 s for the evidence. An observation holds for 90 s
+(`valid-until`); past it the evidence is marked `stale` and the relationship not met, so evidence nobody refreshes never
+stays green. A read that fails (kubectl, a timeout) is a problem in the `verify` reply, never a failed check; if it goes
+on, the evidence turns stale. While this connector deploys a service the sensors leave it alone (Git is ahead of the
+cluster meanwhile). A check the deployed version no longer makes is written once more as `not-applicable` and then left
+alone, so a relationship with no check left ends `not-applicable` rather than keeping its last status. After a restart
+the connector takes over its earlier records rather than writing new ones; a record someone deleted from CALM Hub is
+written again, and a write CALM Hub answers late is kept rather than sent twice. The sensors record only in
+`DEPLOY_NAMESPACES`: `verify` on any other namespace answers `managed: false` with the reason. The
+Deployment tab counts the checks that hold. A connection's sidebar in CALM Hub lists its evidence and control evaluation among its decorators. The connector also answers a detail panel for a connection, but CALM Hub asks for detail panels only for nodes, so it is not shown (FINDINGS X13).
+
+Try it on the running demo: `kubectl -n calm-events-stream delete networkpolicy <relationship>-ingress`, watch the
+connection turn red on the diagram, then green again at Flux's next reconcile (1 min) or the annotation in
+[Try it](#try-it). `POST /namespaces/{namespace}/architectures/{architecture}/verify` (scope `read`) runs the sensors at
+once and answers with every check; the records reach CALM Hub just after the reply, to stay within its 10 s.
 
 ## Records it writes
 
@@ -242,6 +288,7 @@ The panel, tab and card then say in sync again.
 | `src/blocks.ts` | The blocks CALM Hub draws: the tab, the node panel, the landing card and the Services screen. |
 | `src/services.ts` | Every service in `DEPLOY_NAMESPACES`, for the card and screen (one read reused for 10 s). |
 | `src/interrupted.ts` | On start-up, marks the deployments a restart cut off as `failed`. |
+| `src/sensors.ts` | Runtime evidence: the checks, and keeping the evidence decorators and control evaluations in CALM Hub current (on change, heartbeat, stale). The record shapes are in calm-common's `evidence.ts`. |
 | `src/deploy/job.ts` | The deployment job: the controls gate, then the decorator lifecycle; one job per service at a time. |
 | `src/deploy/kube.ts` | Flux and rollout helpers ported from calm-backstage's scaffolder actions. |
 | `standards/gitops.decorator.standard.json`, `scripts/publish-standard.ts` | The GitOps sub-standard and the script that publishes it to CALM Hub's Standards. |
@@ -283,6 +330,10 @@ against an in-memory Hub, a Gitea backed by real bare git repositories, and a ku
 - Backstage's working copy `output/<name>` and its catalog entity keep the old `architecture-version` until they are
   pulled again (the next upgrade does that). Backstage's own card for these records is out of scope for now.
 - The connector only redeploys services that are already in Flux; it does not create the Flux objects.
+- Runtime evidence checks configuration and cluster state (policies, Certificates, sidecars), not traffic: it does not
+  probe connections. Encryption at rest is not checked: the deployment rules give data stores pod volumes, with nothing
+  to inspect. When the connector itself stops, nobody marks its evidence stale, so the last result stays on the diagram
+  (FINDINGS X11).
 
 [FINDINGS.md](FINDINGS.md) lists what the build found out about the extension framework and the standards, as
 requests to CALM.

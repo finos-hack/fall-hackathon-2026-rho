@@ -20,3 +20,4 @@ export * from './gitea';
 export * from './flux';
 export * from './bundleMeta';
 export * from './upgrades';
+export * from './evidence';

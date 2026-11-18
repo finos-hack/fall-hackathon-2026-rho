@@ -10,6 +10,7 @@ import { createLogger } from './logger';
 import { RouteTable } from './routes';
 import { createServer } from './server';
 import { Jobs } from './deploy/job';
+import { INTERVAL_MS, Sensors } from './sensors';
 import type { Kubectl } from './deploy/kube';
 
 async function main() {
@@ -26,7 +27,7 @@ async function main() {
       })
     ).stdout;
   await import('node:fs/promises').then(fs => fs.mkdir(settings.workDir, { recursive: true }));
-  const deps: AppDeps = {
+  const base: Omit<AppDeps, 'sensors'> = {
     settings,
     logger,
     hub,
@@ -41,8 +42,18 @@ async function main() {
       fetchJwks: async () => (await timedGets('CALM Hub', undefined, READ_TIMEOUT_MS)(`${settings.hubUrl}/api/calm/auth/jwks`)).json(),
     }),
   };
+  const deps: AppDeps = { ...base, sensors: new Sensors(base) };
   // Only the namespaces in DEPLOY_NAMESPACES (default hackathon) are scanned.
   await closeInterrupted(deps, settings.deployNamespaces);
+  // Runtime evidence: take over the records an earlier run wrote, then sense every service every 5 s (one tick at a
+  // time: a slow tick delays the next rather than overlapping it).
+  await deps.sensors.adopt(settings.deployNamespaces);
+  const tick = () =>
+    deps.sensors
+      .tick()
+      .catch(e => logger.warn(`Sensors tick failed: ${e instanceof Error ? e.message : String(e)}`))
+      .finally(() => setTimeout(tick, INTERVAL_MS).unref());
+  void tick();
   createServer(deps).listen(settings.port, () =>
     logger.info(
       `platform-connector listening on :${settings.port} (Hub ${settings.hubUrl}, environment ${settings.environment}, approval ${settings.approval})`,
