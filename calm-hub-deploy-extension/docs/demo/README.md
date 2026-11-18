@@ -10,10 +10,9 @@ approval and Flux, and refuses a version that breaks a control or names no patte
 holding at runtime: a deleted network policy turns its connection red on CALM Hub's diagram within seconds, and green
 again once Flux puts it back.
 
-The table gives the times of the newest take (15:50, with *Runtime sensors and controls* and the chapter cards). The
-video on YouTube is an older take, without that chapter or the cards.
+The table gives the chapter times of the take on YouTube (15:50).
 
-▶ [Watch it on YouTube](https://youtu.be/0r6zxzfNzJE). The video is not kept in this repository; YouTube has it, with
+▶ [Watch it on YouTube](https://youtu.be/IgSwURJaPkU). The video is not kept in this repository; YouTube has it, with
 `calm-hub-deploy-demo.srt` as its captions. `record-hub-demo.cjs` writes both files.
 
 The take works out its versions from what runs. `events-stream` (a Nisshi event-streaming service from
