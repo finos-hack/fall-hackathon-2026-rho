@@ -60,3 +60,6 @@ e2e-test-report/
 
 # Repo-local kubeconfig for the calm-backstage minikube profile (yarn k8s:up)
 /.kube/
+
+# Kept narration clips for the demo videos (voice.cjs, DEMO_TTS=local): the presenter's voice, kept local
+docs/demo/.voice/
