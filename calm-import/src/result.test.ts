@@ -43,4 +43,26 @@ describe('toResult', () => {
     );
     expect(r.report).toContain('"Legend"');
   });
+
+  it('lists what was left out or changed, so a result page can show it next to the guesses', () => {
+    const adjusted: Note = {
+      subject: 'Order Service ↔ Risk Service',
+      message: 'two-headed arrow, kept the drawn direction',
+      kind: 'adjusted',
+    };
+    const r = toResult({
+      architecture: {},
+      nodeCount: 0,
+      relationshipCount: 0,
+      decisions: [guess],
+      notes: [skipped, adjusted],
+    });
+    expect(r.leftOut).toEqual([
+      '"Legend" — left out: legend',
+      'Order Service ↔ Risk Service — changed: two-headed arrow, kept the drawn direction',
+    ]);
+    expect(
+      toResult({ architecture: {}, nodeCount: 0, relationshipCount: 0, decisions: [], notes: [] }).leftOut,
+    ).toEqual([]);
+  });
 });

@@ -16,13 +16,14 @@ It isn't on npm, so its core is copied here; each file names its source. Changes
 ```ts
 import { convertDrawio } from '@internal/calm-import';
 
-const { architecture, report, guesses, nodes, relationships } = await convertDrawio(drawioText);
+const { architecture, report, guesses, leftOut, nodes, relationships } = await convertDrawio(drawioText);
 ```
 
 Inputs: `.drawio` and `.xml` (plain or compressed) and draw.io `.svg` exports. Only the first page is converted.
 Boxes become nodes, arrows become `connects` relationships (the protocol comes from the label), boxes drawn around
 others become `deployed-in` or `composed-of`, and positions go in `metadata._layout`. `guesses` lists, one line each,
-every place where draw.io and CALM don't match one to one and the converter used its best guess.
+every place where draw.io and CALM don't match one to one and the converter used its best guess; `leftOut` lists what
+was left out of the architecture (a legend, a note) or changed on the way (a two-headed arrow).
 
 `examples/trading.drawio` is a sample: 7 boxes and 7 arrows.
 

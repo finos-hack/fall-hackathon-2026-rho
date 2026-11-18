@@ -161,6 +161,14 @@ describe('calm:import:drawio', () => {
     expect(c.outputs.architecturePath).toBe('architecture.json');
     expect(Array.isArray(c.outputs.guesses)).toBe(true);
     expect((c.outputs.guesses as string[]).length).toBeGreaterThan(0);
+    // What the import dropped or changed is an output too, not only a log line (#71).
+    expect(c.outputs.leftOut).toEqual(
+      expect.arrayContaining([
+        'TODO: add DR site — left out: sticky note',
+        'Legend — left out: legend',
+        'Order Service ↔ Risk Service — changed: two-headed arrow, kept the drawn direction',
+      ]),
+    );
     const logged = c.logger.info.mock.calls.map((a: any[]) => a[0]).join('\n');
     expect(logged).toContain('Converted 7 nodes');
   });

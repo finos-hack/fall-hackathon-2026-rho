@@ -162,7 +162,7 @@ export function createImportAction(
 ) {
   return createTemplateAction({
     id,
-    description: `Converts an uploaded ${KINDS[kind].name} (${KINDS[kind].files}, at most 2 MB) into a CALM architecture in the workspace. Fails when the name is taken in CALM Hub (namespace calm.publish.hubNamespace) or the catalog. Unsure decisions keep the converter's guess; the guesses are an output and the report is logged.`,
+    description: `Converts an uploaded ${KINDS[kind].name} (${KINDS[kind].files}, at most 2 MB) into a CALM architecture in the workspace. Fails when the name is taken in CALM Hub (namespace calm.publish.hubNamespace) or the catalog. Unsure decisions keep the converter's guess; the guesses and what was left out or changed are outputs, and the report is logged.`,
     // Reads the Hub and the catalog, and writes only inside the workspace.
     supportsDryRun: true,
     schema: {
@@ -195,6 +195,12 @@ export function createImportAction(
           z
             .array(z.string())
             .describe('One line per decision the converter guessed'),
+        leftOut: z =>
+          z
+            .array(z.string())
+            .describe(
+              'One line per thing left out of the architecture (a legend, a note) or changed on the way',
+            ),
         architecturePath: z =>
           z.string().describe('The architecture, relative to the workspace'),
       },
@@ -222,6 +228,7 @@ export function createImportAction(
       ctx.output('nodes', result.nodes);
       ctx.output('relationships', result.relationships);
       ctx.output('guesses', result.guesses);
+      ctx.output('leftOut', result.leftOut);
       ctx.output('architecturePath', path.relative(ctx.workspacePath, file));
     },
   });
