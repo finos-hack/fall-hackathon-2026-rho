@@ -78,6 +78,9 @@ export function parseDataUrl(
     const data = match[2];
     const padding = /={0,2}$/.exec(data)![0].length;
     assertSize(Math.floor((data.length * 3) / 4) - padding);
+  } else if (match[2].length > 3 * MAX_DIAGRAM_BYTES) {
+    // Percent-encoding at most triples a file (each byte as %XX): longer cannot decode to the limit or less.
+    assertSize(Math.ceil(match[2].length / 3));
   }
   let bytes: Buffer;
   try {
