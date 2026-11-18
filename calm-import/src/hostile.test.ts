@@ -29,6 +29,24 @@ function packed(text: string): string {
 }
 
 describe('hostile draw.io uploads', () => {
+  it('looks past many blank pages to the page with a diagram, quickly (#71)', async () => {
+    const blank =
+      '<mxGraphModel><root><mxCell id="0"/><mxCell id="1" parent="0"/>' +
+      '<mxCell '.repeat(10_000) +
+      '</root></mxGraphModel>';
+    const drawn =
+      '<mxGraphModel><root><mxCell id="0"/><mxCell id="1" parent="0"/>' +
+      '<mxCell id="2" value="Order Service" vertex="1" parent="1">' +
+      '<mxGeometry x="0" y="0" width="120" height="60" as="geometry"/></mxCell></root></mxGraphModel>';
+    const pages = Array.from({ length: 20 }, (_, i) => `<diagram name="Blank ${i}">${blank}</diagram>`).join('');
+    const { ms, error } = await timed(async () => {
+      const result = await convertDrawio(`<mxfile>${pages}<diagram name="Arch">${drawn}</diagram></mxfile>`);
+      expect(result.nodes).toBe(1);
+    });
+    expect(error).toBeUndefined();
+    expect(ms).toBeLessThan(FAST_MS);
+  });
+
   it('rejects many <mxGraphModel openers with no closer quickly', async () => {
     const { ms, error } = await timed(() =>
       convertDrawio('<mxGraphModel'.repeat(20_000)),

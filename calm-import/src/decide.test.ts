@@ -318,9 +318,19 @@ describe('decide', () => {
       },
       {
         subject: 'page "Ops"',
-        message: 'page not converted (only the first page is)',
+        message: 'page not converted (only page "Arch" is)',
         kind: 'skipped',
       },
+    ]);
+  });
+
+  it('notes the pages before the converted one too (#71)', () => {
+    const { notes } = decide(
+      diagram({ boxes: [box('a', 'A Service')], pageNames: ['Cover', 'Arch', 'Ops'], page: 1 }),
+    );
+    expect(notes.map(n => `${n.subject}: ${n.message}`)).toEqual([
+      'page "Cover": page not converted (only page "Arch" is)',
+      'page "Ops": page not converted (only page "Arch" is)',
     ]);
   });
 });

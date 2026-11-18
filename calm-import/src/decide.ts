@@ -160,13 +160,15 @@ export function decide(diagram: Diagram): {
         ];
       return [];
     }),
-    ...diagram.pageNames.slice(1).map(
-      (name): Note => ({
-        subject: `page "${name}"`,
-        message: 'page not converted (only the first page is)',
-        kind: 'skipped',
-      }),
-    ),
+    ...diagram.pageNames
+      .filter((_, i) => i !== (diagram.page ?? 0))
+      .map(
+        (name): Note => ({
+          subject: `page "${name}"`,
+          message: `page not converted (only page "${diagram.pageNames[diagram.page ?? 0]}" is)`,
+          kind: 'skipped',
+        }),
+      ),
   ];
   return { decisions, notes };
 }

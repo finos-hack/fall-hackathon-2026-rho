@@ -41,6 +41,40 @@ describe('decodeDrawio', () => {
     expect(result.pageNames).toEqual(['Arch', 'Deployment']);
   });
 
+  it('skips a blank first page for the first page with a diagram on it, and says which (#71)', async () => {
+    const drawn = MODEL.replace(
+      '</root>',
+      '<mxCell id="2" value="Web App" vertex="1" parent="1"/></root>',
+    );
+    const result = await decodeDrawio(
+      `<mxfile><diagram name="Cover">${MODEL}</diagram><diagram name="Arch">${compress(
+        drawn,
+      )}</diagram></mxfile>`,
+    );
+    expect(result.graphModelXml).toBe(drawn);
+    expect(result.pageNames).toEqual(['Cover', 'Arch']);
+    expect(result.page).toBe(1);
+  });
+
+  it('skips an unreadable first page (#71)', async () => {
+    const drawn = MODEL.replace(
+      '</root>',
+      '<mxCell id="2" value="Web App" vertex="1" parent="1"/></root>',
+    );
+    const result = await decodeDrawio(
+      `<mxfile><diagram name="Broken">not base64 at all</diagram><diagram name="Arch">${drawn}</diagram></mxfile>`,
+    );
+    expect(result.graphModelXml).toBe(drawn);
+    expect(result.page).toBe(1);
+  });
+
+  it('keeps the first readable page when no page has anything on it', async () => {
+    const result = await decodeDrawio(
+      `<mxfile><diagram name="A">${MODEL}</diagram><diagram name="B">${MODEL}</diagram></mxfile>`,
+    );
+    expect(result.page).toBe(0);
+  });
+
   it('reads a bare mxGraphModel', async () => {
     const result = await decodeDrawio(MODEL);
     expect(result.graphModelXml).toBe(MODEL);

@@ -19,7 +19,8 @@ import { convertDrawio } from '@internal/calm-import';
 const { architecture, report, guesses, leftOut, nodes, relationships } = await convertDrawio(drawioText);
 ```
 
-Inputs: `.drawio` and `.xml` (plain or compressed) and draw.io `.svg` exports. Only the first page is converted.
+Inputs: `.drawio` and `.xml` (plain or compressed) and draw.io `.svg` exports. The first page with a diagram on it is converted (a blank or unreadable page before it
+is passed over); the other pages are listed in `leftOut`.
 Boxes become nodes, arrows become `connects` relationships (the protocol comes from the label), boxes drawn around
 others become `deployed-in` or `composed-of`, and positions go in `metadata._layout`. `guesses` lists, one line each,
 every place where draw.io and CALM don't match one to one and the converter used its best guess; `leftOut` lists what
