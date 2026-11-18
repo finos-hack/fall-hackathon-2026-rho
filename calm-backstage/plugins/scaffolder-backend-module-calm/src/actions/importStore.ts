@@ -107,7 +107,7 @@ export function createCalmImportStoreAction(options: {
       )}`;
       const described =
         ctx.input.description?.trim() && !hasText(read.description)
-          ? { description: ctx.input.description }
+          ? { description: ctx.input.description.trim() }
           : {};
       // $schema, $id, title, description, then the rest; no service mark.
       const doc = withTitle(

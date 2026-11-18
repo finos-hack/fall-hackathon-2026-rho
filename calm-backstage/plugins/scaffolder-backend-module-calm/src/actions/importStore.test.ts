@@ -201,6 +201,12 @@ describe('calm:import:store', () => {
     expect(other.posts[0].body.description).toBe('Kept');
   });
 
+  it('stores the description input trimmed (#71)', async () => {
+    const hub = fakeHub({});
+    await run({ name: 'trading', description: '  The trading system \n' }, hub);
+    expect(hub.posts[0].body.description).toBe('The trading system');
+  });
+
   it('replaces an $id the file already has', async () => {
     await fs.writeFile(
       file(),
