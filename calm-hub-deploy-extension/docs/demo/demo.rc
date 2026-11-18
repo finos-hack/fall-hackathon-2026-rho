@@ -8,6 +8,13 @@ export HUB=http://localhost:8090
 export EXT=$HUB/api/calm/extensions/platform-connector/api
 export NS=calm-events-stream
 export GITEA=http://localhost:3300/api/v1/repos/calm-services
+# Short names for what the take types often (typing runs at 54 ms per key, so long commands leave the voice waiting).
+export MANIFEST=extension/platform-connector/extension.json
+export PULLS=$GITEA/events-stream/pulls
+export DECORATORS=$HUB/api/calm/namespaces/hackathon/decorators
+export STANDARDS=$HUB/api/calm/namespaces/hackathon/standards
+export ARCH_API=$EXT/namespaces/hackathon/architectures/events-stream
+export ARCH='{"namespace":"hackathon","architecture":"events-stream"}'
 PROMPT_COMMAND='echo >> "$CALM_DEMO_PROMPTS"'
 export BASH_SILENCE_DEPRECATION_WARNING=1
 cd "$CALM_DEMO_DIR" || exit 1

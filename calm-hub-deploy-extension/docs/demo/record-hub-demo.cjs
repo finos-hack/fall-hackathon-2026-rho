@@ -4,11 +4,14 @@
 // shows it woven into CALM Hub's screens: the home page card, the Extensions tab and the node sidebar's Platform
 // panel. Then drift (a workload scaled behind Git's back), a pattern decision deployed from CALM Hub (the standard
 // record, the firm's approval of the pull request, Flux, and CALM Hub validating the record), a version refused at
-// the controls gate (a control evaluation), and an agent calling the same connector over MCP.
+// the controls gate (a control evaluation) or because it names no pattern, runtime control evidence (the connector's
+// sensors turn a connection red on CALM Hub's diagram when its network policy is deleted, and Flux heals it), and an
+// agent calling the same connector over MCP.
 //
 // The voiceover is narration.cjs, spoken by voice.cjs (macOS `say`, or ElevenLabs with DEMO_TTS=elevenlabs); each beat
-// is also the caption. Every step is held until its beat has been spoken, and the pacing is 3x the first take's
-// (typing, holds and waits).
+// is also the caption. Every step is held until its beat has been spoken; the next beat follows after a short, fixed
+// GAP, so nothing lingers on screen once a line ends. Typing is 3x the first take's pace. After the take it lists every
+// silence longer than SILENCE_LIMIT_S (silences.json), to fix before anyone watches it.
 //
 // Patterned on calm-backstage's docs/demo/record-cluster-demo.cjs (ttyd + two Playwright pages + ffmpeg).
 //
@@ -20,24 +23,31 @@
 //
 //   node docs/demo/record-hub-demo.cjs [out-dir]               # the take
 //   node docs/demo/record-hub-demo.cjs [out-dir] --audio-only  # only speak the beats (cached) and time them
+//   node docs/demo/record-hub-demo.cjs [out-dir] --captions-only
+//       # the take with captions and no voice: the beats are timed by the voice (macOS `say` by default) and the video
+//       # has no audio track, for reviewing the story before it is voiced
 //
-// Each take stores two new architecture versions (CALM Hub versions cannot be deleted): one that flips the broker's
-// storage between PostgreSQL and SQLite, and one with a connection the pattern forbids. It restarts CALM Hub twice
-// (without, then with, the extension) and the backend (manual approval during the take, auto afterwards). It scales
-// stream-app to 0 and asks Flux to put it back. It posts one deliberately broken decorator, which CALM Hub refuses.
+// Each take stores three new architecture versions (CALM Hub versions cannot be deleted): one that flips the broker's
+// storage between PostgreSQL and SQLite, one with a connection the pattern forbids, and one that names no pattern. It
+// restarts CALM Hub twice (without, then with, the extension) and the backend (manual approval during the take, auto
+// afterwards). Off camera it deletes the runtime evidence records earlier runs left (so CALM Hub as it ships shows
+// none), and slows Flux's own reconcile of the service for the take (every heal is asked for, with reconcile.sh), then
+// restores it. It scales stream-app to 0, deletes two network policies, and asks Flux to put them back. It posts one
+// deliberately broken decorator, which CALM Hub refuses.
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { spawn, execFile, execFileSync } = require('child_process');
 const { createRequire } = require('module');
 const narration = require('./narration.cjs');
-const { speak } = require('./voice.cjs');
+const { speak, voiceMix } = require('./voice.cjs');
 
 const DIR = path.resolve(__dirname, '../..');
 const BACKSTAGE = process.env.CALM_BACKSTAGE_DIR || path.resolve(DIR, '../calm-backstage');
 const { chromium } = createRequire(path.join(BACKSTAGE, 'package.json'))('playwright');
 const args = process.argv.slice(2);
 const AUDIO_ONLY = args.includes('--audio-only');
+const CAPTIONS_ONLY = args.includes('--captions-only');
 const OUT = args.find(a => !a.startsWith('--')) || fs.mkdtempSync(path.join(os.tmpdir(), 'calm-hub-demo-'));
 const KUBECONFIG = process.env.CALM_KUBECONFIG || path.join(BACKSTAGE, '.kube/config');
 const HUB = 'http://localhost:8090';
@@ -47,43 +57,50 @@ const NAME = 'events-stream';
 const DRIFT_WORKLOAD = 'stream-app';
 const TTYD_PORT = 7682;
 const AUDIO_DIR = path.join(DIR, '.work/demo-audio');
-// Terminal on the left, CALM Hub on the right: 1920×1080 together. CALM Hub renders at 1.15× the size it is
-// recorded at, with its sidebar collapsed, so the diagram and the tab have room.
+// Terminal on the left, CALM Hub on the right: 1920×1080 together. CALM Hub renders at its own size (ZOOM 1: an earlier
+// 1.15 rendered more of it, smaller, and was hard to read), with its sidebar collapsed so the diagram and the tab have
+// room. Narrower than 1060 px, CALM Hub switches to its compact layout (no tabs, no legend).
 const TW = 860,
   BW = 1060,
   H = 1080,
-  ZOOM = 1.15;
-// Pacing: 3× the first take (see ~/.claude CLAUDE.md "Demo videos"): typing, holds and waits.
+  ZOOM = 1;
+/** CALM Hub's own A+ setting (diagram text size, 1 to 2): 2 wraps "PostgreSQL" in its node, 1.75 does not. */
+const DIAGRAM_TEXT_SCALE = '1.75';
+// Pacing: typing and screen holds at 3× the first take (see ~/.claude CLAUDE.md "Demo videos"), but the voice leads:
+// a beat lasts as long as its line, and the next follows after the same short GAP everywhere.
 const SLOW = 3;
 const TYPE_DELAY = 18 * SLOW;
-const GAP = 700; // silence after each beat
-// Flux reconciles the service every minute (with up to 5% jitter) and puts a scaled workload back. Showing the drift
-// (the panel, then the tab) takes about 20 s from the start of the scale beat; this leaves a margin. Chapter 4 lingers
-// so that the scale beat starts soon after a Flux run, and the take checks again (and waits) just before it.
-const DRIFT_WINDOW_MS = 30000;
-const FLUX_SHORTEST_INTERVAL_MS = 57000;
-const FLUX_PERIOD_MS = 59500; // as observed in kustomize-controller's log
-// Chapter 4's actions take a little longer than its narration (navigation, the terminal).
-const CHAPTER_4_ACTIONS_MS = 4000;
+const GAP = 500; // silence after each beat
+/** A silence longer than this between two lines is listed after the take (silences.json), to be fixed. */
+const SILENCE_LIMIT_S = 1.2;
+// Flux would put a scaled workload or a deleted policy back at its own next run (every minute), possibly before the
+// take has shown it. For the take its Kustomization runs only every TAKE_FLUX_INTERVAL; every heal is asked for.
+const TAKE_FLUX_INTERVAL = '60m';
+const FLUX_DEFAULT_INTERVAL = '1m'; // what calm-backstage's k8s/up.sh sets
+const BROKEN_POLICY = 'api-gateway-stream-app-ingress';
+const SENSOR = 'platform-connector-sensors';
 
+// Each chapter's title (the badge) and what it shows (the contents card at the start).
 const CHAPTERS = [
-  'CALM Hub today',
-  'Deployment records are write-only',
-  'A Platform Connector',
-  'Woven in',
-  'Drift: what a record can’t know',
-  'A decision changes, and the connector deploys it',
-  'The controls gate, as a control evaluation',
-  'The same connector, for an agent',
-  'The pattern',
+  ['CALM Hub today', 'Namespaces, a pattern and its open decision, a control, an architecture'],
+  ['Deployment records are write-only', 'The built-in deployments view, and what a record cannot know'],
+  ['A Platform Connector', 'The manifest and the backend; CALM Hub restarted with it'],
+  ['Woven in', 'The home page card, the Extensions tab and the node panel'],
+  ['Drift: what a record can’t know', 'A workload scaled behind Git’s back, and Flux putting it back'],
+  ['A decision changes, and the connector deploys it', 'The controls gate, a pull request, approval, Flux, a validated record'],
+  ['The controls gate, as a control evaluation', 'A forbidden connection and a version with no pattern, both refused'],
+  ['Controls at runtime: evidence', 'Sensors, evidence records, and a deleted network policy turning red'],
+  ['The same connector, for an agent', 'Status, history and verify, as MCP tools'],
+  ['The pattern', 'What a Platform Connector adds, for any platform'],
 ];
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
-const getJson = async url => {
-  const r = await fetch(url);
+const getJson = async (url, init) => {
+  const r = await fetch(url, init);
   if (!r.ok) throw new Error(`${url} -> ${r.status}`);
   return r.json();
 };
+const postJson = url => getJson(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
 /**
  * A value read from live data that the take types into the terminal (or puts in a URL): it must have the expected
  * shape, so nothing unexpected is ever typed. Throws early otherwise.
@@ -131,6 +148,7 @@ async function plan() {
     choice,
     valid,
     invalid: checked('version', bump(valid), 'the version after it'),
+    nopattern: checked('version', bump(bump(valid)), 'the version that names no pattern'),
     card: await cardCounts(),
   };
 }
@@ -160,6 +178,7 @@ function checkBeats(ctx) {
   const ids = new Set(narration(ctx).map(b => b.id));
   const source = fs.readFileSync(__filename, 'utf-8');
   const used = new Set([...source.matchAll(/\b(?:beat|narrate|termBeat)\(\s*'([a-z0-9-]+)'/g)].map(m => m[1]));
+  CHAPTERS.forEach((_, i) => used.add(`chapter-${i + 1}`)); // chapter() speaks each chapter's card
   const missing = [...used].filter(id => !ids.has(id));
   const unused = [...ids].filter(id => !used.has(id));
   if (missing.length || unused.length) {
@@ -167,36 +186,42 @@ function checkBeats(ctx) {
   }
 }
 
-/** When Flux last reconciled calm-<name> (kustomize-controller's log, last 3 minutes), in ms since the epoch. */
-async function lastFluxRun() {
-  const out = await kubectl(['-n', 'flux-system', 'logs', 'deploy/kustomize-controller', '--since=3m']);
-  const times = out
-    .split('\n')
-    .filter(l => l.includes(`"name":"calm-${NAME}"`) && l.includes('Reconciliation finished'))
-    .map(l => {
-      try {
-        return Date.parse(JSON.parse(l).ts);
-      } catch {
-        return NaN;
-      }
-    })
-    .filter(t => !Number.isNaN(t));
-  return times.length ? Math.max(...times) : undefined;
-}
+/** The Kustomization's own reconcile interval, and setting it (Flux's reconcile requests are unaffected). */
+const KS = ['-n', 'flux-system', `kustomization/calm-${NAME}`];
+const fluxInterval = async () => (await kubectl(['get', ...KS, '-o', 'jsonpath={.spec.interval}'])).trim();
+const setFluxInterval = interval =>
+  kubectl(['patch', ...KS, '--type', 'merge', '-p', JSON.stringify({ spec: { interval: interval } })]);
 
 /**
- * How long chapter 4 should linger, in total, so that the scale beat (expected `aheadMs` from now) starts soon after
- * one of Flux's runs, with DRIFT_WINDOW_MS before the next: 0 when it would anyway, or when Flux's log can't be read.
+ * Off camera: deletes the runtime evidence records (evidence decorators and the sensors' control evaluations) earlier
+ * runs left in CALM Hub, so CALM Hub as it ships shows none. The sensors write fresh ones once the connector runs.
  */
-async function fluxLinger(aheadMs) {
-  const last = await lastFluxRun().catch(() => undefined);
-  if (last === undefined) return 0;
-  const earliest = 3000;
-  const latest = FLUX_SHORTEST_INTERVAL_MS - DRIFT_WINDOW_MS;
-  const phase = (((Date.now() + aheadMs - last) % FLUX_PERIOD_MS) + FLUX_PERIOD_MS) % FLUX_PERIOD_MS;
-  if (phase >= earliest && phase <= latest) return 0;
-  const target = earliest + 3000;
-  return phase < earliest ? target - phase : FLUX_PERIOD_MS - phase + target;
+async function deleteRuntimeRecords() {
+  // CALM Hub has just been restarted and can reset connections while it starts: retry the whole (idempotent) sweep.
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await deleteRuntimeRecordsOnce();
+    } catch (e) {
+      if (attempt >= 30) throw e;
+      await sleep(3000);
+    }
+  }
+}
+
+async function deleteRuntimeRecordsOnce() {
+  const base = `${HUB}/api/calm/namespaces/hackathon/decorators`;
+  let deleted = 0;
+  for (const type of ['evidence', 'control-evaluation']) {
+    for (const id of (await getJson(`${base}?type=${type}`)).values) {
+      const d = await getJson(`${base}/${checked('integer', id, 'a decorator id')}`);
+      const by = d.data?.sensor?.name ?? d.data?.engine?.name;
+      if (by !== SENSOR) continue;
+      const r = await fetch(`${base}/${id}`, { method: 'DELETE' });
+      if (!r.ok) throw new Error(`could not delete decorator ${id}: ${r.status}`);
+      deleted++;
+    }
+  }
+  return deleted;
 }
 
 const srtTime = s => {
@@ -212,7 +237,7 @@ const srtTime = s => {
   const beats = await speak(narration(ctx), AUDIO_DIR);
   const byId = new Map(beats.map(b => [b.id, b]));
   const spoken = beats.reduce((s, b) => s + b.seconds + GAP / 1000, 0);
-  console.log(`running ${ctx.running} (${ctx.storage}); will store ${ctx.valid} (${ctx.choice}) and ${ctx.invalid} (forbidden)`);
+  console.log(`running ${ctx.running} (${ctx.storage}); will store ${ctx.valid} (${ctx.choice}), ${ctx.invalid} (forbidden) and ${ctx.nopattern} (no pattern)`);
   console.log(`${beats.length} beats, ${Math.round(spoken)} s of narration (${(spoken / 60).toFixed(1)} min), ${beats.describe}`);
   if (AUDIO_ONLY) {
     for (const b of beats) console.log(`${b.seconds.toFixed(1).padStart(5)} s  ${b.id}`);
@@ -226,6 +251,19 @@ const srtTime = s => {
     // not running
   }
   run('scripts/hub-up.sh', ['--without-extensions'], { stdio: 'ignore' });
+  console.log(`deleted ${await deleteRuntimeRecords()} runtime evidence records left by earlier runs`);
+  let fluxWas = await fluxInterval();
+  if (!fluxWas) throw new Error(`could not read the interval of kustomization/calm-${NAME}`);
+  if (fluxWas === TAKE_FLUX_INTERVAL) {
+    // A take that crashed before restoring it: put back calm-backstage's default rather than keep the take's.
+    console.log(`Flux's interval is still the take's ${TAKE_FLUX_INTERVAL}: it will be restored to ${FLUX_DEFAULT_INTERVAL}`);
+    fluxWas = FLUX_DEFAULT_INTERVAL;
+  }
+  const restoreFlux = () =>
+    setFluxInterval(fluxWas).catch(e => console.error(`could not restore Flux's interval to ${fluxWas}:`, e.message));
+  // From here a failure must put Flux back, even before the browser and terminal exist (onFailure grows later).
+  onFailure = restoreFlux;
+  await setFluxInterval(TAKE_FLUX_INTERVAL);
 
   const prompts = path.join(OUT, 'prompts');
   fs.writeFileSync(prompts, '');
@@ -271,8 +309,19 @@ const srtTime = s => {
   };
   const T = await recorded(TW, 'terminal');
   const B = await recorded(BW, 'hub', ZOOM);
+  // The full-screen cards (title, contents, a card per chapter): laid over both panes in the join while one is up.
+  const S = await recorded(TW + BW, 'slides');
+  // CALM Hub keeps the A+ setting in localStorage: set it before any of its pages load.
+  await B.context.addInitScript(scale => {
+    try {
+      localStorage.setItem('calmHub.diagramTextScale', scale);
+    } catch {
+      // a page without storage (the contents card)
+    }
+  }, DIAGRAM_TEXT_SCALE);
   const term = T.page;
   const page = B.page;
+  const slides = S.page;
   const restoreBackend = () => {
     try {
       run(path.join(__dirname, 'start-extension.sh'), ['auto'], { stdio: 'ignore' });
@@ -285,12 +334,14 @@ const srtTime = s => {
     await page.screenshot({ path: path.join(OUT, 'failed-hub.png') }).catch(() => {});
     await T.context.close();
     await B.context.close();
+    await S.context.close();
     await browser.close();
     // Leave the stack as it was: CALM Hub with the extension, the backend on auto approval.
     try {
       run('scripts/hub-up.sh', [], { stdio: 'ignore' });
     } catch {}
     restoreBackend();
+    await restoreFlux();
   };
   page.setDefaultTimeout(60000);
   const pause = ms => page.waitForTimeout(ms);
@@ -309,7 +360,7 @@ const srtTime = s => {
       await sleep(250);
     }
   }
-  async function sh(cmd, { wait = true, timeout = 300000, after = 1200 * SLOW } = {}) {
+  async function sh(cmd, { wait = true, timeout = 300000, after = 1200 } = {}) {
     const before = promptCount();
     await term.keyboard.type(cmd, { delay: TYPE_DELAY });
     await sleep(250 * SLOW);
@@ -320,24 +371,56 @@ const srtTime = s => {
     await sleep(after);
     return undefined;
   }
-  const comment = text => sh(`# ${text}`, { after: 400 * SLOW });
-  const clear = () => sh('clear', { after: 300 });
+  const comment = text => sh(`# ${text}`, { after: 250 });
+  // The terminal is a queue: each terminal step starts when the one before has finished. A beat can leave its terminal
+  // part running (detach) while the next line is spoken, and whatever is typed next still waits for it. Without this,
+  // a slow command (a restart, a rollout) holds the next line back and leaves a silence.
+  let termQueue = Promise.resolve();
+  let detachedError;
+  const inTerminal = fn => {
+    const p = termQueue.then(fn);
+    termQueue = p.catch(() => {});
+    return p;
+  };
+  /** Resolves when everything queued for the terminal has finished (and throws what a detached step threw). */
+  const termIdle = () =>
+    inTerminal(() => {
+      if (detachedError) throw detachedError;
+    });
+  /** Queues terminal steps (clear, termBeat) in order, now, and lets the beat end without waiting for them. */
+  const detach =
+    (...steps) =>
+    () => {
+      for (const step of steps) step().catch(e => (detachedError ??= e));
+    };
+  /** Runs a beat's steps at the same time: the terminal and CALM Hub are separate pages. */
+  const par =
+    (...steps) =>
+    () =>
+      Promise.all(steps.map(step => step()));
+  /** Runs steps one after another (inside par). */
+  const seq =
+    (...steps) =>
+    async () => {
+      for (const step of steps) await step();
+    };
+  const clear = () => inTerminal(() => sh('clear', { after: 300 }));
 
   // ---- CALM Hub helpers.
-  async function overlay(id, text, style) {
+  async function overlay(id, text, style, target = page) {
     for (let attempt = 0; ; attempt++) {
       try {
-        return await drawOverlay(id, text, style);
+        return await drawOverlay(id, text, style, target);
       } catch (e) {
         // The page navigated under us: wait for it and draw again.
         if (attempt >= 3) throw e;
-        await page.waitForLoadState('domcontentloaded').catch(() => {});
+        await target.waitForLoadState('domcontentloaded').catch(() => {});
         await sleep(500);
       }
     }
   }
-  async function drawOverlay(id, text, style) {
-    await page.evaluate(
+  async function drawOverlay(id, text, style, target) {
+    await target.evaluate(
       ({ id, text, style }) => {
         let el = document.getElementById(id);
         if (!el) {
@@ -352,8 +435,7 @@ const srtTime = s => {
       { id, text, style },
     );
   }
-  const caption = text =>
-    overlay('__demo_caption', text, {
+  const CAPTION_STYLE = {
       position: 'fixed',
       left: '50%',
       bottom: '26px',
@@ -369,7 +451,13 @@ const srtTime = s => {
       boxShadow: '0 6px 24px rgba(0,0,0,0.35)',
       border: '1px solid rgba(122,162,255,0.45)',
       pointerEvents: 'none',
-    });
+    };
+  /** The caption, on CALM Hub and on the cards (whichever is on screen shows it), larger on the full-width cards. */
+  const caption = text =>
+    Promise.all([
+      overlay('__demo_caption', text, CAPTION_STYLE),
+      overlay('__demo_caption', text, { ...CAPTION_STYLE, font: '500 26px/1.4 system-ui, sans-serif', width: '76%', bottom: '40px', padding: '18px 30px' }, slides),
+    ]);
   const badge = text =>
     overlay('__demo_badge', text, {
       position: 'fixed',
@@ -399,29 +487,52 @@ const srtTime = s => {
       if (!b) throw new Error(`no beat ${id}`);
       lastCaption = b.text;
       await caption(b.text);
-      said.push({ id, start: now(), seconds: b.seconds, text: b.text, file: b.file });
+      said.push({ id, start: now(), seconds: b.seconds, text: b.text, file: b.file, lufs: b.lufs });
       log(`  "${id}" (${b.seconds.toFixed(1)} s)`);
       await sleep(b.seconds * 1000 + GAP);
     }));
   /** A beat, and its actions one after another while it is spoken; resolves when both are done (no beat is cut off). */
-  const beat = (id, ...actions) =>
-    Promise.all([
-      narrate(id),
+  const beat = async (id, ...actions) => {
+    const started = Date.now();
+    let lineEnds;
+    await Promise.all([
+      narrate(id).then(() => (lineEnds = Date.now())),
       (async () => {
         for (const a of actions) await a();
       })(),
     ]);
-  /** A beat whose terminal part starts with its short comment. */
-  const termBeat = (id, ...cmds) => async () => {
-    const b = byId.get(id);
-    if (b.term) await comment(b.term);
-    for (const c of cmds) await (typeof c === 'string' ? sh(c) : c());
+    // A beat whose actions outlast its line (and the gap) leaves a silence: say by how much, to fix it.
+    const over = (Date.now() - lineEnds) / 1000;
+    if (over > 0.3) log(`    actions outlast "${id}" by ${over.toFixed(1)} s (beat ${((Date.now() - started) / 1000).toFixed(1)} s)`);
+    if (detachedError) throw detachedError;
   };
-  const chapter = async i => {
-    marks.push({ chapter: i + 1, title: CHAPTERS[i], start: Math.round(now()) });
-    log(`chapter ${i + 1}: ${CHAPTERS[i]}`);
-    lastBadge = `${i + 1} · ${CHAPTERS[i]}`;
+  /**
+   * A beat's terminal part, queued (see inTerminal): its short comment, then its commands. Output stays on screen while
+   * the next command is typed, so only the last command is held for long.
+   */
+  const termBeat = (id, ...cmds) => () =>
+    inTerminal(async () => {
+      const b = byId.get(id);
+      if (b.term) await comment(b.term);
+      for (const [i, c] of cmds.entries()) {
+        const last = i === cmds.length - 1;
+        await (typeof c === 'string' ? sh(c, last ? {} : { after: 400 }) : c());
+      }
+    });
+  /**
+   * A chapter opens on its full-screen card while its line (beat chapter-N) says what it will show. `offCamera` steps
+   * run under the card (a clear, CALM Hub moving to its first page), so the chapter starts on screen ready.
+   */
+  const chapter = async (i, ...offCamera) => {
+    const [title] = CHAPTERS[i];
+    marks.push({ chapter: i + 1, title, start: Math.round(now()) });
+    log(`chapter ${i + 1}: ${title}`);
+    await slide('chapter', i);
+    cardOn();
+    lastBadge = `${i + 1} · ${title}`;
     await badge(lastBadge);
+    await beat(`chapter-${i + 1}`, ...offCamera);
+    cardOff();
   };
 
   /** Goes to a CALM Hub route (hash change: no reload, so no blank frame and the overlays stay). */
@@ -554,30 +665,99 @@ const srtTime = s => {
       log(`WARNING: ${what} (${String(e.message).split('\n')[0]}); carrying on`);
     }
   };
-  /** Waits, when Flux's next run is too close to show the drift before Flux puts the workload back. */
-  const waitForFluxWindow = async () => {
-    const last = await lastFluxRun().catch(() => undefined);
-    if (last === undefined) {
-      log('could not read when Flux last ran: scaling without waiting');
-      return;
-    }
-    if (last + FLUX_SHORTEST_INTERVAL_MS - Date.now() >= DRIFT_WINDOW_MS) return;
-    log('Flux runs again soon: waiting for that run before scaling');
-    // No stale caption over the hold.
-    lastCaption = '';
-    await caption('');
-    await poll(async () => (await lastFluxRun()) > last, 75000, 'Flux to run');
-    await sleep(1500);
+  /** Outlines an element (a legend row, a stat) so the eye finds it. */
+  const outline = locator =>
+    locator.evaluate(el => {
+      el.style.outline = '2px solid rgba(122,162,255,0.9)';
+      el.style.outlineOffset = '3px';
+      el.style.borderRadius = '6px';
+    });
+  /** The Control evaluations row of the diagram's legend (to outline it), and its counts as text. */
+  const evaluationsLegend = () => page.locator('label', { hasText: 'Control evaluations · Built-in' }).first().locator('xpath=..');
+  /**
+   * Only that row's counts ("1 Error 2 OK"): the legend's text from its label to its "View all", so the Deployments
+   * row's "OK" never counts, however the rows are nested.
+   */
+  const evaluationCounts = async () => {
+    const text = await page.locator('body').innerText();
+    return /Control evaluations · Built-in([\s\S]*?)View all/.exec(text)?.[1] ?? '';
   };
-  /** A pause after a beat, with the caption cleared (it would otherwise hang over the pause). */
-  const linger = async ms => {
-    if (ms < 300) return;
-    await voice;
-    lastCaption = '';
-    await caption('');
-    await sleep(ms);
+  const legendSays = (re, timeout = 20000) =>
+    poll(async () => re.test(await evaluationCounts()), timeout, `the Control evaluations counts to match ${re}`);
+  /** Runtime evidence for the running version, now: every check holds (verify also records it in CALM Hub). */
+  const allHold = async () => {
+    const r = await postJson(`${EXT}/namespaces/hackathon/architectures/${NAME}/verify`);
+    return r.managed && r.checked > 0 && r.holding === r.checked && !r.problems.length ? r : undefined;
   };
   const drifted = `${DRIFT_WORKLOAD} runs 0 replicas; Git asks for 1`;
+
+  // ---- Full-screen cards (the slides page, laid over both panes while a card is up): the title, the contents, and a
+  // card at the start of each chapter. One document; a card is shown by switching classes, so no blank frame.
+  const esc = t => t.replace(/&/g, '&amp;').replace(/</g, '&lt;');
+  const SLIDES = `<!doctype html><html><head><meta charset="utf-8"><title>Cards</title><style>
+    html,body{margin:0;height:100%;background:#121826;color:#eef2f8;font-family:system-ui,-apple-system,"Segoe UI",sans-serif}
+    section{position:fixed;inset:0;display:none;padding:0 160px;box-sizing:border-box}
+    body[data-card=title] #title, body[data-card=contents] #contents, body[data-card=chapter] #chapter{display:flex}
+    .kicker{font:600 22px/1.2 ui-monospace,Menlo,monospace;letter-spacing:.16em;color:#7aa2ff;margin-bottom:28px}
+    #title{flex-direction:column;justify-content:center;padding-bottom:120px}
+    #title h1{font:750 88px/1.05 system-ui,sans-serif;letter-spacing:-.02em;margin:0 0 30px}
+    #title p{font:400 32px/1.45 system-ui,sans-serif;color:#9fb0c8;max-width:1100px;margin:0}
+    #contents{flex-direction:column;padding-top:96px}
+    #contents h1{font-size:60px;margin:0 0 8px;letter-spacing:-.01em} #contents .sub{color:#9fb0c8;font-size:26px;margin:0 0 44px}
+    #contents ol{margin:0;padding:0;list-style:none;display:grid;grid-auto-flow:column;grid-template-rows:repeat(5,auto);
+      grid-template-columns:1fr 1fr;gap:18px 48px}
+    #contents li{display:grid;grid-template-columns:62px 1fr;align-items:baseline;padding:12px 18px;border-radius:12px;
+      transition:opacity .5s,background .5s}
+    #contents .n{font:700 28px ui-monospace,Menlo,monospace;color:#7aa2ff} #contents .t{font-size:30px;font-weight:650}
+    #contents .d{color:#9fb0c8;font-size:21px;grid-column:2;margin-top:4px}
+    #contents.focus li{opacity:.3} #contents.focus li.on{opacity:1;background:rgba(122,162,255,.14)}
+    #chapter{flex-direction:column;justify-content:center;padding-bottom:300px}
+    #chapter h1{font:750 84px/1.05 system-ui,sans-serif;letter-spacing:-.02em;margin:0 0 28px;max-width:1500px}
+    #chapter p{font:400 34px/1.4 system-ui,sans-serif;color:#9fb0c8;max-width:1400px;margin:0}
+    #strip{position:absolute;left:160px;right:160px;bottom:215px;display:grid;grid-template-columns:repeat(10,1fr);gap:10px;
+      margin:0;padding:0;list-style:none}
+    #strip li{border-top:4px solid #2c3850;padding-top:12px;font-size:16px;line-height:1.3;color:#6f7d96}
+    #strip li b{display:block;font:700 18px ui-monospace,Menlo,monospace;margin-bottom:4px}
+    #strip li.done{border-color:#4a5d86;color:#8d9bb3} #strip li.on{border-color:#7aa2ff;color:#eef2f8}
+    #strip li.on b{color:#7aa2ff}
+  </style></head><body data-card="title">
+    <section id="title"><div class="kicker">CALM HUB</div><h1>A Platform Connector</h1>
+      <p>Drift, deployment and runtime control evidence, from the platform itself: GitOps on Kubernetes.</p></section>
+    <section id="contents"><h1>Contents</h1><p class="sub">A Platform Connector for CALM Hub: GitOps on Kubernetes</p>
+      <ol>${CHAPTERS.map(([t, d], i) => `<li><span class="n">${i + 1}</span><span class="t">${esc(t)}</span><span class="d">${esc(d)}</span></li>`).join('')}</ol></section>
+    <section id="chapter"><div class="kicker" id="chapter-kicker"></div><h1 id="chapter-title"></h1><p id="chapter-what"></p>
+      <ol id="strip">${CHAPTERS.map(([t], i) => `<li><b>${i + 1}</b>${esc(t)}</li>`).join('')}</ol></section>
+  </body></html>`;
+  /** Puts up a card on the slides page: title, contents (with the chapters `arg` picked out) or chapter `arg`. */
+  const slide = (card, arg) =>
+    slides.evaluate(
+      ({ card, arg, chapters }) => {
+        document.body.dataset.card = card;
+        if (card === 'contents') {
+          const ol = document.getElementById('contents');
+          ol.classList.toggle('focus', arg.length > 0);
+          ol.querySelectorAll('li').forEach((li, i) => li.classList.toggle('on', arg.includes(i)));
+        }
+        if (card === 'chapter') {
+          document.getElementById('chapter-kicker').textContent = `CHAPTER ${arg + 1} OF ${chapters.length}`;
+          document.getElementById('chapter-title').textContent = chapters[arg][0];
+          document.getElementById('chapter-what').textContent = chapters[arg][1];
+          document.querySelectorAll('#strip li').forEach((li, i) => {
+            li.classList.toggle('on', i === arg);
+            li.classList.toggle('done', i < arg);
+          });
+        }
+      },
+      { card, arg, chapters: CHAPTERS },
+    );
+  /** When a card covers the panes: windows on the take's clock, laid over the side-by-side video in the join. */
+  const cards = [];
+  const cardOn = () => {
+    if (!cards.length || cards.at(-1).end !== undefined) cards.push({ start: now() });
+  };
+  const cardOff = () => {
+    if (cards.length && cards.at(-1).end === undefined) cards.at(-1).end = now();
+  };
 
   // ---- Off camera (trimmed): the terminal prompt, CALM Hub's home page, without extensions.
   await term.goto(`http://127.0.0.1:${TTYD_PORT}/`);
@@ -589,7 +769,18 @@ const srtTime = s => {
   await pause(1500);
   if (await page.getByText('Platform Connector').count()) throw new Error('CALM Hub still shows the Platform Connector');
   const prBefore = await latestPr('all');
+  await slides.setContent(SLIDES);
+  await slide('title');
+  await pause(500);
   t0 = Date.now();
+
+  // ---- Introduction and contents: full screen (the panes are under the cards until chapter 1's card ends)
+  cardOn();
+  await beat('intro');
+  await beat('contents-1', () => slide('contents', [0, 1]));
+  await beat('contents-2', () => slide('contents', [2, 3]));
+  await beat('contents-3', () => slide('contents', [4, 5, 6]));
+  await beat('contents-4', () => slide('contents', [7, 8, 9]));
 
   // ---- 1. CALM Hub today
   await chapter(0);
@@ -643,41 +834,34 @@ const srtTime = s => {
   await beat('write-only', () => scroll(300));
 
   // ---- 3. A Platform Connector
-  await chapter(2);
-  await beat('connector', clear);
-  await beat('manifest', termBeat('manifest', `jq '{id, name, provider, hubApi}' extension/platform-connector/extension.json`));
-  await beat('routes', termBeat('routes', `jq -r '.routes[] | "\\(.method)\\t\\(.scope)\\t\\(.path)"' extension/platform-connector/extension.json | column -t`));
-  await beat('contributes', clear, termBeat('contributes', `jq -c '.contributes | to_entries[] | {(.key): [.value[].title]}' extension/platform-connector/extension.json`));
-  await beat('commands', termBeat('commands', `jq -r '.commands | to_entries[] | "\\(.key)  → route \\(.value.route), input: \\(.value.input.required | join(", "))"' extension/platform-connector/extension.json`));
-  await beat('start-backend', clear, termBeat('start-backend', 'start-extension.sh manual'));
-  await beat('restart', termBeat('restart', `scripts/hub-up.sh 2>&1 | grep -E 'Recreated|Started|Waiting'`));
-  await narrate('signed');
-  await beat('registry-after', clear, termBeat('registry-after', `curl -s $HUB/api/calm/extensions | jq -r '.values[].id'`));
+  await chapter(2, clear);
+  await beat('connector');
+  await beat('manifest', termBeat('manifest', `jq '{id, name, provider, hubApi}' $MANIFEST`));
+  await beat('routes', termBeat('routes', `jq -r '.routes[] | "\\(.method)\\t\\(.scope)\\t\\(.path)"' $MANIFEST | column -t`));
+  await beat('contributes', clear, termBeat('contributes', `jq -c '.contributes | map_values(map(.title))' $MANIFEST`));
+  await beat('commands', termBeat('commands', `jq -c '.commands | map_values({route, input: .input.required})' $MANIFEST`));
+  // Starting the backend and restarting CALM Hub outlast their lines: they run on under the next lines (signed).
+  await beat('start-backend', detach(clear, termBeat('start-backend', 'start-extension.sh manual')));
+  await beat('restart', detach(termBeat('restart', `scripts/hub-up.sh 2>&1 | grep -E 'Recreated|Started|Waiting'`)));
+  await beat('signed', termIdle);
+  await beat('registry-after', termBeat('registry-after', `curl -s $HUB/api/calm/extensions | jq -r '.values[].id'`));
   await beat('mcp-tools', termBeat('mcp-tools', 'mcp.sh --list ext_'));
 
   // ---- 4. Woven in
-  await chapter(3);
-  await voice;
-  // A reload, so CALM Hub's UI reads its extension registry again (a hash-only goto would not reload).
-  await page.goto(`${HUB}/#/`);
-  await page.reload();
-  await page.getByText('Platform Connector').first().waitFor();
-  await restoreOverlays();
+  // Under the card: a reload, so CALM Hub's UI reads its extension registry again (a hash-only goto would not reload).
+  await chapter(3, async () => {
+    await page.goto(`${HUB}/#/`);
+    await page.reload();
+    await page.getByText('Platform Connector').first().waitFor();
+    await restoreOverlays();
+  });
   // The narration speaks the counts read before the take: they must still be what the card shows.
   const card = await cardCounts();
   if (JSON.stringify(card) !== JSON.stringify(ctx.card)) {
     throw new Error(`the card now says ${JSON.stringify(card)}, the narration says ${JSON.stringify(ctx.card)}: retake`);
   }
-  // Flux puts a scaled workload back at its next run, so chapter 5's scale should start soon after one. Work out now
-  // how far off that is, and spread any wait over chapter 4's pauses instead of holding silently before chapter 5.
-  const chapter4 = ['home-card', 'blocks', 'ext-tab', 'tab-facts', 'node-panel', 'node-facts', 'log-calls'];
-  const ahead = chapter4.reduce((ms, id) => ms + byId.get(id).seconds * 1000 + GAP, CHAPTER_4_ACTIONS_MS);
-  const lingerEach = (await fluxLinger(ahead)) / chapter4.length;
-  if (lingerEach) log(`lingering ${(lingerEach / 1000).toFixed(1)} s after each beat of chapter 4, to start the scale just after a Flux run`);
   await beat('home-card', () => page.getByText('Platform Connector').first().hover());
-  await linger(lingerEach);
   await narrate('blocks');
-  await linger(lingerEach);
   await beat('ext-tab', async () => {
     await show(ctx.running, 'extensions');
     await mainTab('Extensions').waitFor();
@@ -685,28 +869,23 @@ const srtTime = s => {
     await page.getByRole('button', { name: 'Deploy this version' }).waitFor();
     await page.getByRole('button', { name: 'Deploy this version' }).hover();
   });
-  await linger(lingerEach);
   await beat('tab-facts', async () => {
     await extensionText(`This version (${ctx.running}) is the one running`).waitFor();
     await page.screenshot({ path: path.join(OUT, 'deployment-tab.png') });
   });
-  await linger(lingerEach);
   await beat('node-panel', async () => {
     await tab('Diagram');
     await selectNode(DRIFT_WORKLOAD, `In sync: ${DRIFT_WORKLOAD} runs as Git asks.`);
   });
-  await linger(lingerEach);
   await beat('node-facts', () => scrollAt(BW * ZOOM * 0.85, 300));
-  await linger(lingerEach);
   await beat('log-calls', clear, termBeat('log-calls', 'ext-log.sh 4'));
-  await linger(lingerEach);
 
-  // ---- 5. Drift: what a record can't know (quickly: Flux puts the replicas back at its next run)
-  await voice;
-  await waitForFluxWindow();
+  // ---- 5. Drift: what a record can't know (Flux's own reconcile is slowed for the take: it heals when asked)
   await chapter(4);
-  await beat('scale', clear, termBeat('scale', () => sh(`k -n $NS scale deploy ${DRIFT_WORKLOAD} --replicas=0`, { after: 500 })));
+  await beat('scale', detach(clear, termBeat('scale', () => sh(`k -n $NS scale deploy ${DRIFT_WORKLOAD} --replicas=0`, { after: 500 }))));
   await beat('drift-panel', async () => {
+    // The panel is read when the node is selected: only once the scale has run.
+    await termIdle();
     try {
       await selectNode(DRIFT_WORKLOAD, drifted, 15000);
     } catch (e) {
@@ -726,25 +905,22 @@ const srtTime = s => {
     await page.getByRole('button', { name: 'Zoom In' }).click();
     await viewBadge('Deployments', DRIFT_WORKLOAD).click();
   });
-  await beat(
-    'reconcile',
-    clear,
-    termBeat('reconcile', `reconcile.sh ${NAME} && k -n $NS rollout status deploy/${DRIFT_WORKLOAD} --timeout=120s`, `k -n $NS get deploy ${DRIFT_WORKLOAD}`),
-  );
-  await poll(
-    async () => {
-      const s = await getJson(`${EXT}/namespaces/hackathon/architectures/${NAME}/status`);
-      const w = (s.workloads ?? []).find(x => x.name === DRIFT_WORKLOAD);
-      return s.inSync && w && w.ready === 1 && w.replicas === 1;
-    },
-    120000,
-    `${DRIFT_WORKLOAD} to be back to 1/1 and in sync`,
-  );
-  await beat('in-sync', () => selectNode(DRIFT_WORKLOAD, `In sync: ${DRIFT_WORKLOAD} runs as Git asks.`));
+  // The rollout runs on under the next line.
+  await beat('reconcile', detach(clear, termBeat('reconcile', `reconcile.sh ${NAME} && k -n $NS rollout status deploy/${DRIFT_WORKLOAD}`)));
+  await beat('in-sync', termIdle, () =>
+    poll(
+      async () => {
+        const s = await getJson(`${EXT}/namespaces/hackathon/architectures/${NAME}/status`);
+        const w = (s.workloads ?? []).find(x => x.name === DRIFT_WORKLOAD);
+        return s.inSync && w && w.ready === 1 && w.replicas === 1;
+      },
+      120000,
+      `${DRIFT_WORKLOAD} to be back to 1/1 and in sync`,
+    ), () => selectNode(DRIFT_WORKLOAD, `In sync: ${DRIFT_WORKLOAD} runs as Git asks.`));
 
   // ---- 6. A decision changes, and the connector deploys it
-  await chapter(5);
-  await beat('new-version', clear, termBeat('new-version', `npx tsx scripts/new-version.ts hackathon ${NAME} --choose "broker-storage=${ctx.choice}"`));
+  await chapter(5, clear);
+  await beat('new-version', termBeat('new-version', `new-version.sh ${NAME} --choose "broker-storage=${ctx.choice}"`));
   // From here the take has stored a version: steps that only show something are soft (see soft()), with a shorter wait.
   page.setDefaultTimeout(15000);
   await beat('diagram-new', soft('showing the new version', async () => {
@@ -763,12 +939,11 @@ const srtTime = s => {
   });
   await page.getByRole('button', { name: 'Run' }).click();
   let watching;
-  await beat('run', clear, termBeat('run', async () => {
+  await beat('run', par(seq(clear, termBeat('run', async () => {
     watching = await sh(`UNTIL=approval watch-deploy.sh ${NAME} ${ctx.valid}`, { wait: false });
-  }), soft('the Extensions tab', refreshExtensions));
-  // No record until the version has passed the controls gate.
-  await poll(async () => typeof (await newest(ctx.valid))?.id === 'number', 180000, `the deployment record on ${ctx.valid}`);
-  await beat('record-pending', soft('the record', record));
+  })), soft('the Extensions tab', refreshExtensions)));
+  // No record until the version has passed the controls gate (it does while this line is spoken).
+  await beat('record-pending', () => poll(async () => typeof (await newest(ctx.valid))?.id === 'number', 180000, `the deployment record on ${ctx.valid}`), soft('the record', record));
   await beat('steps', soft('the record', record));
   await watching();
   await beat('waiting', soft('the record', record));
@@ -783,18 +958,31 @@ const srtTime = s => {
   const prPage = `http://localhost:3300/calm-services/${NAME}/pulls/${pr.number}`;
   const [prCommit] = await getJson(`${GITEA}/${NAME}/pulls/${pr.number}/commits`);
   checked('sha', prCommit?.sha, 'the pull request commit');
-  await beat('pr', clear, soft('the pull request page', () => visit(prPage)), termBeat('pr', `curl -s "$GITEA/${NAME}/pulls?state=open" | jq -r '.[] | "#\\(.number)  \\(.title)\\n    \\(.head.ref) → \\(.base.ref)"'`));
-  await beat('files', soft('the files page', () => visit(`${prPage}/files`)), termBeat('files', `curl -s $GITEA/${NAME}/pulls/${pr.number}/files | jq -r '.[] | "\\(.filename)  +\\(.additions) -\\(.deletions)"' | column -t`), soft('scrolling the files', () => scroll(700)));
-  await beat('commit', clear, soft('the commit page', () => visit(`http://localhost:3300/calm-services/${NAME}/commit/${prCommit.sha}`)), termBeat('commit', `curl -s $GITEA/${NAME}/pulls/${pr.number}/commits | jq -r '.[0].commit.message'`));
+  await beat('pr', par(soft('the pull request page', () => visit(prPage)), seq(clear, termBeat('pr', `curl -s "$PULLS?state=open" | jq -r '.[] | "#\\(.number)  \\(.title)"'`))));
+  await beat('files', par(soft('the files page', seq(() => visit(`${prPage}/files`), () => scroll(700))), termBeat('files', `curl -s $PULLS/${pr.number}/files | jq -r '.[].filename'`)));
+  await beat('commit', par(soft('the commit page', () => visit(`http://localhost:3300/calm-services/${NAME}/commit/${prCommit.sha}`)), seq(clear, termBeat('commit', `curl -s $PULLS/${pr.number}/commits | jq -r '.[0].commit.message'`))));
   await beat('approve', soft('the pull request page', () => visit(prPage)), termBeat('approve', `approve-pr.sh ${NAME} ${pr.number}`), soft('the merged pull request', () => visit(prPage)));
 
   watching = undefined;
-  await beat('flux', clear, async () => {
-    watching = await sh(`watch-deploy.sh ${NAME} ${ctx.valid}`, { wait: false });
-  }, soft('back to CALM Hub', () => backToHub(ctx.valid, 'Decorators')), soft('the record', record));
-  await watching();
-  log('deployment finished');
-  await beat('completed', soft('the record', record));
+  await beat(
+    'flux',
+    par(
+      seq(clear, () =>
+        inTerminal(async () => {
+          watching = await sh(`watch-deploy.sh ${NAME} ${ctx.valid}`, { wait: false });
+        })),
+      soft('back to CALM Hub, on the record', async () => {
+        await backToHub(ctx.valid, 'Decorators');
+        await page.getByText('notes', { exact: true }).first().waitFor();
+        await highlight(['status', 'notes']);
+      }),
+    ),
+  );
+  // Flux applies the commit and the rollouts finish while this line is spoken.
+  await beat('completed', async () => {
+    await watching();
+    log('deployment finished');
+  }, soft('the record', record));
   await beat('overlay-after', soft('the diagram', closeDiagram));
   await soft('the diagram still', () => page.screenshot({ path: path.join(OUT, 'diagram-overlay.png') }))();
 
@@ -810,17 +998,14 @@ const srtTime = s => {
     clear,
     termBeat(
       'standard-record',
-      `curl -s $HUB/api/calm/namespaces/hackathon/decorators/${deployed.id} | jq '{"$schema": (.["$schema"] // .schema), data: {status: .data.status, kubernetes: .data.kubernetes, gitops: .data.gitops}}'`,
+      `curl -s $DECORATORS/${deployed.id} | jq '{schema, data: (.data | {status, kubernetes, gitops})}'`,
     ),
   );
   await beat(
     'audit',
     clear,
-    termBeat(
-      'audit',
-      `curl -s $HUB/api/calm/namespaces/hackathon/decorators/${deployed.id} | jq -r '.data.gitops["hub-audit-id"] // .data["hub-audit-id"]'`,
-      `hub-audit.sh ${jti}`,
-    ),
+    // The audit id is in the record on screen (gitops.hub-audit-id).
+    termBeat('audit', `hub-audit.sh ${jti}`),
   );
   const deploymentRecords = async () => (await getJson(`${HUB}/api/calm/namespaces/hackathon/decorators?type=deployment`)).values.length;
   const recordsBefore = await deploymentRecords();
@@ -831,30 +1016,38 @@ const srtTime = s => {
   }
   await beat(
     'sub-standard',
-    clear,
-    termBeat('sub-standard', `curl -s $HUB/api/calm/namespaces/hackathon/standards | jq '.values[] | {id, name, description}'`),
-    soft('the Standards tab', () => route('#/namespace/hackathon?type=standards')),
+    par(seq(termBeat('sub-standard', `curl -s $STANDARDS | jq '.values[] | {name, description}'`)), soft('the Standards tab', () => route('#/namespace/hackathon?type=standards'))),
   );
 
   // ---- 7. The controls gate, as a control evaluation
-  await chapter(6);
-  await beat('forbidden', clear, termBeat('forbidden', `npx tsx scripts/new-version.ts hackathon ${NAME} --connect web-client:stream-app`));
-  await soft(`showing ${ctx.invalid}`, async () => {
+  await chapter(6, clear);
+  await beat('forbidden', termBeat('forbidden', `new-version.sh ${NAME} --connect web-client:stream-app`));
+  await beat('deploy-invalid', soft(`showing ${ctx.invalid}`, async () => {
     await show(ctx.invalid, 'extensions');
     await collapseSidebar();
-  })();
-  // Hard: the page must show the version about to be deployed before Deploy/Run is clicked (no job exists yet).
-  await extensionText(`this page shows ${ctx.invalid}`).waitFor();
-  await beat('deploy-invalid', async () => {
+  }), async () => {
+    // Hard: the page must show the version about to be deployed before Deploy/Run is clicked (no job exists yet).
+    await extensionText(`this page shows ${ctx.invalid}`).waitFor();
     await page.getByRole('button', { name: 'Deploy this version' }).click();
     await page.getByRole('button', { name: 'Run' }).click();
   });
-  await beat('refused', clear, termBeat('refused', () => sh(`watch-deploy.sh ${NAME} ${ctx.invalid}`)));
-  const refusal = await newest(ctx.invalid);
-  if (refusal?.status !== 'refused') throw new Error(`${ctx.invalid} was not refused at the controls gate: ${JSON.stringify(refusal)}`);
-  // Not seen live before this take (no control evaluation existed): each step falls back and warns rather than
-  // throwing, since the take has already stored its two versions.
-  await beat('evaluation', soft('the control evaluation overlay', async () => {
+  /** Waits for the newest attempt to deploy `version` and checks it was refused at the controls gate. */
+  const refused = async version => {
+    // A job still at the gate has no final status yet: wait for one.
+    const final = ['refused', 'completed', 'failed'];
+    const attempt = await poll(
+      async () => {
+        const status = (await newest(version))?.status;
+        return final.includes(status) && status;
+      },
+      60000,
+      `the controls gate's answer on ${version}`,
+    );
+    if (attempt !== 'refused') throw new Error(`${version} was not refused at the controls gate: ${attempt}`);
+  };
+  // The watch runs on under the next line.
+  await beat('refused', detach(clear, termBeat('refused', () => sh(`watch-deploy.sh ${NAME} ${ctx.invalid}`))));
+  await beat('evaluation', () => refused(ctx.invalid), soft('the control evaluation overlay', async () => {
     await tab('Diagram');
     // The overlay re-reads decorators every 5 s.
     const evaluated = viewBadge('Control evaluations');
@@ -879,62 +1072,147 @@ const srtTime = s => {
   }));
   await beat(
     'unchanged',
-    clear,
     termBeat(
       'unchanged',
-      `curl -s "$GITEA/${NAME}/pulls?state=all&limit=1" | jq -r '.[] | "newest pull request: #\\(.number)  \\(.title)"'`,
-      `curl -s $EXT/namespaces/hackathon/architectures/${NAME}/status | jq '{deployedVersion, latestVersion, inSync, drift}'`,
+      `curl -s "$PULLS?state=all&limit=1" | jq -r '.[0].title'`,
+      `curl -s $ARCH_API/status | jq '{deployedVersion, inSync}'`,
+    ),
+  );
+  // The status output is short: no clear, the new version's output follows it.
+  await beat('no-pattern', termBeat('no-pattern', `new-version.sh ${NAME} --no-pattern`));
+  // deploy.sh asks for the deployment as the button does (CALM Hub's extension API) and follows it; CALM Hub shows the
+  // control evaluation the refusal records.
+  await beat(
+    'no-pattern-refused',
+    par(
+      seq(clear, termBeat('no-pattern-refused', `deploy.sh ${NAME} ${ctx.nopattern}`)),
+      seq(() => refused(ctx.nopattern), soft('the refusal’s control evaluation', async () => {
+        await show(ctx.nopattern, 'decorators&type=control-evaluation');
+        await page.getByText('not-met').first().waitFor({ timeout: 15000 });
+        await highlight(['status', 'findings']);
+      })),
     ),
   );
 
-  // ---- 8. The same connector, for an agent
-  await chapter(7);
-  const mcpArgs = `'{"namespace":"hackathon","architecture":"${NAME}"}'`;
+  // ---- 8. Controls at runtime: evidence
+  // Under the card: every check holds again (after chapter 7), and CALM Hub shows the running version's diagram.
+  await chapter(7, () => poll(allHold, 60000, `every runtime check on ${ctx.valid} to hold`), soft('the diagram', async () => {
+    await closeDetails();
+    await show(ctx.valid);
+    await tab('Diagram');
+    await legendSays(/OK/);
+  }));
+  await beat('runtime-gap');
+  await beat(
+    'sensors',
+    clear,
+    termBeat('sensors', `k -n $NS get networkpolicies -o custom-columns='NAME:.metadata.name,RELATIONSHIP:.metadata.annotations.calm\\.finos\\.org/relationship'`),
+  );
+  await beat('evaluations-met', soft('the legend', () => outline(evaluationsLegend())));
+  await beat('tab-checks', soft('the runtime checks stat', async () => {
+    await refreshExtensions();
+    await outline(extensionText('Runtime checks holding').locator('xpath=..'));
+  }));
+  await beat('break-policy', par(termBeat('break-policy', `k -n $NS delete networkpolicy ${BROKEN_POLICY}`), soft('the diagram', () => tab('Diagram'))));
+  await beat('not-met', async () => {
+    try {
+      await legendSays(/Error/, 30000);
+    } catch (e) {
+      throw new Error(`the deleted policy did not show as not met (retake): ${e.message}`);
+    }
+    await soft('the not-met badge', async () => {
+      await page.getByRole('button', { name: 'Zoom In' }).click();
+      await outline(evaluationsLegend());
+    })();
+  });
+  await beat('panel', soft('the connection', async () => {
+    await closeDetails();
+    await fit();
+    await page.getByText(/^The gateway forwards/).first().click();
+    await page.getByText(`${BROKEN_POLICY} is missing`).first().waitFor();
+    await scrollAt(BW * ZOOM * 0.85, 250);
+    await highlight(['result', 'observed']);
+  }));
+  await beat('evidence-record', soft('the evidence record', () => highlight(['evidence-paths', 'control-config-url', 'expected'])));
+  await beat('valid-until', soft('the evidence record', async () => {
+    await scrollAt(BW * ZOOM * 0.85, 300);
+    await highlight(['observed-at', 'valid-until', 'sensor']);
+  }));
+  await beat('evaluation-record', soft('the control evaluation', async () => {
+    await scrollAt(BW * ZOOM * 0.85, 450);
+    await highlight(['status', 'findings', 'report-uri']);
+  }));
+  await beat(
+    'heal',
+    par(termBeat('heal', `reconcile.sh ${NAME}`), soft('the diagram', async () => {
+      await closeDetails();
+      await fit();
+    })),
+    soft('the diagram', () => legendSays(/^(?![\s\S]*Error)[\s\S]*OK/)),
+  );
+  await beat('default-deny', termBeat('default-deny', 'k -n $NS delete networkpolicy default-deny'), soft('the diagram', () => legendSays(/Error(?![\s\S]*OK)/)));
+  await beat('heal-all', termBeat('heal-all', `reconcile.sh ${NAME}`), soft('the diagram', () => legendSays(/^(?![\s\S]*Error)[\s\S]*OK/)));
+
+  // ---- 9. The same connector, for an agent
+  await chapter(8);
+  // $ARCH (demo.rc) is the tools' input: {"namespace":"hackathon","architecture":"events-stream"}.
   await beat(
     'mcp-status',
-    clear,
-    termBeat(
-      'mcp-status',
-      `mcp.sh ext_platform-connector_status ${mcpArgs} | jq '{deployedVersion, inSync, drift, hubRecord: (.hubRecord | {version, status}), workloads: [.workloads[] | "\\(.name) \\(.ready)/\\(.desired)"]}'`,
+    par(
+      termBeat('mcp-status', `mcp.sh ext_platform-connector_status "$ARCH" | jq '{deployedVersion, inSync, workloads: [.workloads[].name]}'`),
+      () => poll(allHold, 60000, `every runtime check on ${ctx.valid} to hold again`),
+      soft('the Platform panel', async () => {
+        await show(ctx.valid);
+        await tab('Diagram');
+        await selectNode(DRIFT_WORKLOAD, `In sync: ${DRIFT_WORKLOAD} runs as Git asks.`);
+      }),
     ),
-    soft('the Platform panel', async () => {
-      await show(ctx.valid);
-      await tab('Diagram');
-      await selectNode(DRIFT_WORKLOAD, `In sync: ${DRIFT_WORKLOAD} runs as Git asks.`);
-    }),
   );
-  await beat(
-    'mcp-history',
-    termBeat('mcp-history', `mcp.sh ext_platform-connector_history ${mcpArgs} | jq -r '.deployments[:4][] | "\\(.version)  \\(.status)"'`),
-  );
+  await beat('mcp-history', termBeat('mcp-history', `mcp.sh ext_platform-connector_history "$ARCH" | jq -c '.deployments[:3][] | [.version, .status]'`));
+  await beat('mcp-verify', termBeat('mcp-verify', `mcp.sh ext_platform-connector_verify "$ARCH" | jq '{holding, checked, checks: [.checks[].element]}'`));
   await narrate('mcp-same');
 
-  // ---- 9. The pattern
-  await chapter(8);
+  // ---- 10. The pattern
+  await chapter(9);
   await beat('recap-1', soft('the home page', async () => {
     await closeDetails();
     await route('#/');
   }));
   await beat('recap-2', soft('the card', () => page.getByText('Platform Connector').first().hover()));
   await narrate('recap-3');
+  await termIdle();
   await caption('');
-  await hold(1000);
+  // Nothing stays on screen after the voice stops: the last line's gap is the end.
   const duration = now();
 
   // ---- Save the two videos, join them side by side, and lay the voiceover under them.
   const tPath = await term.video().path();
   const bPath = await page.video().path();
+  const sPath = await slides.video().path();
   await T.context.close();
   await B.context.close();
+  await S.context.close();
   await browser.close();
   ttyd.kill();
   restoreBackend();
+  await restoreFlux();
 
-  const out = path.join(OUT, 'calm-hub-deploy-demo.mp4');
+  // Silences: from the end of one line to the start of the next.
+  const silences = said
+    .slice(1)
+    .map((s, i) => ({ after: said[i].id, before: s.id, at: Number((said[i].start + said[i].seconds).toFixed(1)), seconds: Number((s.start - said[i].start - said[i].seconds).toFixed(1)) }))
+    .filter(x => x.seconds > SILENCE_LIMIT_S);
+  fs.writeFileSync(path.join(OUT, 'silences.json'), `${JSON.stringify(silences, null, 2)}\n`);
+  console.log(silences.length ? `${silences.length} silences over ${SILENCE_LIMIT_S} s:` : `no silence over ${SILENCE_LIMIT_S} s`);
+  for (const x of silences) console.log(`  ${x.seconds.toFixed(1).padStart(5)} s at ${x.at.toFixed(0)} s, ${x.after} → ${x.before}`);
+
+  const base = CAPTIONS_ONLY ? 'calm-hub-deploy-demo-captions' : 'calm-hub-deploy-demo';
+  const out = path.join(OUT, `${base}.mp4`);
   const at = created => ((t0 - created) / 1000).toFixed(2);
-  const inputs = said.flatMap(s => ['-i', s.file]);
-  const delays = said.map((s, i) => `[${i + 2}:a]aresample=48000,adelay=delays=${Math.round(s.start * 1000)}:all=1[a${i}]`);
-  const mix = `${said.map((_, i) => `[a${i}]`).join('')}amix=inputs=${said.length}:normalize=0:duration=longest,apad[aout]`;
+  const inputs = CAPTIONS_ONLY ? [] : said.flatMap(s => ['-i', s.file]);
+  // Each line at one even level (ElevenLabs clips differ by up to 20 dB): see voiceMix in voice.cjs.
+  for (const c of cards) c.end ??= duration;
+  const onCard = cards.map(c => `between(t,${c.start.toFixed(2)},${c.end.toFixed(2)})`).join('+') || '0';
   execFileSync(
     'ffmpeg',
     [
@@ -949,29 +1227,30 @@ const srtTime = s => {
       at(B.created),
       '-i',
       bPath,
+      '-ss',
+      at(S.created),
+      '-i',
+      sPath,
       ...inputs,
       '-filter_complex',
       [
         '[0:v]setpts=PTS-STARTPTS,fps=25[t]',
         '[1:v]setpts=PTS-STARTPTS,fps=25[b]',
-        '[t][b]hstack=inputs=2,format=yuv420p[v]',
-        ...delays,
-        mix,
+        '[2:v]setpts=PTS-STARTPTS,fps=25[s]',
+        '[t][b]hstack=inputs=2[tb]',
+        `[tb][s]overlay=0:0:enable='${onCard}',format=yuv420p[v]`,
+        ...(CAPTIONS_ONLY ? [] : voiceMix(said, 3)),
       ].join(';'),
       '-map',
       '[v]',
-      '-map',
-      '[aout]',
+      ...(CAPTIONS_ONLY ? ['-an'] : ['-map', '[aout]']),
       '-t',
       duration.toFixed(2),
       '-c:v',
       'libx264',
       '-crf',
       '20',
-      '-c:a',
-      'aac',
-      '-b:a',
-      '128k',
+      ...(CAPTIONS_ONLY ? [] : ['-c:a', 'aac', '-b:a', '192k']),
       '-movflags',
       '+faststart',
       out,
@@ -981,9 +1260,17 @@ const srtTime = s => {
   const srt = said
     .map((s, i) => `${i + 1}\n${srtTime(s.start)} --> ${srtTime(s.start + s.seconds + 0.3)}\n${s.text}\n`)
     .join('\n');
-  fs.writeFileSync(path.join(OUT, 'calm-hub-deploy-demo.srt'), srt);
+  fs.writeFileSync(path.join(OUT, `${base}.srt`), srt);
   fs.writeFileSync(path.join(OUT, 'chapters.json'), `${JSON.stringify(marks, null, 2)}\n`);
+  fs.writeFileSync(path.join(OUT, 'said.json'), `${JSON.stringify({ said, cards }, null, 2)}\n`);
   console.log('video:', out);
+  // What a viewer hears and sees: the level of every line, and a frame per line on contact sheets (check-take.cjs).
+  try {
+    execFileSync(process.execPath, [path.join(__dirname, 'check-take.cjs'), OUT], { stdio: 'inherit' });
+  } catch {
+    console.error(`the take failed its checks: see ${path.join(OUT, 'qa.json')}`);
+    process.exitCode = 1;
+  }
   console.log('chapters:', marks.map(m => `${Math.floor(m.start / 60)}:${String(m.start % 60).padStart(2, '0')} ${m.title}`).join('\n'));
 })().catch(async e => {
   console.error(e);
