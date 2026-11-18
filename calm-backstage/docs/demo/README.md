@@ -82,9 +82,11 @@ flowchart, into CALM architectures with the **Import a diagram** Template. Watch
 | 9 | 2:52 | The wrong file | A draw.io file with C4 chosen: refused before anything is stored, with a hint naming draw.io. |
 | 10 | 3:01 | Recap | |
 
-Record it again. It needs the stack (`yarn hub:up`, Backstage with `yarn start`), `ffmpeg` on the PATH, and calm-import
-built. Pick a suffix not used yet: it imports `<suffix>-drawio`, `<suffix>-c4` and `<suffix>-mmd`, which stay in CALM
-Hub, and tries `<suffix>-wrong`.
+It needs the stack (`yarn hub:up`, Backstage with `yarn start`), `ffmpeg` on the PATH, and calm-import built. The
+imports stay in CALM Hub, so each take needs a new suffix.
+
+Record it again (pick a suffix not used yet; it names `<suffix>-drawio`, `<suffix>-c4`, `<suffix>-mmd`, and tries
+`<suffix>-wrong`, which is refused):
 
 ```sh
 node docs/demo/record-import-demo.cjs <suffix> <out-dir> http://localhost:3100
