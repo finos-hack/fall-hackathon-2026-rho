@@ -147,10 +147,10 @@ export function uploadText(dataUrl: string, kind: UploadKind): string {
 
 /** What every import action needs: CALM Hub and the catalog, for the name check. */
 export interface ImportActionOptions {
-  hub: Pick<CalmHubClient, 'architectures'>;
+  hub: Pick<CalmHubClient, 'architectures' | 'namespaces'>;
   /** `calm.publish.hubNamespace`: the Hub namespace whose architecture names are taken. */
   namespace: string;
-  catalog: Pick<CatalogService, 'getEntityByRef'>;
+  catalog: Pick<CatalogService, 'getEntityByRef' | 'getEntities'>;
   auth: Pick<AuthService, 'getOwnServiceCredentials'>;
 }
 
@@ -167,7 +167,7 @@ export function createImportAction(
 ) {
   return createTemplateAction({
     id,
-    description: `Converts an uploaded ${KINDS[kind].name} (${KINDS[kind].files}, at most 2 MB) into a CALM architecture in the workspace. Fails when the name is taken in CALM Hub (namespace calm.publish.hubNamespace) or the catalog. Unsure decisions keep the converter's guess; the guesses and what was left out or changed are outputs, and the report is logged.`,
+    description: `Converts an uploaded ${KINDS[kind].name} (${KINDS[kind].files}, at most 2 MB) into a CALM architecture in the workspace. Fails when CALM Hub has no namespace calm.publish.hubNamespace, or the name is taken there or in the catalog. Unsure decisions keep the converter's guess; the guesses and what was left out or changed are outputs, and the report is logged.`,
     // Reads the Hub and the catalog, and writes only inside the workspace.
     supportsDryRun: true,
     schema: {

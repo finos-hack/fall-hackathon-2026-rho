@@ -96,6 +96,11 @@ const catalogWith = (names: string[] = []) => ({
       ? ({ metadata: { name: ref.split('/')[1] } } as any)
       : undefined,
   ),
+  getEntities: jest.fn(async (req: any) => ({
+    items: names
+      .filter(n => req.filter['metadata.name'].includes(n))
+      .map(name => ({ metadata: { name } }) as any),
+  })),
 });
 
 /** What calm:import:drawio writes: no title or description, the layout in metadata. */

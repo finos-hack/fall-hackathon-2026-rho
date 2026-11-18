@@ -20,8 +20,14 @@ const dataUrl = (bytes: Buffer, name?: string, mime = 'text/xml') =>
   }base64,${bytes.toString('base64')}`;
 
 /** A Hub holding `hub` architecture names, and a catalog holding `catalog` component names. */
-function deps(opts: { hub?: string[]; catalog?: string[]; hubError?: Error }) {
+function deps(opts: {
+  hub?: string[];
+  catalog?: string[];
+  hubError?: Error;
+  namespaces?: string[];
+}) {
   const credentials = { principal: { type: 'service' } } as any;
+  const inCatalog = (o: any) => (o?.credentials === credentials ? opts.catalog ?? [] : []);
   return {
     hub: {
       architectures: jest.fn(async (namespace: string) => {
@@ -30,15 +36,20 @@ function deps(opts: { hub?: string[]; catalog?: string[]; hubError?: Error }) {
         }
         return (opts.hub ?? []).map(customId => ({ customId, namespace }));
       }),
+      namespaces: jest.fn(async () => opts.namespaces ?? ['hackathon']),
     },
     namespace: 'hackathon',
     catalog: {
       getEntityByRef: jest.fn(async (ref: string, o: any) =>
-        o?.credentials === credentials &&
-        (opts.catalog ?? []).some(n => ref === `component:default/${n}`)
+        inCatalog(o).some(n => ref === `component:default/${n}`)
           ? ({ metadata: { name: ref.split('/')[1] } } as any)
           : undefined,
       ),
+      getEntities: jest.fn(async (req: any, o: any) => ({
+        items: inCatalog(o)
+          .filter(n => req.filter['metadata.name'].includes(n))
+          .map(name => ({ metadata: { name } }) as any),
+      })),
     },
     auth: { getOwnServiceCredentials: jest.fn(async () => credentials) },
   };
@@ -95,7 +106,32 @@ describe('importNameClash', () => {
     );
   });
 
-  it('treats a Hub without the namespace as holding no architectures', async () => {
+  it('suggests a free name with one catalog query, not one lookup per candidate (#71)', async () => {
+    const d = deps({ hub: ['trading'], catalog: ['trading-2', 'trading-3'] });
+    expect(await importNameClash('trading', d)).toBe(
+      'The name trading is already used (in CALM Hub); choose another, for example trading-4',
+    );
+    expect(d.catalog.getEntityByRef).toHaveBeenCalledTimes(1);
+    expect(d.catalog.getEntities).toHaveBeenCalledTimes(1);
+    const [request] = d.catalog.getEntities.mock.calls[0];
+    expect(request.filter).toMatchObject({
+      kind: 'Component',
+      'metadata.namespace': 'default',
+    });
+    expect(request.filter['metadata.name']).toHaveLength(49);
+  });
+
+  it('refuses a missing CALM Hub namespace before anything is converted (#71)', async () => {
+    const d = deps({
+      hubError: new CalmHubError(404, 'u', 'not found'),
+      namespaces: ['finos'],
+    });
+    await expect(importNameClash('trading', d)).rejects.toThrow(
+      'CALM Hub has no namespace hackathon (calm.publish.hubNamespace); create it in CALM Hub first',
+    );
+  });
+
+  it('treats a 404 for a namespace that exists as holding no architectures', async () => {
     const d = deps({ hubError: new CalmHubError(404, 'u', 'not found') });
     expect(await importNameClash('trading', d)).toBeUndefined();
   });
